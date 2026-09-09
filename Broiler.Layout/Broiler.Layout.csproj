@@ -9,10 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Broiler.CSS\Broiler.CSS.Dom\Broiler.CSS.Dom.csproj" />
-    <ProjectReference Include="..\..\Broiler.CSS\Broiler.CSS\Broiler.CSS.csproj" />
-    <ProjectReference Include="..\..\Broiler.DOM\Broiler.Dom\Broiler.Dom.csproj" />
-    <ProjectReference Include="..\..\Broiler.Graphics\src\Broiler.Graphics\Broiler.Graphics.csproj" />
+    <ProjectReference Include="$(BroilerCssRoot)\Broiler.CSS.Dom\Broiler.CSS.Dom.csproj" />
+    <ProjectReference Include="$(BroilerCssRoot)\Broiler.CSS\Broiler.CSS.csproj" />
+    <ProjectReference Include="$(BroilerDomRoot)\Broiler.Dom\Broiler.Dom.csproj" />
+    <ProjectReference Include="$(BroilerGraphicsRoot)\src\Broiler.Graphics\Broiler.Graphics.csproj" />
   </ItemGroup>
 
   <!-- CssBox and the concrete layout engine remain internal. Keep only assemblies that
@@ -56,7 +56,7 @@
     and this condition simply stops doing anything.
   -->
   <PropertyGroup>
-    <BroilerCssPagedMedia Condition="Exists('$(MSBuildThisFileDirectory)..\..\Broiler.CSS\Broiler.CSS.Dom\CssPagedMedia.cs')">true</BroilerCssPagedMedia>
+    <BroilerCssPagedMedia Condition="Exists('$(BroilerCssRoot)\Broiler.CSS.Dom\CssPagedMedia.cs')">true</BroilerCssPagedMedia>
     <DefineConstants Condition="'$(BroilerCssPagedMedia)' == 'true'">$(DefineConstants);BROILER_CSS_PAGED_MEDIA</DefineConstants>
   </PropertyGroup>
 
