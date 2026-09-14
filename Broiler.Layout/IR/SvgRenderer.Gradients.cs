@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
 
 namespace Broiler.Layout.IR;
 

@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Threading;
 using System.Threading.Tasks;
 using Broiler.Graphics;
+using Broiler.Graphics.Adapters;
 
 namespace Broiler.Layout.IR;
 
@@ -171,9 +172,9 @@ public static class TileParallelReplay
     /// </remarks>
     public static bool TryReplay(
         DisplayList list,
-        RGraphics surface,
+        BGraphics surface,
         bool contentAllowsTiling,
-        Action<DisplayList, RGraphics> replay)
+        Action<DisplayList, BGraphics> replay)
     {
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(surface);
@@ -224,7 +225,7 @@ public static class TileParallelReplay
     /// <summary>
     /// The tiles this replay is worth, or an empty array whenever it should stay sequential.
     /// </summary>
-    private static Rectangle[] PartitionOrEmpty(RGraphics surface)
+    private static Rectangle[] PartitionOrEmpty(BGraphics surface)
     {
         if (_maxDegreeOfParallelism <= 1 || surface is not ITileParallelSurface tileable)
             return [];

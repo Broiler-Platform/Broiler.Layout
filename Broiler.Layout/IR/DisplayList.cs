@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Text.Json.Serialization;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
 
 namespace Broiler.Layout.IR;
 

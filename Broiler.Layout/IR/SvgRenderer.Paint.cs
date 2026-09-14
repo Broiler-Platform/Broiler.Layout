@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
 
 namespace Broiler.Layout.IR;
 

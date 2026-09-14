@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Broiler.Graphics;
+using Broiler.Graphics.Text;
 
 namespace Broiler.Layout.Text;
 

@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Broiler.CSS;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
+using Broiler.Graphics.Text;
 
 namespace Broiler.Layout.IR;
 

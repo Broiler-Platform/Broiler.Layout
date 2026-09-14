@@ -1,5 +1,6 @@
 using System.Drawing;
 using Broiler.Graphics;
+using Broiler.Graphics.Adapters;
 
 namespace Broiler.Layout.IR;
 
@@ -44,5 +45,5 @@ public interface ITileParallelSurface
     /// replay has finished.
     /// </summary>
     /// <param name="tile">Device-pixel rectangle the view may write, in surface coordinates.</param>
-    RGraphics CreateTileView(Rectangle tile);
+    BGraphics CreateTileView(Rectangle tile);
 }

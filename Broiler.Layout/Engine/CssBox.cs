@@ -1,5 +1,7 @@
 using Broiler.CSS;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
+using Broiler.Graphics.Text;
 using Broiler.Layout.Diagnostics;
 using System.Drawing;
 using System.Globalization;
