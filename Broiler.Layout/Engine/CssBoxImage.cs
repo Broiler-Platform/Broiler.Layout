@@ -17,7 +17,7 @@ internal sealed class CssBoxImage : CssBox
     /// </summary>
     private DeferredImageLoad? _deferredContentLoad;
 
-    public CssBoxImage(CssBox parent, HtmlTag tag, Uri baseUrl) : base(parent, tag, baseUrl)
+    public CssBoxImage(CssBox? parent, HtmlTag tag, Uri baseUrl) : base(parent, tag, baseUrl)
     {
         _imageWord = new CssRectImage(this);
         Words.Add(_imageWord);

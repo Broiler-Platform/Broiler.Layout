@@ -99,7 +99,7 @@ internal static class LayoutBoxUtils
     public static CssBox GetPreviousContainingBlockSibling(CssBox b)
     {
         var conBlock = b;
-        int index = conBlock.ParentBox.Boxes.IndexOf(conBlock);
+        int index = conBlock.ParentBox?.Boxes.IndexOf(conBlock) ?? -1;
 
         while (conBlock.ParentBox != null && index < 1 && conBlock.Display != CssConstants.Block && conBlock.Display != CssConstants.Table && conBlock.Display != CssConstants.TableCell && conBlock.Display != CssConstants.ListItem)
         {
