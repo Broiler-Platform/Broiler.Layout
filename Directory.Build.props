@@ -1,66 +1,17 @@
-﻿<Project>
+<Project>
 
-  <!-- Chain to a parent Directory.Build.props when one exists (in-tree build).
-       Skipped for standalone / submodule builds. The path is captured in a
+  <!-- Chain to a parent Directory.Build.props when one exists (in-tree build, e.g.
+       Broiler.Browser). Skipped for standalone builds. The path is captured in a
        property first so the inner quotes don't collide with the Condition. -->
   <PropertyGroup>
     <BroilerParentBuildProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</BroilerParentBuildProps>
   </PropertyGroup>
   <Import Project="$(BroilerParentBuildProps)" Condition="'$(BroilerParentBuildProps)' != ''" />
 
-  <!-- Where the Broiler.CSS projects live. It defaults to the vendored submodule
-       so this repo builds on its own; a consumer with its own copy sets it in the
-       Directory.Build.props above, which is imported first, and then one assembly
-       of each name is built instead of several. -->
-  <PropertyGroup Condition="'$(BroilerCssRoot)' == ''">
-    <BroilerCssRoot>$(MSBuildThisFileDirectory)Broiler.CSS</BroilerCssRoot>
-  </PropertyGroup>
-
-  <!-- Where the Broiler.DOM projects live, on the same terms. -->
-  <PropertyGroup Condition="'$(BroilerDomRoot)' == ''">
-    <BroilerDomRoot>$(MSBuildThisFileDirectory)Broiler.DOM</BroilerDomRoot>
-  </PropertyGroup>
-
-  <!-- Where the Broiler.Graphics projects live, on the same terms. -->
-  <PropertyGroup Condition="'$(BroilerGraphicsRoot)' == ''">
-    <BroilerGraphicsRoot>$(MSBuildThisFileDirectory)Broiler.Graphics</BroilerGraphicsRoot>
-  </PropertyGroup>
-
-  <!-- The two kernels are addressed by project rather than by directory, because
-       that is the name the aggregate sets. Defaulting them FROM the roots above
-       keeps one source of truth here, while an aggregate build overrides these
-       directly and the roots never come into it. -->
-  <PropertyGroup Condition="'$(BroilerDomPath)' == ''">
-    <BroilerDomPath>$(BroilerDomRoot)\Broiler.Dom\Broiler.Dom.csproj</BroilerDomPath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(BroilerGraphicsPath)' == ''">
-    <BroilerGraphicsPath>$(BroilerGraphicsRoot)\src\Broiler.Graphics\Broiler.Graphics.csproj</BroilerGraphicsPath>
-  </PropertyGroup>
-
-  <!-- Which checkout each root actually resolved to, recorded into every assembly
-       this repository builds. The roots above are deliberately overridable, and a
-       consumer that overrides them is doing the right thing; what nobody can see
-       afterwards is that it happened. Building this repository from inside a
-       consumer's tree imports that consumer's Directory.Build.props above, so the
-       solution compiles against its components instead of this one's pinned
-       submodules, and passes while this repository's own CI would fail.
-
-       A test reads these back and fails when the build did not use this
-       repository's own checkouts, so a green run from inside a consumer's tree
-       says so out loud instead of being mistaken for evidence. -->
-  <ItemGroup>
-    <AssemblyMetadata Include="BroilerCssRoot" Value="$(BroilerCssRoot)" />
-    <AssemblyMetadata Include="BroilerDomRoot" Value="$(BroilerDomRoot)" />
-    <AssemblyMetadata Include="BroilerGraphicsRoot" Value="$(BroilerGraphicsRoot)" />
-  </ItemGroup>
-
   <!-- Broiler NuGet packaging metadata (vendored; do not edit by hand). -->
   <Import Project="$(MSBuildThisFileDirectory)eng\Broiler.Packaging.props" />
 
-  <!-- Component-owned override. Evaluated after the import above and therefore
-       wins, which is the extension point the vendored file documents. The shared
-       default points at the organisation; this component has its own repository
-       now and should link to it. -->
+  <!-- Repository-owned packaging overrides. -->
   <PropertyGroup>
     <PackageProjectUrl>https://github.com/Broiler-Platform/Broiler.Layout</PackageProjectUrl>
     <PackageTags>broiler;layout;css;box-model;engine;html</PackageTags>

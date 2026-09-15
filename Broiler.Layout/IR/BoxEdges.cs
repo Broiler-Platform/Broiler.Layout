@@ -1,3 +1,5 @@
+using System;
+
 namespace Broiler.Layout.IR;
 
 public sealed class BoxEdges(double top, double right, double bottom, double left)

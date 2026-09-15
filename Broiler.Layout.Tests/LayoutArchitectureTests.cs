@@ -19,11 +19,8 @@ public sealed class LayoutArchitectureTests
     {
         var project = XDocument.Load(FindProjectPath());
         var references = project
-            .Descendants("ProjectReference")
-            // Normalise Windows-style backslash separators so the file-name extraction works on
-            // any host — Path.GetFileNameWithoutExtension does not treat '\' as a separator on Linux.
-            .Select(static element => Path.GetFileNameWithoutExtension(
-                ((string?)element.Attribute("Include"))?.Replace('\\', '/')))
+            .Descendants("PackageReference")
+            .Select(static element => (string?)element.Attribute("Include"))
             .OrderBy(static name => name, StringComparer.Ordinal)
             .ToArray();
 
@@ -32,7 +29,7 @@ public sealed class LayoutArchitectureTests
         // NOT appear here — this allowlist is the structural gate that keeps them
         // out of the layout engine.
         Assert.Equal(["Broiler.CSS", "Broiler.CSS.Dom", "Broiler.Dom", "Broiler.Graphics"], references);
-        Assert.Empty(project.Descendants("PackageReference"));
+        Assert.Empty(project.Descendants("ProjectReference"));
     }
 
     [Fact(Timeout = 600000)]
@@ -87,9 +84,11 @@ public sealed class LayoutArchitectureTests
                 type.Namespace.StartsWith("Broiler.HTML", StringComparison.Ordinal) ||
                 type.Namespace.StartsWith("Broiler.JavaScript", StringComparison.Ordinal) ||
                 // Concrete graphics backends (e.g. Broiler.Graphics.Windows) must not
-                // leak; the backend-agnostic core (namespace "Broiler.Graphics" exactly:
-                // BColor, ILayoutFont) is an allowed primitive dependency.
-                type.Namespace.StartsWith("Broiler.Graphics.", StringComparison.Ordinal))
+                // leak; the backend-agnostic core is an allowed primitive dependency. It is
+                // told apart by assembly: since Broiler.Graphics 0.1.0-preview.3 the core's own
+                // types live in sub-namespaces too (Broiler.Graphics.Color.BColor,
+                // Broiler.Graphics.Text.ILayoutFont).
+                type.Assembly.GetName().Name!.StartsWith("Broiler.Graphics.", StringComparison.Ordinal))
             .Distinct()
             .ToArray();
 
@@ -132,9 +131,17 @@ public sealed class LayoutArchitectureTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var path = Path.Combine(directory.FullName, "Broiler.Layout", "Broiler.Layout", "Broiler.Layout.csproj");
-            if (File.Exists(path))
-                return path;
+            // The repository root (a clone under any folder name), or the directory holding the
+            // checkout (an in-tree build whose output lands outside it).
+            foreach (var path in new[]
+            {
+                Path.Combine(directory.FullName, "Broiler.Layout", "Broiler.Layout.csproj"),
+                Path.Combine(directory.FullName, "Broiler.Layout", "Broiler.Layout", "Broiler.Layout.csproj"),
+            })
+            {
+                if (File.Exists(path))
+                    return path;
+            }
             directory = directory.Parent;
         }
         throw new DirectoryNotFoundException($"Broiler.Layout.csproj not found walking up from {AppContext.BaseDirectory}");
