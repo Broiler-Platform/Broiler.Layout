@@ -62,14 +62,8 @@ internal static class EmbeddedCanvas
         // frame, not the page the embedder is printed on. Suspending it here rather than at the
         // two call sites means the rule holds for every embedded render, including the one inside
         // Broiler.HTML that this file cannot see.
-#if BROILER_CSS_PAGED_MEDIA
         var scope = new Scope(
             EmbedderColorScheme, IsEmbedded, Broiler.CSS.Dom.CssPagedMedia.Suspend());
-#else
-        // The paged formatting context is a pending Broiler.CSS patch (see patches/). Until it
-        // lands there is no context to suspend, and this reads exactly as it did before.
-        var scope = new Scope(EmbedderColorScheme, IsEmbedded, NoScope.Instance);
-#endif
         EmbedderColorScheme = embedderColorScheme;
         IsEmbedded = true;
         return scope;
@@ -108,18 +102,6 @@ internal static class EmbeddedCanvas
     public static bool PaintsOpaqueBackdrop(string? embeddedRootColorScheme) =>
         !IsEmbedded
         || UsesDarkColorScheme(EmbedderColorScheme) != UsesDarkColorScheme(embeddedRootColorScheme);
-
-#if !BROILER_CSS_PAGED_MEDIA
-    /// <summary>A disposable that does nothing, for the build without the pending patch.</summary>
-    private sealed class NoScope : System.IDisposable
-    {
-        internal static readonly NoScope Instance = new();
-
-        public void Dispose()
-        {
-        }
-    }
-#endif
 
     private sealed class Scope(
         string? previousScheme, bool previousIsEmbedded, System.IDisposable continuousMedia)

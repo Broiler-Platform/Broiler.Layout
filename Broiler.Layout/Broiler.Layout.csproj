@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Broiler.Layout</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>CSS box-model and layout engine over the canonical Broiler DOM and computed style, independent of any graphics backend.</Description>
   </PropertyGroup>
@@ -37,12 +38,13 @@
          DOM zoom bake (Phase 5 LayoutSnapshot endgame, blocker (b) — visual-viewport). -->
     <InternalsVisibleTo Include="Broiler.HtmlBridge.Dom" />
   </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Broiler.CSS" Version="0.1.0-preview.1" />
-    <PackageReference Include="Broiler.CSS.Dom" Version="0.1.0-preview.1" />
-    <PackageReference Include="Broiler.Dom" Version="0.1.0-preview.2" />
-    <PackageReference Include="Broiler.Graphics" Version="0.1.0-preview.3" />
-  </ItemGroup>
 
+  <!-- Versions are pinned in Directory.Packages.props. -->
+  <ItemGroup>
+    <PackageReference Include="Broiler.CSS" />
+    <PackageReference Include="Broiler.CSS.Dom" />
+    <PackageReference Include="Broiler.Dom" />
+    <PackageReference Include="Broiler.Graphics" />
+  </ItemGroup>
 
 </Project>

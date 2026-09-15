@@ -5,97 +5,87 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      package-version:
+        description: Resolved preview version for a publish run
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  packages: read
+
+env:
+  PACKAGE_VERSION: ${{ inputs.package-version }}
+  # Broiler.CSS, Broiler.Dom and Broiler.Graphics restore from GitHub Packages, which needs
+  # credentials even for public packages.
+  NuGetPackageSourceCredentials_github: Username=${{ github.actor }};Password=${{ secrets.GITHUB_TOKEN }};ValidAuthenticationTypes=Basic
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: ${{ matrix.configuration }}
+    name: ${{ matrix.os }} / Release
     runs-on: ${{ matrix.os }}
-
     defaults:
       run:
         shell: bash
-
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Every project here is platform-neutral net10.0, so both legs compile
-          # the same sources. They run anyway because layout is where text
-          # measurement and font resolution live, and those are exactly the places
-          # two hosts disagree.
-          - os: ubuntu-latest
-            configuration: Release-Linux
-          - os: windows-latest
-            configuration: Release-Windows
-
+        # The library is platform-neutral net10.0, so both legs compile the same sources.
+        # They run anyway because layout is where text measurement and font resolution
+        # live, and those are exactly the places two hosts disagree.
+        os: [ubuntu-latest, windows-latest]
     steps:
-      # One level only, and by name. Broiler.CSS and Broiler.DOM supply the
-      # computed-style and document models this engine lays out; Broiler.Graphics
-      # supplies the backend-agnostic primitives it measures with. All three are
-      # project references, so nothing restores without them.
-      #
-      # `--recursive` is deliberately NOT used: Broiler.Media declares
-      # Broiler.Graphics as a submodule of its own, so the recursion does not
-      # terminate. The one nested checkout that is actually needed is fetched by
-      # name in the next step.
       - name: Check out
         uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      # Broiler.Graphics.csproj references $(BroilerMediaRoot)\src\Broiler.Media.Image,
-      # which its own Directory.Build.props defaults to this nested checkout.
-      # Without it the Graphics reference does not restore.
-      - name: Check out the graphics submodule's own dependency
-        run: git -C Broiler.Graphics submodule update --init --depth 1 Broiler.Media
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Test preview version selection
+        run: node --test eng/resolve-preview-version.test.mjs
+
       - name: Build
-        run: dotnet build Broiler.Layout.slnx -c ${{ matrix.configuration }} --nologo
+        run: |
+          args=()
+          if [ -n "$PACKAGE_VERSION" ]; then
+            args+=("-p:Version=$PACKAGE_VERSION" "-p:PackageVersion=$PACKAGE_VERSION")
+          fi
+          dotnet build Broiler.Layout.slnx -c Release --nologo "${args[@]}"
 
       - name: Test
-        run: |
-          dotnet test Broiler.Layout.slnx -c ${{ matrix.configuration }} --no-build --nologo \
-            --logger "trx;LogFilePrefix=broiler" --results-directory ./test-results
+        shell: pwsh
+        run: ./eng/run-tests.ps1 -Configuration Release
 
-      # A `dotnet test` that discovers nothing exits 0, so a build that silently
-      # stopped producing test assemblies would pass this job in green. The guard
-      # is a floor rather than an exact number: it catches a collapse without
-      # failing every time somebody adds a test.
-      - name: Guard against a collapsed test count
-        run: |
-          # awk rather than bc: bc is not on the Windows runner's git-bash, and a
-          # guard that only works on one leg guards one leg.
-          total=$(grep -ho 'total="[0-9]*"' ./test-results/*.trx \
-            | grep -o '[0-9]*' | awk '{ sum += $1 } END { print sum + 0 }')
-          echo "Executed $total test(s)."
-          if [ "$total" -lt 1200 ]; then
-            echo "::error::Executed test count collapsed to ${total:-0}; expected at least 1200."
-            exit 1
-          fi
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: warn
 
-      # The kernels this component pins are vendored by Broiler.CSS as well, so a
-      # reference that escaped the root properties in Directory.Build.props would
-      # build a second Broiler.Dom from Broiler.CSS/Broiler.DOM. That is the defect
-      # that produces a TypeLoadException at run time behind a perfectly green
-      # build, so it is worth one grep.
-      - name: Fail if a duplicate kernel was built
-        run: |
-          duplicates=$(find Broiler.CSS/Broiler.DOM -path '*/bin/*' -name '*.dll' 2>/dev/null | wc -l)
-          if [ "$duplicates" -ne 0 ]; then
-            echo "::error::Broiler.CSS/Broiler.DOM produced $duplicates assemblies; a reference escaped \$(BroilerDomRoot)."
-            find Broiler.CSS/Broiler.DOM -path '*/bin/*' -name '*.dll'
-            exit 1
-          fi
-          echo "No duplicate kernel: every DOM reference collapsed onto this repository's own checkout."
+      - name: Pack and verify every package
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: ./eng/pack.ps1 -Version $env:PACKAGE_VERSION
+
+      - name: Upload packages
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: artifacts/*
+          if-no-files-found: error

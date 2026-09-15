@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Linq;
 using Broiler.Graphics;
+using Broiler.Graphics.Color;
 using Broiler.Layout.IR;
 using Xunit;
 

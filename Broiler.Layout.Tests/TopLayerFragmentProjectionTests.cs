@@ -95,13 +95,13 @@ public sealed class TopLayerFragmentProjectionTests
     // no text or replaced content, so the measurement/image/colour members are never exercised.
     private sealed class FakeLayoutEnvironment : Broiler.Layout.ILayoutEnvironment
     {
-        private static readonly Broiler.Graphics.ILayoutFont TheFont = new FakeFont();
-        public Broiler.Graphics.ILayoutFont GetFont(string family, double size, LayoutFontStyle style, string? fontFeatures = null) => TheFont;
-        public SizeF MeasureText(Broiler.Graphics.ILayoutFont font, string text) => SizeF.Empty;
-        public void MeasureText(Broiler.Graphics.ILayoutFont font, string text, double maxWidth, out int charFit, out double charFitWidth) { charFit = 0; charFitWidth = 0; }
-        public double GetWhitespaceWidth(Broiler.Graphics.ILayoutFont font) => 0;
+        private static readonly Broiler.Graphics.Text.ILayoutFont TheFont = new FakeFont();
+        public Broiler.Graphics.Text.ILayoutFont GetFont(string family, double size, LayoutFontStyle style, string? fontFeatures = null) => TheFont;
+        public SizeF MeasureText(Broiler.Graphics.Text.ILayoutFont font, string text) => SizeF.Empty;
+        public void MeasureText(Broiler.Graphics.Text.ILayoutFont font, string text, double maxWidth, out int charFit, out double charFitWidth) { charFit = 0; charFitWidth = 0; }
+        public double GetWhitespaceWidth(Broiler.Graphics.Text.ILayoutFont font) => 0;
         public Broiler.Layout.ImageIntrinsics GetImageIntrinsics(object imageHandle) => default;
-        public Broiler.Graphics.BColor ParseColor(string value) => default;
+        public Broiler.Graphics.Color.BColor ParseColor(string value) => default;
         public void RequestRefresh(bool relayout) { }
         public SizeF ViewportSize => new(1000, 1000);
         public PointF RootLocation => PointF.Empty;
@@ -116,7 +116,7 @@ public sealed class TopLayerFragmentProjectionTests
         public string FormatListMarker(int number, string style) => string.Empty;
     }
 
-    private sealed class FakeFont : Broiler.Graphics.ILayoutFont
+    private sealed class FakeFont : Broiler.Graphics.Text.ILayoutFont
     {
         public double Size => 16;
         public double Height => 16;

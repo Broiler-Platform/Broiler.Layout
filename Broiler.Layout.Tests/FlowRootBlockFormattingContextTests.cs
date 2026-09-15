@@ -163,12 +163,12 @@ public sealed class FlowRootBlockFormattingContextTests
 
     private sealed class StubLayoutEnvironment : ILayoutEnvironment
     {
-        public Broiler.Graphics.ILayoutFont GetFont(string family, double size, LayoutFontStyle style, string? fontFeatures = null) => new StubFont(size);
-        public SizeF MeasureText(Broiler.Graphics.ILayoutFont font, string text) => SizeF.Empty;
-        public void MeasureText(Broiler.Graphics.ILayoutFont font, string text, double maxWidth, out int charFit, out double charFitWidth) { charFit = 0; charFitWidth = 0; }
-        public double GetWhitespaceWidth(Broiler.Graphics.ILayoutFont font) => 0;
+        public Broiler.Graphics.Text.ILayoutFont GetFont(string family, double size, LayoutFontStyle style, string? fontFeatures = null) => new StubFont(size);
+        public SizeF MeasureText(Broiler.Graphics.Text.ILayoutFont font, string text) => SizeF.Empty;
+        public void MeasureText(Broiler.Graphics.Text.ILayoutFont font, string text, double maxWidth, out int charFit, out double charFitWidth) { charFit = 0; charFitWidth = 0; }
+        public double GetWhitespaceWidth(Broiler.Graphics.Text.ILayoutFont font) => 0;
         public ImageIntrinsics GetImageIntrinsics(object imageHandle) => default;
-        public Broiler.Graphics.BColor ParseColor(string value) => default;
+        public Broiler.Graphics.Color.BColor ParseColor(string value) => default;
         public void RequestRefresh(bool relayout) { }
         public SizeF ViewportSize => new(1000, 1000);
         public PointF RootLocation => PointF.Empty;
@@ -183,7 +183,7 @@ public sealed class FlowRootBlockFormattingContextTests
         public string FormatListMarker(int number, string style) => string.Empty;
     }
 
-    private sealed class StubFont(double size) : Broiler.Graphics.ILayoutFont
+    private sealed class StubFont(double size) : Broiler.Graphics.Text.ILayoutFont
     {
         public double Size { get; } = size;
         public double Height => size;
