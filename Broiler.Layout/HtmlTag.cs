@@ -31,6 +31,7 @@ public sealed class HtmlTag
     public bool IsSingle { get; }
     public bool HasAttributes() => Attributes.Count > 0;
     public bool HasAttribute(string attribute) => Attributes.ContainsKey(attribute);
+    [return: System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(defaultValue))]
     public string? TryGetAttribute(string attribute, string? defaultValue = null) =>
         Attributes.TryGetValue(attribute, out string? value) ? value : defaultValue;
 

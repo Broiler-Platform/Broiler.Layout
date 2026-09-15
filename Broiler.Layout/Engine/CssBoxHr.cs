@@ -7,7 +7,7 @@ namespace Broiler.Layout.Engine;
 
 internal sealed class CssBoxHr : CssBox
 {
-    public CssBoxHr(CssBox parent, HtmlTag tag, Uri baseUrl) : base(parent, tag, baseUrl) => Display = CssConstants.Block;
+    public CssBoxHr(CssBox? parent, HtmlTag tag, Uri baseUrl) : base(parent, tag, baseUrl) => Display = CssConstants.Block;
 
     protected override void PerformLayoutImp(ILayoutEnvironment g)
     {

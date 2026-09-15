@@ -1610,6 +1610,9 @@ internal sealed class CssLayoutEngineTable
         return _columnWidths[columnIndex] > GetColumnMinWidths()[columnIndex];
     }
 
+    // A table box is always laid out inside its containing box.
+    private CssBox TableParent => _tableBox.ParentBox ?? throw new InvalidOperationException("Table box has no parent box.");
+
     private double GetAvailableTableWidth()
     {
         CssLength tblen = new(_tableBox.Width);
@@ -1617,11 +1620,11 @@ internal sealed class CssLayoutEngineTable
         if (tblen.Number > 0)
         {
             _widthSpecified = true;
-            return CssLengthParser.ParseLength(_tableBox.Width, _tableBox.ParentBox.AvailableWidth, _tableBox.GetEmHeight());
+            return CssLengthParser.ParseLength(_tableBox.Width, TableParent.AvailableWidth, _tableBox.GetEmHeight());
         }
         else
         {
-            return _tableBox.ParentBox.AvailableWidth;
+            return TableParent.AvailableWidth;
         }
     }
 
@@ -1631,7 +1634,7 @@ internal sealed class CssLayoutEngineTable
         if (tblen.Number > 0)
         {
             _widthSpecified = true;
-            return CssLengthParser.ParseLength(_tableBox.MaxWidth, _tableBox.ParentBox.AvailableWidth, _tableBox.GetEmHeight());
+            return CssLengthParser.ParseLength(_tableBox.MaxWidth, TableParent.AvailableWidth, _tableBox.GetEmHeight());
         }
         else
         {

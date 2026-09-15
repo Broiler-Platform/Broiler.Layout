@@ -13,7 +13,7 @@ namespace Broiler.Layout.Engine;
 
 internal partial class CssBox : CssBoxProperties, IDisposable
 {
-    private CssBox _parentBox;
+    private CssBox? _parentBox;
     protected object _htmlContainer;
     private ILayoutEnvironment _layoutEnvironment;
     private ReadOnlyMemory<char> _text;
@@ -173,12 +173,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
     }
 
-    public CssBox(CssBox parentBox, HtmlTag tag, Uri baseUrl)
+    public CssBox(CssBox? parentBox, HtmlTag? tag, Uri baseUrl)
     {
         if (parentBox != null)
         {
             _parentBox = parentBox;
-            _parentBox.Boxes.Add(this);
+            parentBox.Boxes.Add(this);
         }
 
         HtmlTag = tag;
@@ -238,7 +238,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         set { _layoutEnvironment = value; }
     }
 
-    public CssBox ParentBox
+    public CssBox? ParentBox
     {
         get { return _parentBox; }
         set
@@ -247,7 +247,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             _parentBox = value;
 
             if (value != null)
-                _parentBox.Boxes.Add(this);
+                value.Boxes.Add(this);
         }
     }
 
@@ -333,7 +333,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public virtual string HrefLink => GetAttribute(HtmlConstants.Href);
 
-    public HtmlTag HtmlTag { get; }
+    public HtmlTag? HtmlTag { get; }
 
     public bool IsImage => Words.Count == 1 && Words[0].IsImage;
 
@@ -622,13 +622,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public void SetBeforeBox(CssBox before)
     {
-        int index = _parentBox.Boxes.IndexOf(before);
+        var parent = _parentBox ?? throw new InvalidOperationException("Box has no parent box.");
+        int index = parent.Boxes.IndexOf(before);
 
         if (index < 0)
             throw new Exception("before box doesn't exist on parent");
 
-        _parentBox.Boxes.Remove(this);
-        _parentBox.Boxes.Insert(index, this);
+        parent.Boxes.Remove(this);
+        parent.Boxes.Insert(index, this);
     }
 
     public void SetAllBoxes(CssBox fromBox)
@@ -657,17 +658,18 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private int GetIndexForList()
     {
         // Phase 2: Read list attributes from CssBoxProperties instead of GetAttribute().
-        bool reversed = ParentBox.ListReversed;
+        var parent = ParentBox ?? throw new InvalidOperationException("List item box has no parent box.");
+        bool reversed = parent.ListReversed;
 
         int index;
-        if (ParentBox.ListStart.HasValue)
+        if (parent.ListStart.HasValue)
         {
-            index = ParentBox.ListStart.Value;
+            index = parent.ListStart.Value;
         }
         else if (reversed)
         {
             index = 0;
-            foreach (CssBox b in ParentBox.Boxes)
+            foreach (CssBox b in parent.Boxes)
             {
                 if (b.Display == CssConstants.ListItem)
                     index++;
@@ -678,7 +680,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             index = 1;
         }
 
-        foreach (CssBox b in ParentBox.Boxes)
+        foreach (CssBox b in parent.Boxes)
         {
             if (b.Equals(this))
                 return index;
@@ -739,11 +741,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     internal string GetAttribute(string attribute) => GetAttribute(attribute, string.Empty);
-    internal string GetAttribute(string attribute, string defaultValue) => HtmlTag != null ? HtmlTag.TryGetAttribute(attribute, defaultValue) : defaultValue;
+    [return: System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(defaultValue))]
+    internal string? GetAttribute(string attribute, string? defaultValue) => HtmlTag != null ? HtmlTag.TryGetAttribute(attribute, defaultValue) : defaultValue;
 
-    internal new void InheritStyle(CssBox box = null, bool everything = false) => base.InheritStyle(box ?? ParentBox, everything);
+    internal new void InheritStyle(CssBox? box = null, bool everything = false) => base.InheritStyle(box ?? ParentBox, everything);
 
-    protected override ILayoutFont GetCachedFont(string fontFamily, double fsize, LayoutFontStyle st, string fontFeatures) => LayoutEnvironment.GetFont(fontFamily, fsize, st, fontFeatures);
+    protected override ILayoutFont GetCachedFont(string fontFamily, double fsize, LayoutFontStyle st, string? fontFeatures) => LayoutEnvironment.GetFont(fontFamily, fsize, st, fontFeatures);
 
     /// <summary>
     /// Resolves the CSS <c>ch</c> unit by measuring the advance of the "0" glyph

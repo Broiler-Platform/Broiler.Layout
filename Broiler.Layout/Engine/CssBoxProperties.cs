@@ -1522,7 +1522,7 @@ internal abstract partial class CssBoxProperties
     /// inherited.  Resolved to enabled OpenType feature tags by
     /// <see cref="GetEnabledFontFeatureTags"/>.
     /// </summary>
-    public string FontFeatureSettings { get; set; }
+    public string? FontFeatureSettings { get; set; }
 
     /// <summary>
     /// Raw CSS <c>font-variant-alternates</c> value (e.g.
@@ -1535,9 +1535,9 @@ internal abstract partial class CssBoxProperties
     /// Parses <see cref="FontFeatureSettings"/> into a space-separated list of
     /// the OpenType feature tags that are switched on, or <c>null</c> when none.
     /// </summary>
-    protected string GetEnabledFontFeatureTags()
+    protected string? GetEnabledFontFeatureTags()
     {
-        string value = FontFeatureSettings;
+        string? value = FontFeatureSettings;
         if (string.IsNullOrWhiteSpace(value) || value == "normal")
             return null;
 
@@ -2485,7 +2485,7 @@ internal abstract partial class CssBoxProperties
         }
     }
 
-    protected abstract ILayoutFont GetCachedFont(string fontFamily, double fsize, LayoutFontStyle st, string fontFeatures);
+    protected abstract ILayoutFont GetCachedFont(string fontFamily, double fsize, LayoutFontStyle st, string? fontFeatures);
 
     public double ActualLineHeight
     {
@@ -2940,7 +2940,7 @@ internal abstract partial class CssBoxProperties
         ActualWordSpacing += ApplyZoomToLength(len, CssLengthParser.ParseLength(len, 1, GetEmHeight()));
     }
 
-    protected void InheritStyle(CssBox p, bool everything)
+    protected void InheritStyle(CssBox? p, bool everything)
     {
         if (p == null)
             return;

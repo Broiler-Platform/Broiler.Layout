@@ -9,7 +9,7 @@ namespace Broiler.Layout.Engine;
 
 internal static class CssBoxHelper
 {
-    public static CssBox CreateBox(HtmlTag tag, Uri baseUrl, CssBox parent = null)
+    public static CssBox CreateBox(HtmlTag tag, Uri baseUrl, CssBox? parent = null)
     {
         ArgumentNullException.ThrowIfNull(tag);
 
@@ -39,7 +39,7 @@ internal static class CssBoxHelper
         }
     }
 
-    public static CssBox CreateBox(CssBox parent, Uri baseUrl, HtmlTag tag = null, CssBox before = null)
+    public static CssBox CreateBox(CssBox parent, Uri baseUrl, HtmlTag? tag = null, CssBox? before = null)
     {
         ArgumentNullException.ThrowIfNull(parent);
 
@@ -64,7 +64,7 @@ internal static class CssBoxHelper
 
     public static CssBox CreateBlock(Uri baseUrl) => new(null, null, baseUrl) { Display = CssConstants.Block };
 
-    public static CssBox CreateBlock(CssBox parent, Uri baseUrl, HtmlTag tag = null, CssBox before = null)
+    public static CssBox CreateBlock(CssBox parent, Uri baseUrl, HtmlTag? tag = null, CssBox? before = null)
     {
         ArgumentNullException.ThrowIfNull(parent);
 
@@ -167,10 +167,11 @@ internal static class CssBoxHelper
 
         if (box.Size.Width > 90999 || (box.ParentBox != null && box.ParentBox.Size.Width > 90999))
         {
-            while (box != null)
+            CssBox? current = box;
+            while (current != null)
             {
-                sum += box.ActualMarginLeft + box.ActualMarginRight;
-                box = box.ParentBox;
+                sum += current.ActualMarginLeft + current.ActualMarginRight;
+                current = current.ParentBox;
             }
         }
 

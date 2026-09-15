@@ -54,7 +54,7 @@ internal abstract class CssRect(CssBox owner)
         set { Height = value - Top; }
     }
 
-    public ISelectionHandler Selection { get; set; }
+    public ISelectionHandler? Selection { get; set; }
 
     public virtual bool HasSpaceBefore => false;
 

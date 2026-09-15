@@ -695,7 +695,7 @@ internal static class FragmentTreeBuilder
 
     private static (string Html, string BaseUrl) TryLoadEmbeddedDocument(CssBox box)
     {
-        string tagName = box.HtmlTag.Name;
+        string tagName = (box.HtmlTag ?? throw new InvalidOperationException("Embedded-document box has no HTML tag.")).Name;
 
         // A nested browsing context that has been scripted is no longer what its `src` resource
         // says: its own scripts, or a parent reaching in through `frames[0]`, have moved the live
