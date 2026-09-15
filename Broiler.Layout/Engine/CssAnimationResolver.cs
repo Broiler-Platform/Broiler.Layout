@@ -1,6 +1,9 @@
 #nullable disable
+using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using Broiler.CSS;
 using Broiler.Graphics;

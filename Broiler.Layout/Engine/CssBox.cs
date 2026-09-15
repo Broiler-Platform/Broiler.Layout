@@ -3,6 +3,8 @@ using Broiler.Graphics;
 using Broiler.Graphics.Color;
 using Broiler.Graphics.Text;
 using Broiler.Layout.Diagnostics;
+using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 

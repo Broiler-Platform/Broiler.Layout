@@ -3,17 +3,9 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Broiler.Layout</RootNamespace>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>CSS box-model and layout engine over the canonical Broiler DOM and computed style, independent of any graphics backend.</Description>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="$(BroilerCssRoot)\Broiler.CSS.Dom\Broiler.CSS.Dom.csproj" />
-    <ProjectReference Include="$(BroilerCssRoot)\Broiler.CSS\Broiler.CSS.csproj" />
-    <ProjectReference Include="$(BroilerDomRoot)\Broiler.Dom\Broiler.Dom.csproj" />
-    <ProjectReference Include="$(BroilerGraphicsRoot)\src\Broiler.Graphics\Broiler.Graphics.csproj" />
-  </ItemGroup>
 
   <!-- CssBox and the concrete layout engine remain internal. Keep only assemblies that
        directly construct, render, inspect, or test that internal box tree. -->
@@ -45,19 +37,12 @@
          DOM zoom bake (Phase 5 LayoutSnapshot endgame, blocker (b) — visual-viewport). -->
     <InternalsVisibleTo Include="Broiler.HtmlBridge.Dom" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Broiler.CSS" Version="0.1.0-preview.1" />
+    <PackageReference Include="Broiler.CSS.Dom" Version="0.1.0-preview.1" />
+    <PackageReference Include="Broiler.Dom" Version="0.1.0-preview.2" />
+    <PackageReference Include="Broiler.Graphics" Version="0.1.0-preview.3" />
+  </ItemGroup>
 
-
-  <!--
-    The paged formatting context a media query is evaluated in (`Broiler.CSS.Dom.CssPagedMedia`)
-    is a pending submodule patch: the push to Broiler-Platform/Broiler.CSS answers 403, so it is
-    captured under patches/ and the gitlink is deliberately not bumped. Guarded rather than left
-    to break the build, and the probe is the source file itself because that is the exact thing
-    being depended on. Once the patch lands upstream and the pointer is bumped, the file is there
-    and this condition simply stops doing anything.
-  -->
-  <PropertyGroup>
-    <BroilerCssPagedMedia Condition="Exists('$(BroilerCssRoot)\Broiler.CSS.Dom\CssPagedMedia.cs')">true</BroilerCssPagedMedia>
-    <DefineConstants Condition="'$(BroilerCssPagedMedia)' == 'true'">$(DefineConstants);BROILER_CSS_PAGED_MEDIA</DefineConstants>
-  </PropertyGroup>
 
 </Project>

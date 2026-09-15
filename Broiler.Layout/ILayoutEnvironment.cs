@@ -1,6 +1,7 @@
 using Broiler.Graphics;
 using Broiler.Graphics.Color;
 using Broiler.Graphics.Text;
+using System;
 using System.Drawing;
 
 namespace Broiler.Layout;
