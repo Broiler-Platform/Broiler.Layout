@@ -13,6 +13,13 @@ The remaining work is preview hardening and cleanup.
   vulnerability-scan evidence for the reviewed revision.
 - Keep the README dependency and friend-assembly inventory aligned with the
   executable architecture tests.
+- Release `DocumentModeContext.IsQuirksHtml`'s initial-insertion-mode rule (a
+  DOCTYPE after anything but comments and ASCII whitespace is ignored) no earlier
+  than the Broiler.Dom.Html release whose tree builder applies the same rule (the
+  one after 0.1.0-preview.2). Consumers (Broiler.HtmlBridge, Broiler.HTML) take
+  both package updates in one change: against preview.2 a page with content
+  before its DOCTYPE is quirks mode from the source and standards mode from the
+  serialized tree.
 
 ## Resource hardening
 
