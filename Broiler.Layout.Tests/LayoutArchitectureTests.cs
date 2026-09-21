@@ -49,9 +49,6 @@ public sealed class LayoutArchitectureTests
                 "Broiler.DevConsole.Tests",
                 "Broiler.HTML",
                 "Broiler.HTML.Dom",
-                // Headless live-geometry snapshot (Phase 5 engine-native live geometry) reads the
-                // internal box tree via HeadlessLayoutView.
-                "Broiler.HTML.Headless",
                 // Rasterises a nested browsing context, so it reads EmbeddedCanvas to decide
                 // whether that frame's canvas is opaque or transparent (CSS Color Adjust §2.4).
                 "Broiler.HTML.Image",
@@ -111,6 +108,25 @@ public sealed class LayoutArchitectureTests
             .ToArray();
 
         Assert.Empty(mutable);
+    }
+
+    /// <summary>
+    /// Pins what <c>ILayoutView</c>'s remarks and the README now say: the geometry contract
+    /// is consumer-implemented and this component fills none of it. The remarks used to name
+    /// <c>Broiler.HTML.Headless.HeadlessLayoutView</c>, which had been deleted, and nothing
+    /// caught the drift. Should this component ever ship a default view, this test fails and
+    /// the prose has to be rewritten with it.
+    /// </summary>
+    [Fact(Timeout = 600000)]
+    public void Layout_View_Contract_Has_No_Implementation_In_This_Component()
+    {
+        var assembly = typeof(ILayoutEnvironment).Assembly;
+        var implementors = assembly.GetTypes()
+            .Where(static type => type is { IsInterface: false, IsAbstract: false })
+            .Where(static type => typeof(ILayoutView).IsAssignableFrom(type))
+            .ToArray();
+
+        Assert.Empty(implementors);
     }
 
     private static IEnumerable<Type> GetMemberTypes(Type type)

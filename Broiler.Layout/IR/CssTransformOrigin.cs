@@ -35,8 +35,15 @@ namespace Broiler.Layout.IR;
 /// wrong one is not a rounding difference — it is the element in a different place — so the caller
 /// states it.
 /// </para>
+/// <para>
+/// Public because a used <c>transform</c> matrix is unusable without it: <see cref="CssTransform"/>
+/// resolves the function list about the coordinate origin, and where the element actually lands is
+/// that matrix applied about the point this resolves (<see cref="CssTransform.AboutOrigin"/>). A
+/// consumer given only the first of the two re-implements the second, which is how the paint walker
+/// and the script bridge came to disagree in the first place.
+/// </para>
 /// </remarks>
-internal static class CssTransformOrigin
+public static class CssTransformOrigin
 {
     /// <summary>
     /// The transform origin <paramref name="value"/> names inside <paramref name="box"/>.
@@ -48,7 +55,7 @@ internal static class CssTransformOrigin
     /// invalid-fallback origin is the box's corner (<c>0 0</c>); <see langword="false"/> for a CSS
     /// box, whose initial is its centre (<c>50% 50%</c>).
     /// </param>
-    internal static PointF Resolve(string? value, RectangleF box, bool initialIsBoxCorner)
+    public static PointF Resolve(string? value, RectangleF box, bool initialIsBoxCorner)
     {
         float centreX = box.X + box.Width / 2f;
         float centreY = box.Y + box.Height / 2f;

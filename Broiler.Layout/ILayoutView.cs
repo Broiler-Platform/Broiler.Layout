@@ -13,12 +13,22 @@ namespace Broiler.Layout;
 /// <see cref="DomElement"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// This is the narrow contract that lets the script bridge (Broiler.HtmlBridge.Dom) read
 /// accurate element geometry while depending only on the canonical layout read-model, not
-/// on Broiler.HTML.Image. The concrete implementation lives below the HTML renderer (see
-/// <c>Broiler.HTML.Headless.HeadlessLayoutView</c>) and is injected into the bridge.
-/// Implementations own renderer resources, so callers dispose the view when the owning
-/// document is torn down.
+/// on Broiler.HTML.Image. Implementations own renderer resources, so callers dispose the
+/// view when the owning document is torn down.
+/// </para>
+/// <para>
+/// <b>This component ships no implementation of this interface, and none exists in any
+/// Broiler component today.</b> The contract is one a consumer implements over the box
+/// tree and injects; a consumer that injects nothing gets whatever null view it falls back
+/// to, and therefore no engine geometry at all. Earlier revisions of these remarks named
+/// <c>Broiler.HTML.Headless.HeadlessLayoutView</c> as the implementation. That project was
+/// deleted from Broiler.HTML on 2026-09-15 because it could not build after the move to
+/// packages, so the reference was dangling; whether this component should grow a default
+/// implementation is an open question and not answered here.
+/// </para>
 /// </remarks>
 public interface ILayoutView : IDisposable
 {

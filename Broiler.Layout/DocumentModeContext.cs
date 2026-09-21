@@ -66,7 +66,9 @@ public static class DocumentModeContext
     /// </para>
     /// <para>
     /// This reads the doctype out of the markup rather than from a parsed tree because both callers
-    /// have only the string: the flag is published before the document is built.
+    /// have only the string: the flag is published before the document is built. A caller that does
+    /// hold a parsed DOCTYPE asks <see cref="IsQuirksDoctype"/> instead — the conditions below the
+    /// name are the same code, so the two cannot drift apart.
     /// </para>
     /// <para>
     /// <b>Only a DOCTYPE the parser would keep counts.</b> The HTML Standard's "initial" insertion
@@ -102,10 +104,48 @@ public static class DocumentModeContext
             return true;
 
         ReadDoctype(html, doctypeStart + "<!DOCTYPE".Length, out var name, out var publicId, out var systemId);
-        if (!name.Equals("html", StringComparison.OrdinalIgnoreCase))
+        return IsQuirksDoctype(name, publicId, systemId);
+    }
+
+    /// <summary>
+    /// The HTML Standard's quirks-mode conditions for an already-parsed DOCTYPE — a name plus a
+    /// public and a system identifier, as a <c>DomDocumentType</c> carries them. A name other than
+    /// <c>html</c> is quirks mode; otherwise the identifiers decide, exactly as they do for
+    /// <see cref="IsQuirksHtml"/>. A missing identifier is <c>null</c> or an empty string.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the half of <see cref="IsQuirksHtml"/> that does not touch markup, and that method is
+    /// now a wrapper around it: find the DOCTYPE the initial insertion mode would take, read it, and
+    /// ask this. A document with no DOCTYPE at all never reaches here — that is quirks mode by
+    /// absence, which only the caller holding the document can know.
+    /// </para>
+    /// <para>
+    /// A host that reads the mode from a tree rather than from source needs this, and the
+    /// alternative is worse than it looks: rebuilding a <c>&lt;!DOCTYPE …&gt;</c> string from the
+    /// parsed node and feeding it back to <see cref="IsQuirksHtml"/> means reproducing this file's
+    /// quoting and whitespace rules outside it, and the shortcut of testing the name alone —
+    /// <c>doctype.Name == "html"</c> — is wrong for precisely the legacy pages the identifier tables
+    /// exist for. <c>&lt;!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"&gt;</c> has the
+    /// name <c>html</c> and selects quirks mode; a host that serialises its tree on that test flips
+    /// the document to standards mode on the round trip and every quirk keyed off the flag goes
+    /// inert.
+    /// </para>
+    /// <para>
+    /// The identifier comparisons are ASCII case-insensitive, and the name is compared the same way
+    /// so a parser that preserves the source case of <c>&lt;!DOCTYPE HTML&gt;</c> gets the same
+    /// answer as one that lowercases it.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The DOCTYPE name, as parsed.</param>
+    /// <param name="publicId">The public identifier, or null/empty when the DOCTYPE carries none.</param>
+    /// <param name="systemId">The system identifier, or null/empty when the DOCTYPE carries none.</param>
+    public static bool IsQuirksDoctype(string? name, string? publicId, string? systemId)
+    {
+        if (name is null || !name.Equals("html", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return SelectsQuirksMode(publicId, systemId);
+        return SelectsQuirksMode(publicId ?? string.Empty, systemId ?? string.Empty);
     }
 
     /// <summary>

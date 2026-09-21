@@ -28,7 +28,12 @@ the backend-neutral `Broiler.Graphics` primitive layer, and the BCL; painting,
 resource acquisition, HTML parsing, and platform UI remain in their owning
 assemblies.
 
-Ten assemblies have deliberate access to internal layout state:
+`ILayoutView` is also public, but it is a contract a consumer implements and injects, not
+one this component fills: nothing here — and nothing in any other Broiler component today —
+implements it. A consumer that injects no view reads no engine geometry.
+
+These assemblies have deliberate access to internal layout state (the `InternalsVisibleTo`
+set in `Broiler.Layout.csproj` is authoritative):
 
 | Friend assembly | Compatibility need |
 |---|---|
@@ -40,7 +45,6 @@ Ten assemblies have deliberate access to internal layout state:
 | `Broiler.DevConsole.Tests` | Characterizes diagnostic snapshots with constructed boxes. |
 | `Broiler.Layout.Tests` | Exercises the internal layout kernel directly. |
 | `Broiler.Wpt` | Enables scoped native anchor placement around final WPT renders. |
-| `Broiler.HTML.Headless` | Produces the live geometry snapshot through `ILayoutView`. |
 | `Broiler.HtmlBridge.Dom` | Supplies the visual-viewport scale around geometry snapshots. |
 
 Facade and application assemblies must consume owned projections instead of traversing
