@@ -151,6 +151,30 @@ public readonly record struct CssTransform(float A, float B, float C, float D, f
     public PointF Map(float x, float y) => new(A * x + C * y + E, B * x + D * y + F);
 
     /// <summary>
+    /// The transform that undoes this one — what carries a point on the page back into the
+    /// element's own untransformed coordinates, which is how a hit test asks whether a rotated box
+    /// really covers a point instead of testing its enclosing rectangle.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> when the matrix is singular, which is a transform that has collapsed
+    /// the element to a line or a point: there is no inverse because nothing maps back, and the
+    /// element covers no area to be hit.
+    /// </returns>
+    public bool TryInvert(out CssTransform inverse)
+    {
+        inverse = Identity;
+
+        var determinant = A * D - B * C;
+        if (!float.IsFinite(determinant) || MathF.Abs(determinant) < 1e-9f)
+            return false;
+
+        float ia = D / determinant, ib = -B / determinant;
+        float ic = -C / determinant, id = A / determinant;
+        inverse = new CssTransform(ia, ib, ic, id, -(ia * E + ic * F), -(ib * E + id * F));
+        return true;
+    }
+
+    /// <summary>
     /// The axis-aligned bounding box of a mapped rectangle — what <c>getBoundingClientRect</c>
     /// reports, which is why a rotated box's rect is larger than the box.
     /// </summary>
