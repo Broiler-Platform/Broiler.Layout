@@ -93,9 +93,9 @@ internal static partial class SvgRenderer
                     // viewport. The default "xMidYMid meet" scales uniformly to fit and centres;
                     // `none` stretches each axis independently, which is what a <symbol> used at a
                     // different shape asks for, and `slice` fills instead of fitting.
-                    (sx, sy, tx, ty) = ResolveViewBoxMapping(
+                    (sx, sy, tx, ty) = SvgViewBox.Resolve(
                         svgAttrs.GetValueOrDefault("preserveAspectRatio"),
-                        bounds, vbX, vbY, vbW, vbH);
+                        bounds, new RectangleF(vbX, vbY, vbW, vbH));
                     // A viewBox establishes the viewport for its children, so a percentage inside it
                     // resolves against the viewBox extent rather than against the CSS box.
                     viewportW = vbW;
@@ -437,47 +437,6 @@ internal static partial class SvgRenderer
         EmitNestedViewports(svgXml, bounds, order, structure, sx, sy, tx, ty, pctW, pctH);
 
         order.Flush(output);
-    }
-
-    /// <summary>
-    /// SVG 1.1 §7.8: the scale and translation that map a view box onto the viewport under a
-    /// <c>preserveAspectRatio</c> value, as <c>(sx, sy, tx, ty)</c>.
-    /// </summary>
-    /// <remarks>
-    /// Only <c>none</c> and the alignment/<c>meet</c>/<c>slice</c> forms are read; a value this
-    /// cannot parse takes the initial <c>xMidYMid meet</c>, which is what the renderer applied
-    /// unconditionally before.
-    /// </remarks>
-    private static (float Sx, float Sy, float Tx, float Ty) ResolveViewBoxMapping(
-        string? preserveAspectRatio, RectangleF bounds, float vbX, float vbY, float vbW, float vbH)
-    {
-        var parts = (preserveAspectRatio ?? string.Empty)
-            .Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
-
-        // "defer" is a legacy prefix that only applies to <image>, and is ignored here.
-        int first = parts.Length > 0 && parts[0].Equals("defer", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-        string align = parts.Length > first ? parts[first] : "xMidYMid";
-        bool slice = parts.Length > first + 1
-            && parts[first + 1].Equals("slice", StringComparison.OrdinalIgnoreCase);
-
-        float scaleX = bounds.Width / vbW;
-        float scaleY = bounds.Height / vbH;
-
-        if (align.Equals("none", StringComparison.OrdinalIgnoreCase))
-            return (scaleX, scaleY, -vbX * scaleX, -vbY * scaleY);
-
-        float scale = slice ? Math.Max(scaleX, scaleY) : Math.Min(scaleX, scaleY);
-        float slackX = bounds.Width - vbW * scale;
-        float slackY = bounds.Height - vbH * scale;
-
-        float alignX = align.Contains("xMin", StringComparison.OrdinalIgnoreCase) ? 0f
-            : align.Contains("xMax", StringComparison.OrdinalIgnoreCase) ? slackX
-            : slackX / 2f;
-        float alignY = align.Contains("YMin", StringComparison.Ordinal) ? 0f
-            : align.Contains("YMax", StringComparison.Ordinal) ? slackY
-            : slackY / 2f;
-
-        return (scale, scale, -vbX * scale + alignX, -vbY * scale + alignY);
     }
 
     private static PointF? TryGetPathStart(string pathData)
