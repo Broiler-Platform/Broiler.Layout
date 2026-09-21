@@ -217,6 +217,24 @@ public sealed class FragmentHitTestTests
         Assert.Equal(["p", "dialog", "b", "div"], TagsOf(HitTest(root, 15, 15)));
     }
 
+    // A popover opened from inside an open dialog is a second top-layer entry sitting inside the
+    // first one's subtree. The ordinary walk stops at the dialog and never reaches it, so unless the
+    // top-layer pass looks for it there it is painted nowhere and hit by nothing — which is worse
+    // than the mis-ordering the pass exists to fix, because the element disappears entirely.
+    [Fact(Timeout = 600000)]
+    public void A_Top_Layer_Entry_Inside_Another_Is_Still_Painted()
+    {
+        var root = Root();
+        var dialog = Child(root, new RectangleF(0, 0, 100, 100), tagName: "dialog",
+            attributes: new Dictionary<string, string> { ["data-broiler-top-layer"] = "0" });
+        _ = Child(dialog, new RectangleF(10, 10, 20, 20), tagName: "aside",
+            attributes: new Dictionary<string, string> { ["data-broiler-top-layer"] = "1" });
+
+        // And the flat order decides between them, not the nesting: the popover was added after the
+        // dialog, so it covers it.
+        Assert.Equal(["aside", "dialog", "div"], TagsOf(HitTest(root, 15, 15)));
+    }
+
     // ── what covers the point ─────────────────────────────────────────────
 
     [Fact(Timeout = 600000)]

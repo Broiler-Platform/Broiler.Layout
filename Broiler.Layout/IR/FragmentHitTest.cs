@@ -193,15 +193,44 @@ public static class FragmentHitTest
         if (topLayer.Count == 0)
             return;
 
+        // A top-layer element may itself contain one — a dialog holding a popover. The ordinary walk
+        // stops at the outer one and never descends past it, so the inner one is still unfound here;
+        // collecting it now is what keeps it in the painting at all. Only the entries the ordinary
+        // walk found are expanded, because each expansion descends through every top-layer box below
+        // it, and those entries sit in disjoint subtrees — so nothing is collected twice.
+        var found = topLayer.Count;
+        for (var i = 0; i < found; i++)
+            CollectTopLayer(topLayer[i].Fragment, topLayer[i].Transform, topLayer);
+
+        // The layer is flat however deeply its entries nest, so one order decides all of them.
         topLayer.Sort(static (left, right) =>
             (left.Fragment.TopLayerOrder ?? 0).CompareTo(right.Fragment.TopLayerOrder ?? 0));
 
-        // A top-layer element may itself contain one (a dialog holding a popover). Those are already
-        // in this list, collected while their host's subtree was walked, so the nested pass discards
-        // what it finds rather than appending to a list being iterated.
+        // Every entry is in this list now, so the nested pass discards what it finds rather than
+        // appending to a list being iterated.
         var nested = new List<Candidate>();
         foreach (var entry in topLayer)
             PaintStackingContext(entry.Fragment, entry.Transform, painted, nested);
+    }
+
+    /// <summary>
+    /// The top-layer boxes anywhere below <paramref name="parent"/>, with the transform chain each
+    /// sits under — including those below another top-layer box, which is why this descends past one
+    /// rather than stopping at it the way <see cref="Collect"/> does.
+    /// </summary>
+    private static void CollectTopLayer(Fragment parent, CssTransform parentTransform, List<Candidate> into)
+    {
+        foreach (var child in parent.Children)
+        {
+            if (child is null || child.Style.Display == "none")
+                continue;
+
+            var transform = Compose(parentTransform, child);
+            if (child.TopLayerOrder is not null)
+                into.Add(new Candidate(child, transform));
+
+            CollectTopLayer(child, transform, into);
+        }
     }
 
     /// <summary>
