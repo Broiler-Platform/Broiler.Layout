@@ -8,11 +8,11 @@ Broiler.HTML through internal compatibility boundaries.
 
 This is first-preview software. The API, layout behavior, and integration boundaries may
 change without compatibility guarantees. Substantial implementation work was AI-assisted.
-The recorded [human review](HUMAN_REVIEW.md) approved a specific 2026-07-01
+The recorded [human review](https://github.com/Broiler-Platform/Broiler.Layout/blob/main/HUMAN_REVIEW.md) approved a specific 2026-07-01
 revision with conditions. The component has changed substantially since that
 revision, so the approval must not be treated as covering current source or a
 broader release. Re-review and hardening work is tracked in the
-[current roadmap](docs/roadmap.md).
+[current roadmap](https://github.com/Broiler-Platform/Broiler.Layout/blob/main/docs/roadmap.md).
 
 Broiler.Layout is an independent Broiler component. Its integration with Broiler.HTML
 inherits architectural context from HTML Renderer, but it must not be represented as an
@@ -55,8 +55,9 @@ boundary decision and documentation update.
 
 ## Build and test
 
-Broiler.Layout consumes `Broiler.CSS`, `Broiler.CSS.Dom`, `Broiler.Dom` and `Broiler.Graphics`
-as packages from GitHub Packages, so a fresh restore needs feed credentials (see below).
+Every dependency, the Broiler packages included, restores from nuget.org; no feed
+credentials are needed. `NuGet.config` clears whatever sources the machine has configured
+and maps every package to nuget.org. Versions are pinned in `Directory.Packages.props`.
 
 ```bash
 dotnet build Broiler.Layout.slnx -c Release
@@ -65,45 +66,28 @@ node --test eng/resolve-preview-version.test.mjs
 pwsh -File eng/pack.ps1
 ```
 
-### Consuming Broiler packages from GitHub Packages
-
-`NuGet.config` pins two sources — nuget.org and the Broiler-Platform GitHub Packages
-feed (key `github`) — and clears whatever the machine has configured. Package source
-mapping sends `Broiler.*` to GitHub Packages and everything else to nuget.org. Versions
-are pinned in `Directory.Packages.props`.
-
-GitHub Packages requires authentication **even for public packages**. Create a personal
-access token with the `read:packages` scope and store it for the `github` source in your
-**user-level** config, never in the committed one:
-
-```bash
-dotnet nuget add source https://nuget.pkg.github.com/Broiler-Platform/index.json --name github --username <github-user> --password <pat> --store-password-in-clear-text --configfile "$APPDATA/NuGet/NuGet.Config"
-```
-
-In GitHub Actions the workflows supply `secrets.GITHUB_TOKEN` through
-`NuGetPackageSourceCredentials_github`. Each Broiler dependency must grant this repository
-Actions read access; `packages: read` alone does not grant access to packages owned by
-another repository.
-
 NuGet caches packages by id and version only. A Broiler package that was once restored
-from a local feed under the same version shadows the published one, and the build then
-reports Broiler types as missing. Delete that version from `~/.nuget/packages/<id>/` and
-restore again.
+from a local or retired feed under the same version shadows the one on nuget.org, and the
+build then reports Broiler types as missing. Delete that version from
+`~/.nuget/packages/<id>/` and restore again.
 
 ## Continuous integration and publishing
 
 CI builds and tests `Release` on Ubuntu and Windows (with a floor on the executed test
 count), then packs and verifies the package on Ubuntu and attaches it as `nuget-packages`.
-**Publish** (manual, or a `v0.1.0-preview.N` tag for NuGet.org) resolves the next unused
-preview version, reruns CI with it, verifies a fresh consumer restore from the destination
-feed, and pushes the validated package. `dry-run=true` is the default. The workflows and
-`eng/` scripts are shared with Broiler.CSS, Broiler.DOM and Broiler.Graphics.
+**Publish** (manual, or a `v0.1.0-preview.N` tag) resolves the next unused preview
+version, reruns CI with it, verifies a fresh consumer restore from nuget.org, and pushes
+the validated package and its symbols to nuget.org with the `NUGET_TOKEN` secret.
+`dry-run=true` is the default. The workflows and `eng/` scripts are shared with
+Broiler.CSS, Broiler.DOM and Broiler.Graphics.
 
-Publishing to NuGet.org also requires `Broiler.CSS`, `Broiler.CSS.Dom`, `Broiler.Dom` and
-`Broiler.Graphics` to be available there first.
+Preview numbers are cumulative: the next version is one past the highest preview of the
+line already on nuget.org, and never below the `VersionSuffix` floor in
+`Directory.Build.props`. That floor carries the numbers the retired GitHub Packages feed
+already spent (`0.1.0-preview.1` through `preview.5`), which nuget.org cannot see.
 
 ## License
 
-Broiler.Layout is licensed under the [Apache License 2.0](LICENSE). Third-party material,
+Broiler.Layout is licensed under the [Apache License 2.0](https://github.com/Broiler-Platform/Broiler.Layout/blob/main/LICENSE). Third-party material,
 if present, retains the license identified with that material. The license provides the
 software on an “AS IS” basis, without warranties or conditions.

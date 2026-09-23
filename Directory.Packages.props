@@ -3,10 +3,10 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Broiler.CSS" Version="0.1.0-preview.1" />
-    <PackageVersion Include="Broiler.CSS.Dom" Version="0.1.0-preview.1" />
-    <PackageVersion Include="Broiler.Dom" Version="0.1.0-preview.2" />
-    <PackageVersion Include="Broiler.Graphics" Version="0.1.0-preview.3" />
+    <PackageVersion Include="Broiler.CSS" Version="0.1.0-preview.7" />
+    <PackageVersion Include="Broiler.CSS.Dom" Version="0.1.0-preview.7" />
+    <PackageVersion Include="Broiler.Dom" Version="0.1.0-preview.8" />
+    <PackageVersion Include="Broiler.Graphics" Version="0.1.0-preview.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageVersion Include="xunit" Version="2.5.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
