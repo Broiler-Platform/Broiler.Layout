@@ -1,9 +1,6 @@
-# Prove that a consumer can restore the complete release using its destination feed.
+# Prove that a consumer can restore the complete release with nuget.org as its only other feed.
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory)][ValidateSet('github', 'nuget')][string] $Target,
-    [string] $Packages = 'artifacts'
-)
+param([string] $Packages = 'artifacts')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -14,6 +11,7 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ("broiler-feed-check-" + [guid]:
 New-Item -ItemType Directory -Path $scratch | Out-Null
 $references = @()
 $mappings = @()
+$dependencies = @()
 foreach ($archive in $archives) {
     $zip = [IO.Compression.ZipFile]::OpenRead($archive.FullName)
     try {
@@ -24,15 +22,10 @@ foreach ($archive in $archives) {
         $version = [Security.SecurityElement]::Escape($nuspec.package.metadata.version)
         $references += "    <PackageReference Include=`"$id`" Version=`"[$version]`" />"
         $mappings += "      <package pattern=`"$id`" />"
+        foreach ($dependency in $nuspec.SelectNodes('//*[local-name()="dependency"]')) {
+            $dependencies += [pscustomobject]@{ Package = $nuspec.package.metadata.id; Id = $dependency.id; Version = $dependency.version }
+        }
     } finally { $zip.Dispose() }
-}
-$githubSource = ''
-$githubMapping = ''
-if ($Target -eq 'github') {
-    $owner = if ($env:GITHUB_REPOSITORY_OWNER) { $env:GITHUB_REPOSITORY_OWNER } else { 'Broiler-Platform' }
-    $owner = [Security.SecurityElement]::Escape($owner)
-    $githubSource = "<add key=`"github`" value=`"https://nuget.pkg.github.com/$owner/index.json`" />"
-    $githubMapping = '<packageSource key="github"><package pattern="Broiler.*" /></packageSource>'
 }
 $escapedPath = [Security.SecurityElement]::Escape($packagePath)
 @"
@@ -41,7 +34,6 @@ $escapedPath = [Security.SecurityElement]::Escape($packagePath)
     <clear />
     <add key="release" value="$escapedPath" />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-    $githubSource
   </packageSources>
   <disabledPackageSources><clear /></disabledPackageSources>
   <packageSourceMapping>
@@ -50,7 +42,6 @@ $escapedPath = [Security.SecurityElement]::Escape($packagePath)
 $($mappings -join "`n")
     </packageSource>
     <packageSource key="nuget.org"><package pattern="*" /></packageSource>
-    $githubMapping
   </packageSourceMapping>
 </configuration>
 "@ | Set-Content (Join-Path $scratch 'NuGet.config') -Encoding utf8
@@ -67,5 +58,17 @@ $($references -join "`n")
 "@ | Set-Content (Join-Path $scratch 'Consumer.csproj') -Encoding utf8
 # An isolated cache prevents installed developer packages from hiding feed gaps.
 & dotnet restore (Join-Path $scratch 'Consumer.csproj') --configfile (Join-Path $scratch 'NuGet.config') --packages (Join-Path $scratch 'packages') --no-http-cache --nologo
-if ($LASTEXITCODE -ne 0) { throw "Consumer restore from $Target failed. Check feed access and publish missing dependencies first. Diagnostics: $scratch" }
-Write-Host "Consumer restore verified $($archives.Count) packages against $Target."
+if ($LASTEXITCODE -ne 0) { throw "Consumer restore from nuget.org failed. Publish missing dependencies there first. Diagnostics: $scratch" }
+# A declared dependency version missing from nuget.org does not fail the restore: NuGet
+# resolves the next higher version with only an NU1603 warning, so consumers would get
+# bits this release was never built against. Check each declared dependency directly.
+$assets = Get-Content -LiteralPath (Join-Path $scratch 'obj/project.assets.json') -Raw | ConvertFrom-Json
+$libraries = @($assets.libraries.PSObject.Properties.Name)
+foreach ($dependency in $dependencies) {
+    $version = $dependency.Version -replace '^\[([^,\]]+).*$', '$1'
+    if ($libraries -notcontains "$($dependency.Id)/$version") {
+        $restored = @($libraries | Where-Object { $_ -like "$($dependency.Id)/*" }) -join ', '
+        throw "$($dependency.Package) declares $($dependency.Id) $version, which nuget.org does not have (restored: $restored)."
+    }
+}
+Write-Host "Consumer restore verified $($archives.Count) packages against nuget.org."

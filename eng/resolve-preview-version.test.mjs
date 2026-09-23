@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseVersion, readVersions } from './resolve-preview-version.mjs';
+import { NUGET_ORG, chooseVersion, readPublishedVersions, readVersions } from './resolve-preview-version.mjs';
 
 test('first publish uses the configured preview; later publishes increment numerically', () => {
   assert.equal(chooseVersion('0.1.0-preview.1', []), '0.1.0-preview.1');
@@ -12,6 +12,14 @@ test('configured preview is a floor and other release lines do not affect it', (
   assert.equal(chooseVersion('0.1.0-preview.4', [
     '0.1.0-preview.1', '0.2.0-preview.99', '0.1.0', '0.1.0-rc.9',
   ]), '0.1.0-preview.4');
+});
+
+test('the next preview is cumulative over the floor and every number on nuget.org', () => {
+  // preview.3 was spent on the retired GitHub Packages feed, so the floor is preview.4.
+  assert.equal(chooseVersion('0.1.0-preview.4', ['0.1.0-preview.1', '0.1.0-preview.2']), '0.1.0-preview.4');
+  assert.equal(chooseVersion('0.1.0-preview.4', ['0.1.0-preview.4']), '0.1.0-preview.5');
+  assert.equal(chooseVersion('0.1.0-preview.4', ['0.1.0-preview.7']), '0.1.0-preview.8');
+  assert.throws(() => chooseVersion('0.1.0-preview.4', ['0.1.0-preview.2'], { suffix: 'preview.3' }));
 });
 
 test('only unused previews on the configured release line are accepted', () => {
@@ -46,6 +54,20 @@ test('all packages contribute, including a partially published newer preview', a
     'https://feed/flat/new/index.json': 404,
   }));
   assert.equal(chooseVersion('0.1.0-preview.1', versions), '0.1.0-preview.3');
+});
+
+test('published versions are read from nuget.org only, without credentials', async () => {
+  const requests = [];
+  const versions = await readPublishedVersions(['Core'], async (url, options) => {
+    requests.push(url);
+    assert.equal(Object.keys(options.headers).length, 0);
+    if (url === NUGET_ORG) return Response.json({
+      resources: [{ '@type': 'PackageBaseAddress/3.0.0', '@id': 'https://api.nuget.org/v3-flatcontainer/' }],
+    });
+    return Response.json({ versions: ['0.1.0-preview.2'] });
+  });
+  assert.deepEqual(versions, ['0.1.0-preview.2']);
+  assert.deepEqual(requests, [NUGET_ORG, 'https://api.nuget.org/v3-flatcontainer/core/index.json']);
 });
 
 test('feed failures and malformed responses stop publication', async () => {
