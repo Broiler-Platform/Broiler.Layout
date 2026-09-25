@@ -707,6 +707,34 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// The column flex passes that follow line layout, which stacks a <c>column</c> container's
+    /// items one per line: breaking them into flex lines, aligning them across the inline axis,
+    /// and flexing them along the block axis.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS Flexbox §9.3/§9.5: a wrapping or reversed column flex container needs its items broken
+    /// into lines and packed from the main-start, neither of which a post-pass over the single
+    /// block-flow stack can express. <see cref="PerformFlexColumnLineLayout"/> takes the placement
+    /// over when it applies; the one case it declines — a single line in ordinary <c>column</c>
+    /// order — is what the two passes after it handle.
+    /// </para>
+    /// <para>
+    /// A column container reaches line layout by two routes, and both finish here: a block-level
+    /// one through <see cref="LayoutBlockChildren"/>, and an <c>inline-flex</c> one through
+    /// <c>CssLayoutEngine.FlowInlineBlock</c>.
+    /// </para>
+    /// </remarks>
+    internal void FinishFlexColumnLayout(ILayoutEnvironment g)
+    {
+        if (!PerformFlexColumnLineLayout(g))
+        {
+            ApplyFlexColumnInlineAxisAlignment(g);
+            ApplyFlexColumnMainAxisSizing(g);
+        }
+    }
+
+    /// <summary>
     /// CSS Flexbox §9.7: distributes a <c>column</c> flex container's free space along its main
     /// (block) axis, growing its items into what is left over and shrinking them into what is not.
     /// </summary>
