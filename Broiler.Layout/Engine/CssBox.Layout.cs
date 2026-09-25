@@ -197,6 +197,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             LayoutBlockChildren(g);
 
             RealignRightFloatAfterContentSizing(widthAtPlacement);
+            ResolveTableAutoMargins();
         }
         else
         {
@@ -780,6 +781,40 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// reads floats <em>earlier</em> in the formatting context.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// CSS 2.1 §10.3.3 for a block-level table in flow: its auto inline margins take the space its
+    /// containing block has left, so the table moves once the table algorithm has sized it.
+    /// </summary>
+    /// <remarks>
+    /// Block layout resolves auto margins in <see cref="ResolveBlockUsedWidth"/>, which such a table
+    /// skips because its width comes from the table algorithm, and it was placed before it had one.
+    /// So <c>margin: 0 auto</c>, the way a page centres a table, left it at the left edge, and so did
+    /// HTML's <c>&lt;table align=center&gt;</c>, which is those margins. Both margins auto split the
+    /// space; only the left one auto puts the table against the right edge less its right margin.
+    /// </remarks>
+    private void ResolveTableAutoMargins()
+    {
+        if (Display != CssConstants.Table
+            || Float != CssConstants.None
+            || Position == CssConstants.Absolute || Position == CssConstants.Fixed
+            || ContainingBlock is not { } containing
+            || !IsSpecifiedMarginLeftAuto)
+            return;
+
+        double contentLeft = containing.Location.X + containing.ActualBorderLeftWidth + containing.ActualPaddingLeft;
+        double contentWidth = containing.Size.Width
+            - containing.ActualBorderLeftWidth - containing.ActualBorderRightWidth
+            - containing.ActualPaddingLeft - containing.ActualPaddingRight;
+        double free = contentWidth - Size.Width;
+        if (free <= 0)
+            return;
+
+        double marginLeft = IsSpecifiedMarginRightAuto ? free / 2 : Math.Max(0, free - ActualMarginRight);
+        double shift = contentLeft + marginLeft - Location.X;
+        if (Math.Abs(shift) > 0.01)
+            OffsetLeft(shift);
+    }
+
     private void RealignRightFloatAfterContentSizing(double widthAtPlacement)
     {
         if (Float != CssConstants.Right || ContainingBlock == null)
