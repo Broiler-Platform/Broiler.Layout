@@ -1430,6 +1430,14 @@ internal static class CssLayoutEngine
         b.ActualBottom = b.Location.Y;
 
         // --- Lay out children inside the inline-block ---
+        // CSS Flexbox §5.4: a flex container lays its items out, and paints them, in order-modified
+        // document order, and a grid container places its items in it. LayoutBlockChildren sorts a
+        // block-level container's children into it before laying them out; a container laid out
+        // here was left in document order, so `order` did nothing in an inline-flex or inline-grid
+        // container, or in a flex or grid container that is itself an item laid out this way.
+        if (b.Display is "flex" or "inline-flex" or "grid" or "inline-grid")
+            b.ApplyOrderModifiedDocumentOrder();
+
         // `inline-flex` is a flex container in every way that matters here — only its outer display
         // differs, and this method is precisely the path an inline-level box arrives on. Testing
         // for `flex` alone meant an inline-flex container never ran the flex algorithm at all: its
