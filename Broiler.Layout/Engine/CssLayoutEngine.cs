@@ -1503,6 +1503,19 @@ internal static class CssLayoutEngine
             // the shape of a multi-line grid item (e.g. `X<br>X`), which the
             // css-grid check-layout reference tests use throughout.
             CreateLineBoxes(g, b);
+
+            // An inline-flex column container lands here too, and line layout only stacks its
+            // items. A block-level column container gets the column passes after that; this
+            // route stopped short of them, so the items kept their content width: not
+            // stretched, not aligned, not reversed under column-reverse and not flexed.
+            //
+            // Not for a flex item that is itself a column container, which comes this way as
+            // well. Its own container lays it out again, through block layout and so with the
+            // passes, whenever it stretches it. Running them here too would lay out each level
+            // of nested column containers twice, and a twelve-level nest 6,145 times instead
+            // of 26.
+            if (b.Display == "inline-flex" && b.IsColumnFlexContainer())
+                b.FinishFlexColumnLayout(g);
         }
         else if (b.Boxes.Count > 0)
         {
