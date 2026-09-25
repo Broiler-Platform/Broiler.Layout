@@ -1353,9 +1353,12 @@ internal static class CssLayoutEngine
                 + b.ActualPaddingLeft + b.ActualPaddingRight;
             prefMin = Math.Max(0, prefMin - ownPaddingBorder);
             prefMax = Math.Max(0, prefMax - ownPaddingBorder);
-            double available = Math.Max(0, limitRight - curx - rightspacing
-                - b.ActualBorderLeftWidth - b.ActualBorderRightWidth
-                - b.ActualPaddingLeft - b.ActualPaddingRight);
+            // curx already includes this box's left margin, border and padding (leftspacing), and
+            // rightspacing its right ones, so what is left of the line is a content width already.
+            // Taking the border and padding off again left every inline-block that has to fit the
+            // space it is given — a flex column's item, which that column sizes to the item — that
+            // much narrower than its content, and its text wrapped.
+            double available = Math.Max(0, limitRight - curx - rightspacing);
             ibContentWidth = Math.Min(Math.Max(prefMin, available), prefMax);
         }
 
@@ -2591,15 +2594,23 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
-    /// Shifts an inline-block box and all its descendant boxes horizontally.
+    /// Shifts an atomic inline-level box — inline-block, inline-flex, inline-grid or inline-table —
+    /// and all its descendant boxes horizontally.
     /// Called by <see cref="ApplyCenterAlignment"/> and <see cref="ApplyRightAlignment"/>
     /// to ensure the box's actual <see cref="CssBox.Location"/> matches the shifted
     /// line-box rectangle, so background, border, and child content paint at the
     /// correct position.  CSS 2.1 §9.4.2.
     /// </summary>
+    /// <remarks>
+    /// It moved only an inline-block. Every atomic inline-level box is laid out inside at its own
+    /// <see cref="CssBox.Location"/>, and its text and its rounded clip paint from there, while its
+    /// background and border paint from the line rectangle the alignment had moved. A centred
+    /// <c>inline-flex</c> button therefore had its fill moved and its text left behind: Google's
+    /// consent buttons, white text on a blue pill, showed a sliver of blue and white text on white.
+    /// </remarks>
     private static void ShiftInlineBlockBox(CssBox b, double dx)
     {
-        if (b.Display != CssConstants.InlineBlock)
+        if (!CssBoxHelper.IsAtomicInlineLevel(b.Display))
             return;
 
         b.Location = new PointF((float)(b.Location.X + dx), b.Location.Y);
@@ -2617,6 +2628,13 @@ internal static class CssLayoutEngine
 
     private static void ShiftDescendantBoxes(CssBox parent, double dx)
     {
+        // Each word is shifted through the box that owns it, which holds it whether or not a line
+        // box of this subtree does. A grid item's words are in no line box of the grid's, so an
+        // inline-grid moved and left its text behind when words were shifted through line boxes.
+        // Every word has one owner and every box is visited once, so none moves twice.
+        foreach (var word in parent.Words)
+            word.Left += dx;
+
         foreach (var child in parent.Boxes)
         {
             child.Location = new PointF((float)(child.Location.X + dx), child.Location.Y);
@@ -2627,12 +2645,9 @@ internal static class CssLayoutEngine
             ShiftDescendantBoxes(child, dx);
         }
 
-        // Shift words and rectangles within this box's own line boxes.
+        // Shift the rectangles within this box's own line boxes.
         foreach (var lineBox in parent.LineBoxes)
         {
-            foreach (var word in lineBox.Words)
-                word.Left += dx;
-
             foreach (var key in ToList(lineBox.Rectangles.Keys))
             {
                 var r = lineBox.Rectangles[key];
