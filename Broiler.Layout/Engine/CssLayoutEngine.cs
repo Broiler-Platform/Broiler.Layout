@@ -1108,6 +1108,14 @@ internal static class CssLayoutEngine
                         cury = maxbottom;
                         curx = startx;
                         line = new CssLineBox(blockbox);
+
+                        // The item's right margin, border and padding end the line the item was
+                        // on. The next line starts at the content edge, so they are not carried
+                        // onto it. Adding them after the break put every item after a padded one
+                        // that far to the right; a stretched item then overflowed the container by
+                        // as much, and one as wide as the container no longer fit its line and
+                        // wrapped a line's descent further down.
+                        rightspacing = 0;
                     }
                 }
                 else
