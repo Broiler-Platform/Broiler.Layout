@@ -295,8 +295,30 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (TryApplyGridTrackLayout())
             return;
 
+        if (DescribeApproximatedTemplates(GridTemplateColumns, GridTemplateRows) is { } templates)
+            Diagnostics.LayoutDiagnostics.ReportFallback("grid", templates);
+
         if (!ApplyGridStacking())
             ApplyGridAutoPlacement();
+    }
+
+    /// <summary>
+    /// How a grid the track-sizing pass declined is described to a host, or <see langword="null"/> when
+    /// there is nothing to report: a grid that declares no template is an implicit grid, and for it the
+    /// auto-placement below is the layout, not a stand-in for one.
+    /// </summary>
+    internal static string? DescribeApproximatedTemplates(string? columns, string? rows)
+    {
+        static bool Declared(string? template) =>
+            !string.IsNullOrWhiteSpace(template)
+            && !template.Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
+
+        if (!Declared(columns) && !Declared(rows))
+            return null;
+
+        return $"grid-template-columns: {(Declared(columns) ? columns!.Trim() : "none")}; " +
+               $"grid-template-rows: {(Declared(rows) ? rows!.Trim() : "none")} " +
+               "laid out by the stacking/auto-placement approximation, not by track sizing";
     }
 
     /// <summary>

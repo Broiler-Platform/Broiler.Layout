@@ -958,6 +958,11 @@ internal static partial class CssUtils
             case "animation-play-state":
                 cssBox.AnimationPlayState = value;
                 break;
+            default:
+                // A name the box does not model is ignored — reported, for a host that asks, so that
+                // "the page set it and nothing happened" has an answer (Diagnostics.LayoutDiagnostics).
+                Diagnostics.LayoutDiagnostics.ReportPropertyNotModeled(propName, value);
+                break;
         }
     }
 
