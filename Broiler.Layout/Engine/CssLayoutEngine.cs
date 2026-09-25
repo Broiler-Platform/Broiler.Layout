@@ -1504,7 +1504,20 @@ internal static class CssLayoutEngine
             double childMaxBottom = b.Location.Y;
 
             foreach (var child in b.Boxes)
+            {
+                // CSS 2.1 §10.6.7: absolutely positioned children are ignored in this box's auto
+                // height, and a fixed one is just as out of flow (§9.6). The loop above has laid
+                // them out, and an absolute one has entered the document's scrollable size there;
+                // counting them here as well made the box as tall as its out-of-flow contents, and
+                // its line with it, so everything below moved down by the difference. A column flex
+                // container flows its items through here too, so there it moved every item after
+                // this one: DuckDuckGo's viewport-tall off-canvas menu, fixed inside its relative
+                // header, pushed the whole first screen one viewport down.
+                if (child.Position is CssConstants.Absolute or CssConstants.Fixed)
+                    continue;
+
                 childMaxBottom = Math.Max(childMaxBottom, child.ActualBottom);
+            }
 
             b.ActualBottom = childMaxBottom;
         }
