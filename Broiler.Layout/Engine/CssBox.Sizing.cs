@@ -431,8 +431,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         CssBoxHelper.GetMinMaxSumWords(this, ref min, ref maxSum, ref paddingSum, ref marginSum, suppressExplicitWidthFor: this);
 
-        maxWidth = paddingSum + maxSum;
-        minWidth = paddingSum + (min < 90999 ? min : 0);
+        // The walk counts border and padding where they lie, on each line and each word's path.
+        maxWidth = maxSum;
+        minWidth = min < 90999 ? min : 0;
         maxWidth -= CssBoxHelper.EdgeWhitespaceSpacing(this);
         if (maxWidth < minWidth)
             maxWidth = minWidth;
@@ -470,8 +471,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         CssBoxHelper.GetMinMaxSumWords(this, ref min, ref maxSum, ref paddingSum, ref marginSum);
 
-        maxWidth = paddingSum + maxSum;
-        minWidth = paddingSum + (min < 90999 ? min : 0);
+        // The walk counts border and padding where they lie, on each line and each word's path.
+        maxWidth = maxSum;
+        minWidth = min < 90999 ? min : 0;
 
         // CSS Text 3 §4.1.1 (phase II): a collapsible space sequence at the
         // start of the first line / end of the last line of a formatting

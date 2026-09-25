@@ -210,6 +210,23 @@ internal static class CssBoxHelper
         && box.WhiteSpace != CssConstants.NoWrap
         && box.Float == CssConstants.None;
 
+    /// <summary>
+    /// Walks <paramref name="box"/> for its min- and max-content widths: <paramref name="min"/> is
+    /// the widest thing that cannot be broken, <paramref name="maxSum"/> the widest line.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="marginSum"/> and <paramref name="paddingSum"/> are the horizontal margins and
+    /// the horizontal border and padding of the boxes on the path to the box being visited: each box
+    /// adds its own on the way in and takes them off on the way out. A line starts from both, and a
+    /// word's minimum is measured with the padding and border around it.
+    /// <para>
+    /// <paramref name="paddingSum"/> used to be a running total that nothing took off, added to both
+    /// widths by the caller at the end, so the padding of boxes stacked one above another was
+    /// counted as if they sat side by side. Ten rows with 100px of left padding made their
+    /// shrink-to-fit container 1008px wide around an 8px word. html5test.com's results column, a
+    /// padded table cell per feature, came out 12,060px wide in a 900px page.
+    /// </para>
+    /// </remarks>
     public static void GetMinMaxSumWords(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, CssBox suppressExplicitWidthFor = null)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicVisits);
@@ -234,7 +251,7 @@ internal static class CssBoxHelper
         if (StartsNewMaxContentLine(box))
         {
             oldSum = maxSum;
-            maxSum = marginSum;
+            maxSum = marginSum + paddingSum;
         }
 
         // When measuring a grid item's content contribution, its own explicit
@@ -265,10 +282,10 @@ internal static class CssBoxHelper
         {
             double explicitWidth = CssLengthParser.ParseLength(
                 box.Width, box.ContainingBlock?.Size.Width ?? 0, box.GetEmHeight());
-            paddingSum += box.ActualBorderLeftWidth + box.ActualBorderRightWidth
-                        + box.ActualPaddingRight + box.ActualPaddingLeft;
-            maxSum += explicitWidth;
-            min = Math.Max(min, explicitWidth);
+            double explicitEdges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth
+                                 + box.ActualPaddingRight + box.ActualPaddingLeft;
+            maxSum += explicitWidth + explicitEdges;
+            min = Math.Max(min, paddingSum + explicitWidth + explicitEdges);
 
             if (oldSum.HasValue)
                 maxSum = Math.Max(maxSum, oldSum.Value);
@@ -289,10 +306,10 @@ internal static class CssBoxHelper
                 box.Width, box.ContainingBlock?.Size.Width ?? 0, box.GetEmHeight());
             if (explicitWidth > 0)
             {
-                paddingSum += box.ActualBorderLeftWidth + box.ActualBorderRightWidth
-                            + box.ActualPaddingRight + box.ActualPaddingLeft;
-                maxSum += explicitWidth;
-                min = Math.Max(min, explicitWidth);
+                double explicitEdges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth
+                                     + box.ActualPaddingRight + box.ActualPaddingLeft;
+                maxSum += explicitWidth + explicitEdges;
+                min = Math.Max(min, paddingSum + explicitWidth + explicitEdges);
 
                 if (oldSum.HasValue)
                     maxSum = Math.Max(maxSum, oldSum.Value);
@@ -300,13 +317,16 @@ internal static class CssBoxHelper
             }
         }
 
-        // add the padding 
-        paddingSum += box.ActualBorderLeftWidth + box.ActualBorderRightWidth + box.ActualPaddingRight + box.ActualPaddingLeft;
-
-
-        // for tables the padding also contains the spacing between cells
+        // This box's own border and padding, and a table's spacing between its cells, are on the
+        // path of everything inside it: its line and each word in it are that much wider. They come
+        // off again below, once the box is done, so its siblings do not carry them.
+        double edges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth + box.ActualPaddingRight + box.ActualPaddingLeft;
         if (box.Display == CssConstants.Table)
-            paddingSum += CssLayoutEngineTable.GetTableSpacing(box);
+            edges += CssLayoutEngineTable.GetTableSpacing(box);
+
+        maxSum += edges;
+        paddingSum += edges;
+        min = Math.Max(min, paddingSum);
 
         // CSS Sizing 3 §5.2.1: a replaced box's intrinsic inline size is its own — it has no
         // contents to walk for one. An <img> carries a word to be measured, but a <canvas>, a
@@ -321,17 +341,15 @@ internal static class CssBoxHelper
                 out double replacedContentWidth, out _);
 
             maxSum += replacedContentWidth;
-            min = Math.Max(min, replacedContentWidth);
-            return;
+            min = Math.Max(min, paddingSum + replacedContentWidth);
         }
-
-        if (box.Words.Count > 0)
+        else if (box.Words.Count > 0)
         {
             // calculate the min and max sum for all the words in the box
             foreach (CssRect word in box.Words)
             {
                 maxSum += word.FullWidth + (word.HasSpaceBefore ? word.OwnerBox.ActualWordSpacing : 0);
-                min = Math.Max(min, word.Width);
+                min = Math.Max(min, paddingSum + word.Width);
             }
 
             // remove the last word padding
@@ -340,6 +358,11 @@ internal static class CssBoxHelper
         }
         else
         {
+            // A table row's cells sit side by side and nothing wraps between them, so its minimum is
+            // the sum of theirs, where anywhere else a minimum is the widest thing on any one path.
+            bool sumsChildMinimums = box.Display == CssConstants.TableRow;
+            double rowMin = paddingSum;
+
             // recursively on all the child boxes
             for (int i = 0; i < box.Boxes.Count; i++)
             {
@@ -354,7 +377,7 @@ internal static class CssBoxHelper
                 if (childBox.IsBrElement)
                 {
                     oldSum = oldSum.HasValue ? Math.Max(oldSum.Value, maxSum) : maxSum;
-                    maxSum = marginSum;
+                    maxSum = marginSum + paddingSum;
                     continue;
                 }
 
@@ -391,11 +414,27 @@ internal static class CssBoxHelper
                 if (!StartsNewMaxContentLine(childBox) && childBox.Display != CssConstants.None)
                     maxSum += childBox.ActualMarginLeft + childBox.ActualMarginRight;
 
-                GetMinMaxSumWords(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum);
+                if (sumsChildMinimums)
+                {
+                    // The cell's minimum is measured with this row's path; what the cell adds to it
+                    // is its share of the row.
+                    double childMin = 0;
+                    GetMinMaxSumWords(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum);
+                    rowMin += Math.Max(0, childMin - paddingSum);
+                }
+                else
+                {
+                    GetMinMaxSumWords(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum);
+                }
 
                 marginSum -= childBox.ActualMarginLeft + childBox.ActualMarginRight;
             }
+
+            if (sumsChildMinimums)
+                min = Math.Max(min, rowMin);
         }
+
+        paddingSum -= edges;
 
         // max sum is max of all the lines in the box
         if (oldSum.HasValue)
