@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using Broiler.CSS.Dom;
 
 namespace Broiler.Layout.Diagnostics;
 
@@ -8,7 +10,7 @@ namespace Broiler.Layout.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why it exists.</b> The cascade hands every declared longhand to
+/// <b>Why it exists.</b> The renderer hands each box's cascaded declarations to
 /// <see cref="Engine.CssUtils.SetPropertyValue"/>, whose switch ignores the names it does not model,
 /// and a handful of places in the engine meet a value they cannot lay out and quietly use a simpler
 /// one. Neither leaves any trace: the page renders, just not as written, and nothing says which
@@ -30,9 +32,17 @@ public static class LayoutDiagnostics
 {
     /// <summary>
     /// Invoked with <c>(property, value)</c> for each cascaded declaration whose property the layout
-    /// engine does not model, and so ignores. Custom properties are not reported. Called once per box
-    /// the declaration applies to; a consumer aggregates.
+    /// engine does not model, and so ignores. Called once per box the declaration applies to; a
+    /// consumer aggregates.
     /// </summary>
+    /// <remarks>
+    /// Two kinds of name the switch ignores are not reported, because nothing is lost by it: custom
+    /// properties, and a shorthand the style engine expands. The cascade keeps such a shorthand beside
+    /// the longhands it expands to (<see cref="CssStyleEngine.ExpandShorthands"/> is additive), so a
+    /// box is handed <c>margin</c> and <c>margin-top</c> alike and applies the longhands. A shorthand
+    /// the style engine does not expand and the switch does not model — <c>animation</c>,
+    /// <c>place-items</c> — arrives alone, is not applied at all, and is reported.
+    /// </remarks>
     public static Action<string, string>? PropertyNotModeled { get; set; }
 
     /// <summary>
@@ -42,11 +52,36 @@ public static class LayoutDiagnostics
     /// </summary>
     public static Action<string, string>? FallbackTaken { get; set; }
 
-    internal static void ReportPropertyNotModeled(string property, string value) =>
-        Invoke(PropertyNotModeled, property, value);
+    internal static void ReportPropertyNotModeled(string property, string value)
+    {
+        if (PropertyNotModeled is not { } handler || IsExpandedShorthand(property, value))
+            return;
+
+        Invoke(handler, property, value);
+    }
 
     internal static void ReportFallback(string feature, string detail) =>
         Invoke(FallbackTaken, feature, detail);
+
+    /// <summary>
+    /// Whether the style engine expands <paramref name="property"/> with <paramref name="value"/> into
+    /// longhands — asked of the expander itself, with the value, because a value it cannot read
+    /// (<c>font: x</c>) is not expanded and then no longhand stands in for it either.
+    /// </summary>
+    private static bool IsExpandedShorthand(string property, string value)
+    {
+        var probe = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [property] = value };
+        try
+        {
+            CssStyleEngine.ExpandShorthands(probe);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        return probe.Count > 1;
+    }
 
     private static void Invoke(Action<string, string>? handler, string first, string second)
     {

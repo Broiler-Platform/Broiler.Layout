@@ -960,7 +960,8 @@ internal static partial class CssUtils
                 break;
             default:
                 // A name the box does not model is ignored — reported, for a host that asks, so that
-                // "the page set it and nothing happened" has an answer (Diagnostics.LayoutDiagnostics).
+                // "the page set it and nothing happened" has an answer (Diagnostics.LayoutDiagnostics,
+                // which leaves out a shorthand whose longhands the box is handed beside it).
                 Diagnostics.LayoutDiagnostics.ReportPropertyNotModeled(propName, value);
                 break;
         }
