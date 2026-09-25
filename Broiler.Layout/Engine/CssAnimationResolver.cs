@@ -165,7 +165,7 @@ internal static class CssAnimationResolver
     /// Applies a CSS timing function to a raw progress value.
     /// Supports: ease, linear, ease-in, ease-out, ease-in-out, cubic-bezier(...)
     /// </summary>
-    private static double ApplyTimingFunction(double progress, string timingFunction)
+    internal static double ApplyTimingFunction(double progress, string timingFunction)
     {
         if (string.IsNullOrEmpty(timingFunction))
             return CubicBezier(progress, 0.25, 0.1, 0.25, 1.0); // ease
@@ -180,8 +180,18 @@ internal static class CssAnimationResolver
             "ease-out" => CubicBezier(progress, 0.0, 0.0, 0.58, 1.0),
             "ease-in-out" => CubicBezier(progress, 0.42, 0.0, 0.58, 1.0),
             _ when lower.StartsWith("cubic-bezier(") => ParseAndApplyCubicBezier(progress, lower),
-            _ => progress // fallback to linear for unsupported functions
+            _ => LinearFallback(progress, timingFunction),
         };
+    }
+
+    /// <summary>
+    /// An unsupported timing function — <c>steps()</c>, <c>linear()</c> — samples as linear, and says so
+    /// to a host that asks (<see cref="Diagnostics.LayoutDiagnostics.FallbackTaken"/>).
+    /// </summary>
+    private static double LinearFallback(double progress, string timingFunction)
+    {
+        Diagnostics.LayoutDiagnostics.ReportFallback("animation-timing-function", timingFunction.Trim() + " sampled as linear");
+        return progress;
     }
 
     /// <summary>
