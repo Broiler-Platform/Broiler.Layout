@@ -122,6 +122,70 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>A flex container whose main axis is the block axis, so its cross axis is inline.</summary>
     internal bool IsColumnFlexContainer() => IsFlexContainer() && !IsRowFlexContainer();
 
+    /// <summary>
+    /// CSS Flexbox §9.9.1: the min- and max-content widths of a row flex container's content box.
+    /// Its items sit side by side on one line, so their contributions add up, where the children
+    /// of a block container, each on a line of its own, contribute the widest.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The max-content width is the sum of the items' max-content contributions, each item's
+    /// max-content width and its horizontal margins, with a column gap between each two. The
+    /// min-content width of a single-line container is the same sum over the min-content
+    /// contributions. A multi-line one can break between any two items, so its min-content width
+    /// is its largest single contribution, with no gap.
+    /// </para>
+    /// <para>
+    /// Every intrinsic measurement took a flex container for a block container. Its items are
+    /// blockified, so each started a line of its own, and a row came out as wide as its widest
+    /// item. An auto-width inline-flex row, a floated or absolutely positioned flex row, and one
+    /// sized min-, max- or fit-content all squeezed their items into that width, where the items
+    /// wrapped or ran out of the box.
+    /// </para>
+    /// <para>
+    /// A percentage gap resolves against zero here, as CSS Box Alignment has it for intrinsic size
+    /// contributions. Children that are not flex items (out of flow, <c>display: none</c>, or
+    /// collapsible white space) contribute nothing, as they take no room in layout.
+    /// </para>
+    /// </remarks>
+    /// <returns><see langword="false"/> for anything but a row flex container in a horizontal
+    /// writing mode, whose width is then its main size.</returns>
+    internal bool TryGetFlexRowIntrinsicContentWidths(out double minContent, out double maxContent)
+    {
+        minContent = 0;
+        maxContent = 0;
+
+        if (!IsRowFlexContainer() || IsVerticalWritingMode(WritingMode))
+            return false;
+
+        bool multiLine = FlexWrap is "wrap" or "wrap-reverse";
+        double gap = ResolveFlexGap(ColumnGap, 0);
+        double sumOfMins = 0, sumOfMaxes = 0, largestMin = 0;
+        int items = 0;
+
+        foreach (var child in Boxes)
+        {
+            if (!IsInFlowFlexItem(child) || IsCollapsibleWhitespaceItem(child))
+                continue;
+
+            child.GetMinMaxWidth(out double childMin, out double childMax);
+            double margins = child.ActualMarginLeft + child.ActualMarginRight;
+
+            childMin = (double.IsNaN(childMin) ? 0 : childMin) + (double.IsNaN(margins) ? 0 : margins);
+            childMax = (double.IsNaN(childMax) ? 0 : childMax) + (double.IsNaN(margins) ? 0 : margins);
+
+            sumOfMins += childMin;
+            sumOfMaxes += childMax;
+            largestMin = Math.Max(largestMin, childMin);
+            items++;
+        }
+
+        double gaps = items > 1 && gap > 0 ? (items - 1) * gap : 0;
+        maxContent = sumOfMaxes + gaps;
+        minContent = multiLine ? largestMin : sumOfMins + gaps;
+        return true;
+    }
+
     internal void PerformFlexRowLayout(ILayoutEnvironment g)
     {
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Flex);

@@ -516,6 +516,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (TryComputeGridIntrinsicContentWidth(useMax: true, out double gridMaxContent))
             return gridMaxContent;
 
+        // CSS Flexbox §9.9.1: a row flex container's items sit side by side, so they add up. The
+        // walk below takes each blockified item for a line of its own, and the widest one.
+        if (TryGetFlexRowIntrinsicContentWidths(out _, out double flexMaxContent))
+            return flexMaxContent;
+
         double maxLineWidth = 0;
         // Running width of a horizontal run of adjacent floated children. At
         // max-content the container is under no width constraint, so a run of
@@ -1014,6 +1019,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     private double ComputeIntrinsicInlineSize(bool useMin)
     {
+        // CSS Flexbox §9.9.1: a row flex container's items sit side by side, so they add up,
+        // where the loop below takes each blockified item for a line of its own.
+        if (TryGetFlexRowIntrinsicContentWidths(out double flexMinContent, out double flexMaxContent))
+            return useMin ? flexMinContent : flexMaxContent;
+
         double maxLineWidth = 0;
 
         foreach (var child in Boxes)
