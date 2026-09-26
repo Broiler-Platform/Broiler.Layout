@@ -904,8 +904,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         if (!PerformFlexColumnLineLayout(g))
         {
-            ApplyFlexColumnInlineAxisAlignment(g);
-            ApplyFlexColumnMainAxisSizing(g);
+            bool stretchChangedHeights = ApplyFlexColumnInlineAxisAlignment(g);
+            ApplyFlexColumnMainAxisSizing(g, stretchChangedHeights);
         }
     }
 
@@ -944,8 +944,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// leave it reading the pre-flex one. Single-line only: <c>column wrap</c> is
     /// <see cref="PerformFlexColumnLineLayout"/>'s.
     /// </para>
+    /// <para>
+    /// The stack is rebuilt, too, when <paramref name="itemHeightsChanged"/> says the cross-axis
+    /// stretch changed an item's height (see <see cref="ApplyFlexColumnInlineAxisAlignment"/>).
+    /// Line layout stacked the items at the heights they had before it, and nothing moved the
+    /// items after a taller one or grew the container around it, so they overlapped: an image a
+    /// 320px column stretches is 0px tall while the column stacks it and 160px once stretched, and
+    /// the two 10px items after it sat at its top in a 29px container, where browsers put them at
+    /// 160 and 170 in a 180px one. A column with a definite height or a row gap was already
+    /// rebuilt here, from the heights the stretch left, which is why only a column of
+    /// <c>height: auto</c> without a gap showed it.
+    /// </para>
     /// </remarks>
-    private void ApplyFlexColumnMainAxisSizing(ILayoutEnvironment g)
+    private void ApplyFlexColumnMainAxisSizing(ILayoutEnvironment g, bool itemHeightsChanged = false)
     {
         if (!IsFlexContainer() || IsRowFlexContainer())
             return;
@@ -980,7 +991,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         bool flexes = mainSize is { } definiteMainSize
             && ResolveFlexColumnMainSizes(g, items, definiteMainSize, rowGap, out targets);
 
-        if (!flexes && (rowGap <= 0 || items.Count < 2))
+        if (!flexes && !itemHeightsChanged && (rowGap <= 0 || items.Count < 2))
             return;
 
         double cursorY = ClientTop;
@@ -1016,7 +1027,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             cursorY += GetFlexItemOuterHeight(child) + rowGap;
         }
 
-        if (!moved)
+        // An item the stretch made taller moves nothing when it is the last one, but the
+        // container still has to grow around it.
+        if (!moved && !itemHeightsChanged)
             return;
 
         cursorY -= rowGap;   // the trailing gap the loop added after the last item
@@ -2130,21 +2143,32 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         Math.Max(0, child.ActualBottom - child.Location.Y)
         + child.ActualMarginTop + child.ActualMarginBottom;
 
-    private void ApplyFlexColumnInlineAxisAlignment(ILayoutEnvironment g)
+    /// <summary>
+    /// CSS Flexbox §8.3 and §9.4 step 11 on a column container's cross (inline) axis: stretches
+    /// each item that asks for it to the container's width and aligns the others.
+    /// </summary>
+    /// <returns>
+    /// Whether stretching changed an item's height, which leaves the items after it where line
+    /// layout stacked them at the old height; <see cref="ApplyFlexColumnMainAxisSizing"/> then
+    /// rebuilds the stack.
+    /// </returns>
+    private bool ApplyFlexColumnInlineAxisAlignment(ILayoutEnvironment g)
     {
         if (!IsFlexContainer())
-            return;
+            return false;
 
         string direction = FlexDirection?.Trim().ToLowerInvariant() ?? "row";
         if (direction is not ("column" or "column-reverse"))
-            return;
+            return false;
 
         double contentWidth = Math.Max(0, Size.Width
             - ActualBorderLeftWidth - ActualBorderRightWidth
             - ActualPaddingLeft - ActualPaddingRight);
 
         if (contentWidth <= 0)
-            return;
+            return false;
+
+        bool heightsChanged = false;
 
         foreach (var child in Boxes)
         {
@@ -2176,6 +2200,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 double stretchedOuterWidth = contentWidth;
                 double left = child.Location.X;
                 double top = child.Location.Y;
+                double outerHeight = GetFlexItemOuterHeight(child);
 
                 LayoutFlexItemAtTargetWidth(g, child, stretchedOuterWidth);
 
@@ -2185,6 +2210,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     child.OffsetLeft(dxBack);
                 if (Math.Abs(dyBack) > 0.1)
                     child.OffsetTop(dyBack);
+
+                // Its height can change with its width: an image given `width: 100%` of the
+                // anonymous block wrapping it, or a box with an `aspect-ratio`, is as tall as its
+                // width allows, and it had none while line layout stacked it.
+                heightsChanged |= Math.Abs(GetFlexItemOuterHeight(child) - outerHeight) > 0.5;
 
                 continue;
             }
@@ -2205,6 +2235,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (Math.Abs(dx) > 0.5)
                 child.OffsetLeft(dx);
         }
+
+        return heightsChanged;
     }
 
     /// <summary>
