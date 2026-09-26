@@ -960,7 +960,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     /// <returns>
     /// <see langword="false"/> when no item's target differs from the height block flow already
-    /// gave it, so the caller can leave the stack exactly as it stands.
+    /// gave it and no item has moved or changed height since, so the caller can leave the stack
+    /// exactly as it stands.
     /// </returns>
     /// <remarks>
     /// <para>
@@ -980,13 +981,25 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// column flex item on the web has — asks it to, and no further than its own content.
     /// </para>
     /// <para>
-    /// That clamp is applied twice, and both are load-bearing: to the base size, giving §9.4
-    /// step 3's hypothetical main size that free space is measured from, and again to each
-    /// distributed target (§9.7 step 4). Clamping only the shrink branch is not enough — an item
-    /// that takes no share at all still has a minimum and a maximum. <c>flex-basis: 0</c> with a
-    /// 100px child in a 10px container (<c>flex-minimum-height-flex-items-011</c>) is floored at
-    /// its content either way, and <c>max-height: min-content</c> over a <c>flex-basis: 200px</c>
+    /// That clamp is applied to the base size, giving §9.4 step 3's hypothetical main size that
+    /// free space is measured from, and again to each distributed target (§9.7 step 4). Both are
+    /// load-bearing: an item that takes no share at all still has a minimum and a maximum.
+    /// <c>flex-basis: 0</c> with a 100px child in a 10px container
+    /// (<c>flex-minimum-height-flex-items-011</c>) is floored at its content either way, and
+    /// <c>max-height: min-content</c> over a <c>flex-basis: 200px</c>
     /// (<c>flex-item-max-height-min-content</c>) is capped at it.
+    /// </para>
+    /// <para>
+    /// The second clamp is why distributing is a loop. When it holds an item at a limit, the
+    /// height the item could not give or take is left over. So after each pass some items are
+    /// frozen at their clamped heights: those held at a minimum if clamping added height overall,
+    /// those held at a maximum if it removed height, and all of them if it did neither. The pass
+    /// then repeats for the unfrozen items, with the free space measured from the frozen ones'
+    /// clamped heights. Every pass but the last freezes at least one item, and each item's content
+    /// size is measured once however many passes read it, so the extra passes lay nothing out.
+    /// This used to stop after the first pass: a 150px column of three 100px items, the first
+    /// with <c>min-height: 90px</c>, gave them 90, 50 and 50px and overflowed by 40px, where
+    /// browsers give 90, 30 and 30.
     /// </para>
     /// </remarks>
     private bool ResolveFlexColumnMainSizes(
@@ -995,64 +1008,109 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         int count = items.Count;
         targets = new double[count];
 
+        // Where block flow left each item. Reading an item's content size below lays it out again
+        // at that size, and block flow then restacks the items after it.
+        var laidOutTops = new double[count];
+        var laidOutHeights = new double[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            laidOutTops[i] = items[i].Location.Y;
+            laidOutHeights[i] = GetFlexItemOuterHeight(items[i]);
+        }
+
         // The §4.5 content size suggestion, memoized: reading it re-lays an item out, and each is
-        // read by both clamps below.
+        // read by every clamp below.
         var contentHeights = new double?[count];
+        var bases = new double[count];
         double usedOuterHeight = 0;
 
         for (int i = 0; i < count; i++)
         {
-            targets[i] = ClampFlexColumnItemOuterHeight(
+            bases[i] = ClampFlexColumnItemOuterHeight(
                 g, items[i], ResolveFlexItemBaseOuterHeight(items[i], mainSize), mainSize, ref contentHeights[i]);
 
-            usedOuterHeight += targets[i];
+            targets[i] = bases[i];
+            usedOuterHeight += bases[i];
         }
 
-        double freeSpace = mainSize - usedOuterHeight - Math.Max(0, count - 1) * rowGap;
+        double available = mainSize - Math.Max(0, count - 1) * rowGap;
+        double freeSpace = available - usedOuterHeight;
 
-        if (freeSpace > 0.5)
+        if (Math.Abs(freeSpace) > 0.5)
         {
-            double growTotal = 0;
-
-            foreach (var child in items)
-                growTotal += ParseFlexFactor(child.FlexGrow, 0);
-
-            if (growTotal > 0)
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    targets[i] = ClampFlexColumnItemOuterHeight(
-                        g, items[i],
-                        targets[i] + freeSpace * (ParseFlexFactor(items[i].FlexGrow, 0) / growTotal),
-                        mainSize, ref contentHeights[i]);
-                }
-            }
-        }
-        else if (freeSpace < -0.5)
-        {
-            // §9.7 step 2: the shrink factor is scaled by the base size, so a large item gives up
-            // more of the overflow than a small one with the same `flex-shrink`.
-            double shrinkTotal = 0;
+            bool growing = freeSpace > 0;
+            var weights = new double[count];
+            var frozen = new bool[count];
+            var violations = new double[count];
 
             for (int i = 0; i < count; i++)
-                shrinkTotal += ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, targets[i]);
-
-            if (shrinkTotal > 0)
             {
+                // §9.7: the shrink factor is scaled by the base size, so a large item gives up
+                // more of the overflow than a small one with the same `flex-shrink`.
+                weights[i] = growing
+                    ? ParseFlexFactor(items[i].FlexGrow, 0)
+                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, bases[i]);
+
+                // §9.7 step 3: an item with no share to take keeps its hypothetical main size.
+                frozen[i] = weights[i] <= 0;
+            }
+
+            for (int pass = 0; pass < count; pass++)
+            {
+                double remaining = available;
+                double weightTotal = 0;
+
                 for (int i = 0; i < count; i++)
                 {
-                    double share = (ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, targets[i])) / shrinkTotal;
+                    remaining -= frozen[i] ? targets[i] : bases[i];
+
+                    if (!frozen[i])
+                        weightTotal += weights[i];
+                }
+
+                if (weightTotal <= 0)
+                    break;
+
+                double totalViolation = 0;
+
+                for (int i = 0; i < count; i++)
+                {
+                    if (frozen[i])
+                        continue;
+
+                    double target = bases[i] + remaining * (weights[i] / weightTotal);
 
                     targets[i] = ClampFlexColumnItemOuterHeight(
-                        g, items[i], targets[i] + freeSpace * share, mainSize, ref contentHeights[i]);
+                        g, items[i], target, mainSize, ref contentHeights[i]);
+                    violations[i] = targets[i] - target;
+                    totalViolation += violations[i];
+                }
+
+                if (Math.Abs(totalViolation) < 0.01)
+                    break;
+
+                for (int i = 0; i < count; i++)
+                {
+                    if (!frozen[i] && (totalViolation > 0 ? violations[i] > 0 : violations[i] < 0))
+                        frozen[i] = true;
                 }
             }
         }
 
+        // A measured item's target can equal the content height it was measured at, which is
+        // where an item held at its automatic minimum ends. The stack has still changed then: it is
+        // block flow's restack after the measurement, without the gaps between the items.
         for (int i = 0; i < count; i++)
         {
-            if (Math.Abs(targets[i] - GetFlexItemOuterHeight(items[i])) > 0.5)
+            double height = GetFlexItemOuterHeight(items[i]);
+
+            if (Math.Abs(targets[i] - height) > 0.5
+                || Math.Abs(height - laidOutHeights[i]) > 0.5
+                || Math.Abs(items[i].Location.Y - laidOutTops[i]) > 0.1)
+            {
                 return true;
+            }
         }
 
         return false;
@@ -1543,6 +1601,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </remarks>
     private void ResolveFlexColumnLineItemSizes(ILayoutEnvironment g, FlexColumnLine line, double lineMain, double rowGap)
     {
+        // The heights block flow gave the items, which is what a re-layout without a pinned height
+        // gives them again. Measuring an item's content lays it out at its content height, so an
+        // item whose target is that height still needs it pinned when it is stretched.
+        var laidOutHeights = new double[line.Items.Count];
+
+        for (int i = 0; i < line.Items.Count; i++)
+            laidOutHeights[i] = GetFlexItemOuterHeight(line.Items[i]);
+
         bool flexes = ResolveFlexColumnMainSizes(g, line.Items, lineMain, rowGap, out double[] targets);
         double mainSize = 0;
 
@@ -1552,8 +1618,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             double? targetHeight = null;
             double? targetWidth = null;
 
-            if (flexes && Math.Abs(targets[i] - GetFlexItemOuterHeight(child)) > 0.5)
+            if (flexes && (Math.Abs(targets[i] - GetFlexItemOuterHeight(child)) > 0.5
+                           || Math.Abs(targets[i] - laidOutHeights[i]) > 0.5))
+            {
                 targetHeight = Math.Max(0, targets[i]);
+            }
 
             if (ShouldStretchFlexColumnItemAcrossLine(child, line.CrossSize))
                 targetWidth = line.CrossSize;
