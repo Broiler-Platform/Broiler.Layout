@@ -29,7 +29,20 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         public CssBox Box { get; init; }
         public double Grow { get; init; }
         public double Shrink { get; init; }
-        public double BaseOuterWidth { get; init; }
+
+        /// <summary>
+        /// The item's flex base size as an outer width (CSS Flexbox §9.2 step 3), before its min
+        /// and max widths clamp it. §9.7 distributes a line's free space from this.
+        /// </summary>
+        public double FlexBaseOuterWidth { get; init; }
+
+        /// <summary>
+        /// The item's hypothetical main size as an outer width: its flex base size clamped by its
+        /// min and max widths. Lines are broken by this, and whether a line grows or shrinks is
+        /// decided by it (§9.3, §9.7 step 1).
+        /// </summary>
+        public double HypotheticalOuterWidth { get; init; }
+
         public double TargetOuterWidth { get; set; }
 
         /// <summary>
@@ -44,7 +57,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private sealed class FlexLineLayout
     {
         public List<FlexItemLayout> Items { get; } = [];
-        public double BaseOuterWidth { get; set; }
+        public double HypotheticalOuterWidth { get; set; }
         public double CrossSize { get; set; }
     }
 
@@ -225,18 +238,24 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             double? itemCrossContentHeight =
                 ResolveFlexItemDefiniteCrossContentHeight(child, definiteContentHeight);
 
+            double margins = child.ActualMarginLeft + child.ActualMarginRight;
+            double flexBase = ResolveFlexItemFlexBaseBorderBoxWidth(
+                child, contentWidth, itemCrossContentHeight);
+
             var item = new FlexItemLayout
             {
                 Box = child,
                 Grow = ParseFlexFactor(child.FlexGrow, 0),
                 Shrink = ParseFlexFactor(child.FlexShrink, 1),
                 DefiniteCrossContentHeight = itemCrossContentHeight,
-                BaseOuterWidth = ResolveFlexItemBaseOuterWidth(child, contentWidth, itemCrossContentHeight)
+                FlexBaseOuterWidth = flexBase + margins,
+                HypotheticalOuterWidth = margins + ClampFlexItemBorderBoxWidth(
+                    child, flexBase, contentWidth, itemCrossContentHeight),
             };
 
-            item.TargetOuterWidth = item.BaseOuterWidth;
+            item.TargetOuterWidth = item.HypotheticalOuterWidth;
 
-            double candidateWidth = currentLine.BaseOuterWidth + item.BaseOuterWidth
+            double candidateWidth = currentLine.HypotheticalOuterWidth + item.HypotheticalOuterWidth
                 + (currentLine.Items.Count > 0 ? columnGap : 0);
 
             if (wrap && currentLine.Items.Count > 0 && candidateWidth > contentWidth + 0.5)
@@ -246,7 +265,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             }
 
             currentLine.Items.Add(item);
-            currentLine.BaseOuterWidth += item.BaseOuterWidth;
+            currentLine.HypotheticalOuterWidth += item.HypotheticalOuterWidth;
         }
 
         if (currentLine.Items.Count > 0 || lines.Count == 0)
@@ -399,7 +418,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         child.Display != CssConstants.None
         && child.Position is not (CssConstants.Absolute or CssConstants.Fixed);
 
-    private static double ResolveFlexItemBaseOuterWidth(
+    /// <summary>
+    /// CSS Flexbox §9.2 step 3: an item's flex base size, as a border-box width, before its min and
+    /// max widths clamp it into its hypothetical main size.
+    /// </summary>
+    private static double ResolveFlexItemFlexBaseBorderBoxWidth(
         CssBox child, double containerContentWidth, double? definiteCrossContentHeight)
     {
         double borderBoxWidth;
@@ -439,9 +462,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             borderBoxWidth = preferred + child.ActualBorderLeftWidth + child.ActualBorderRightWidth;
         }
 
-        borderBoxWidth = ClampFlexItemBorderBoxWidth(
-            child, borderBoxWidth, containerContentWidth, definiteCrossContentHeight);
-        return borderBoxWidth + child.ActualMarginLeft + child.ActualMarginRight;
+        return Math.Max(0, borderBoxWidth);
     }
 
     /// <summary>
@@ -715,11 +736,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
-    /// CSS Flexbox §9.7 over one row flex line: grows or shrinks its items from their hypothetical
-    /// main sizes into the container's content width, in proportion to their flex factors, with
-    /// each held within its own minimum and maximum width.
+    /// CSS Flexbox §9.7 over one row flex line: grows or shrinks its items from their flex base
+    /// sizes into the container's content width, in proportion to their flex factors, with each
+    /// held within its own minimum and maximum width.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Free space is handed out from each item's flex base size, before its min and max widths
+    /// clamp it. The clamped size, the hypothetical main size, decides only whether the line grows
+    /// or shrinks. An item the clamp alone has already carried the way the line flexes is frozen
+    /// at its hypothetical main size from the start (§9.7 step 3): one a growing line's item is
+    /// held down to by its maximum, or a shrinking line's item is held up to by its minimum.
+    /// Starting every item from its hypothetical main size instead made two <c>flex: 1</c> items
+    /// in a 300px row, one holding a 120px box, 206 and 94px wide: the first grew from its 120px
+    /// minimum rather than from 0, where browsers make both 150.
+    /// </para>
     /// <para>
     /// Holding an item within its limits is why this is a loop. When the distribution takes an
     /// item below its minimum or past its maximum, the item is clamped to that limit (§9.7 step 4),
@@ -752,20 +783,28 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             return;
 
         double available = contentWidth - Math.Max(0, itemCount - 1) * columnGap;
-        double freeSpace = available - line.BaseOuterWidth;
+        double freeSpace = available - line.HypotheticalOuterWidth;
 
         if (Math.Abs(freeSpace) <= 0.5)
             return;
 
         bool growing = freeSpace > 0;
 
-        // §9.7 step 3: an item with no share to take, because its flex factor is zero or, when
-        // shrinking, its base size is, keeps its hypothetical main size, the target it starts with.
+        // §9.7 step 3: an item keeps its hypothetical main size, the target it starts with, when it
+        // has no share to take (its flex factor is zero or, when shrinking, its flex base size is),
+        // or when its min or max width has already clamped it the way the line flexes.
         var frozen = new bool[itemCount];
         var violations = new double[itemCount];
 
         for (int i = 0; i < itemCount; i++)
-            frozen[i] = FlexWeight(line.Items[i], growing) <= 0;
+        {
+            var item = line.Items[i];
+
+            frozen[i] = FlexWeight(item, growing) <= 0
+                || (growing
+                    ? item.FlexBaseOuterWidth > item.HypotheticalOuterWidth + 0.01
+                    : item.FlexBaseOuterWidth < item.HypotheticalOuterWidth - 0.01);
+        }
 
         for (int pass = 0; pass < itemCount; pass++)
         {
@@ -775,7 +814,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             for (int i = 0; i < itemCount; i++)
             {
                 var item = line.Items[i];
-                remaining -= frozen[i] ? item.TargetOuterWidth : item.BaseOuterWidth;
+                remaining -= frozen[i] ? item.TargetOuterWidth : item.FlexBaseOuterWidth;
 
                 if (!frozen[i])
                     weightTotal += FlexWeight(item, growing);
@@ -793,7 +832,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
                 var item = line.Items[i];
                 double share = FlexWeight(item, growing) / weightTotal;
-                double target = item.BaseOuterWidth + remaining * share;
+                double target = item.FlexBaseOuterWidth + remaining * share;
                 double marginWidth = item.Box.ActualMarginLeft + item.Box.ActualMarginRight;
                 double unclamped = target - marginWidth;
                 double clamped = ClampFlexItemBorderBoxWidth(
@@ -821,11 +860,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>
     /// An item's share of its line's free space, relative to the other items' (CSS Flexbox §9.7):
     /// its <c>flex-grow</c> when the line grows, and when it shrinks its <c>flex-shrink</c> scaled
-    /// by its base size, so a large item gives up more of an overflow than a small one with the
-    /// same factor.
+    /// by its flex base size, so a large item gives up more of an overflow than a small one with
+    /// the same factor.
     /// </summary>
     private static double FlexWeight(FlexItemLayout item, bool growing) =>
-        growing ? item.Grow : item.Shrink * Math.Max(0, item.BaseOuterWidth);
+        growing ? item.Grow : item.Shrink * Math.Max(0, item.FlexBaseOuterWidth);
 
     /// <summary>
     /// The column flex passes that follow line layout, which stacks a <c>column</c> container's
@@ -997,8 +1036,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// column flex item on the web has — asks it to, and no further than its own content.
     /// </para>
     /// <para>
-    /// That clamp is applied to the base size, giving §9.4 step 3's hypothetical main size that
-    /// free space is measured from, and again to each distributed target (§9.7 step 4). Both are
+    /// That clamp is applied to the base size, giving §9.4 step 3's hypothetical main size, and
+    /// again to each distributed target (§9.7 step 4). The hypothetical main sizes decide whether
+    /// the line grows or shrinks, but the free space is handed out from the flex base sizes, before
+    /// the clamp; an item the clamp alone has already carried the way the line flexes is frozen at
+    /// its hypothetical main size from the start (§9.7 step 3). Starting from the hypothetical
+    /// sizes gave two <c>flex: 1</c> items in a 300px column, the first with
+    /// <c>min-height: 100px</c>, 192 and 108px, where browsers make both 150. Both clamps are
     /// load-bearing: an item that takes no share at all still has a minimum and a maximum.
     /// <c>flex-basis: 0</c> with a 100px child in a 10px container
     /// (<c>flex-minimum-height-flex-items-011</c>) is floored at its content either way, and
@@ -1038,16 +1082,18 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // The §4.5 content size suggestion, memoized: reading it re-lays an item out, and each is
         // read by every clamp below.
         var contentHeights = new double?[count];
-        var bases = new double[count];
+        var flexBases = new double[count];
+        var hypothetical = new double[count];
         double usedOuterHeight = 0;
 
         for (int i = 0; i < count; i++)
         {
-            bases[i] = ClampFlexColumnItemOuterHeight(
-                g, items[i], ResolveFlexItemBaseOuterHeight(items[i], mainSize), mainSize, ref contentHeights[i]);
+            flexBases[i] = ResolveFlexItemBaseOuterHeight(items[i], mainSize);
+            hypothetical[i] = ClampFlexColumnItemOuterHeight(
+                g, items[i], flexBases[i], mainSize, ref contentHeights[i]);
 
-            targets[i] = bases[i];
-            usedOuterHeight += bases[i];
+            targets[i] = hypothetical[i];
+            usedOuterHeight += hypothetical[i];
         }
 
         double available = mainSize - Math.Max(0, count - 1) * rowGap;
@@ -1062,14 +1108,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             for (int i = 0; i < count; i++)
             {
-                // §9.7: the shrink factor is scaled by the base size, so a large item gives up
+                // §9.7: the shrink factor is scaled by the flex base size, so a large item gives up
                 // more of the overflow than a small one with the same `flex-shrink`.
                 weights[i] = growing
                     ? ParseFlexFactor(items[i].FlexGrow, 0)
-                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, bases[i]);
+                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, flexBases[i]);
 
-                // §9.7 step 3: an item with no share to take keeps its hypothetical main size.
-                frozen[i] = weights[i] <= 0;
+                // §9.7 step 3: an item keeps its hypothetical main size when it has no share to
+                // take, or when its min or max height has already clamped it the way the line
+                // flexes.
+                frozen[i] = weights[i] <= 0
+                    || (growing
+                        ? flexBases[i] > hypothetical[i] + 0.01
+                        : flexBases[i] < hypothetical[i] - 0.01);
             }
 
             for (int pass = 0; pass < count; pass++)
@@ -1079,7 +1130,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
                 for (int i = 0; i < count; i++)
                 {
-                    remaining -= frozen[i] ? targets[i] : bases[i];
+                    remaining -= frozen[i] ? targets[i] : flexBases[i];
 
                     if (!frozen[i])
                         weightTotal += weights[i];
@@ -1095,7 +1146,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     if (frozen[i])
                         continue;
 
-                    double target = bases[i] + remaining * (weights[i] / weightTotal);
+                    double target = flexBases[i] + remaining * (weights[i] / weightTotal);
 
                     targets[i] = ClampFlexColumnItemOuterHeight(
                         g, items[i], target, mainSize, ref contentHeights[i]);
