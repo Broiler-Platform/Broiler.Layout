@@ -26,6 +26,16 @@ internal sealed class CssBoxImage : CssBox
 
     public object Image => _imageWord.Image;
 
+    /// <summary>
+    /// Whether this image is block-level: <c>display: block</c> as declared, or as blockification
+    /// leaves a flex or grid item. By the time it is laid out its <c>display</c> may read
+    /// <c>inline</c>, because the box fix-up that follows blockification wraps such an image in an
+    /// anonymous block and makes it inline there; see
+    /// <see cref="FlexGridItemBlockification.Generate"/>, which records this before that happens,
+    /// and <c>CssLayoutEngine.BlockLevelImageOf</c>, which reads it.
+    /// </summary>
+    internal bool IsBlockLevel { get; set; }
+
     internal override void MeasureWordsSize(ILayoutEnvironment g)
     {
         if (!_wordsSizeMeasured)
