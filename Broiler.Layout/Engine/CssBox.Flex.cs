@@ -68,8 +68,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// than once per render. Boxes whose <c>order</c> is absent or not an integer count as 0, the
     /// initial value.
     /// </para>
+    /// <para>
+    /// A container reaches its children's layout by two routes, and both sort here first: a
+    /// block-level one through <see cref="LayoutBlockChildren"/>, and one laid out as an atomic
+    /// inline-level box (an <c>inline-flex</c> or <c>inline-grid</c> one, or a flex or grid
+    /// container that is itself an item laid out that way) through
+    /// <c>CssLayoutEngine.FlowInlineBlock</c>.
+    /// </para>
     /// </remarks>
-    private void ApplyOrderModifiedDocumentOrder()
+    internal void ApplyOrderModifiedDocumentOrder()
     {
         if (Boxes.Count < 2)
             return;
