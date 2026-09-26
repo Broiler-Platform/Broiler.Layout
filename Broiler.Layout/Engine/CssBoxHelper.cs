@@ -356,6 +356,14 @@ internal static class CssBoxHelper
             if (box.Words.Count > 0 && !box.Words[^1].HasSpaceAfter)
                 maxSum -= box.Words[^1].ActualWordSpacing;
         }
+        else if (box.TryGetFlexRowIntrinsicContentWidths(out double flexMin, out double flexMax))
+        {
+            // CSS Flexbox §9.9.1: a row flex container's items sit side by side on this box's line,
+            // so their widths add up. Walked as children below, each blockified item would start a
+            // line of its own and the row would measure as its widest item.
+            maxSum += flexMax;
+            min = Math.Max(min, paddingSum + flexMin);
+        }
         else
         {
             // A table row's cells sit side by side and nothing wraps between them, so its minimum is
