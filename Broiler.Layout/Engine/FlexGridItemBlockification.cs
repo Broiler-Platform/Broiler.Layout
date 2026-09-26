@@ -60,6 +60,22 @@ internal static class FlexGridItemBlockification
         SvgForeignObjectBoxes.Generate(root);
 
         Blockify(root);
+
+        // Driven from here too, and it has to run exactly here: after blockification, which is what
+        // makes an image that is a column flex item or a grid item block-level, and before the next
+        // fix-up, `DomParser.CorrectImgBoxes`, rewrites every block-level image's display to inline
+        // (see CssLayoutEngine.BlockLevelImageOf for why that is). Idempotent: it only ever sets
+        // the flag, so a later run over a tree whose images now read inline leaves them marked.
+        MarkBlockLevelImages(root);
+    }
+
+    private static void MarkBlockLevelImages(CssBox box)
+    {
+        if (box is CssBoxImage image && image.Display == CssConstants.Block)
+            image.IsBlockLevel = true;
+
+        foreach (var child in box.Boxes)
+            MarkBlockLevelImages(child);
     }
 
     private static void Blockify(CssBox box)

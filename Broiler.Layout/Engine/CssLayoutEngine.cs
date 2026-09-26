@@ -597,6 +597,11 @@ internal static class CssLayoutEngine
         if (blockBox.ActualLineHeight > 0 && !hasExplicitHeight && hasInlineContent)
             maxBottom = Math.Max(maxBottom, starty + blockBox.ActualLineHeight);
 
+        // The anonymous block a block-level image is wrapped in has no line box of its own to hold a
+        // strut: the image sits at its top, and it ends where the image's margin box does.
+        if (BlockLevelImageOf(blockBox) is { } blockLevelImage)
+            maxBottom = PlaceBlockLevelImage(blockBox, blockLevelImage, starty, maxBottom);
+
         blockBox.ActualBottom = maxBottom + blockBox.ActualPaddingBottom + blockBox.ActualBorderBottomWidth;
 
         // CSS2.1 §10.6.3: When height is not 'auto', the used value is the
@@ -2176,6 +2181,85 @@ internal static class CssLayoutEngine
     {
         double margin = word.OwnerBox?.ActualMarginBottom ?? 0;
         return double.IsNaN(margin) ? 0 : margin;
+    }
+
+    /// <summary>
+    /// The block-level image <paramref name="blockBox"/> exists to position, when it is the
+    /// anonymous block the box fix-up wraps one in; otherwise null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Block flow here cannot position a block-level replaced box, so the box fix-up
+    /// (<c>DomParser.CorrectImgBoxes</c>, in Broiler.HTML) wraps each <c>display: block</c> image
+    /// that is not a row flex item in an anonymous block and makes the image inline inside it. That
+    /// is an image declared <c>display: block</c>, as most CSS resets declare every image, and every
+    /// image that is a column flex item or a grid item, which blockification makes block-level.
+    /// Inline, the image was laid out on a line of its own, and a line has a strut (CSS2.1 §10.8):
+    /// the image stood on the strut's baseline, so the wrapper ended the strut's descent below it,
+    /// 3.8px at a 16px font, and an image shorter than the strut's ascent was pushed down as well.
+    /// A block-level box is on no line. Browsers put the next box directly below the image, and a
+    /// 10px image takes 10px.
+    /// </para>
+    /// <para>
+    /// An inline image alone in an anonymous block looks the same from here: the block-inside-inline
+    /// correction wraps the image of <c>&lt;div&gt;&lt;img&gt;&lt;div&gt;</c> that way, and there the
+    /// strut is right, as browsers leave the descent below an inline image. So the image carries
+    /// whether it was block-level (<see cref="CssBoxImage.IsBlockLevel"/>), recorded before the
+    /// fix-up rewrote its <c>display</c>. A floated or absolutely positioned image is on no line of
+    /// the wrapper's, and is left alone.
+    /// </para>
+    /// </remarks>
+    private static CssBoxImage? BlockLevelImageOf(CssBox blockBox) =>
+        blockBox.HtmlTag == null
+        && blockBox.Display == CssConstants.Block
+        && blockBox.Boxes.Count == 1
+        && blockBox.Boxes[0] is CssBoxImage { IsBlockLevel: true } image
+        && image.Float == CssConstants.None
+        && image.Position is not (CssConstants.Absolute or CssConstants.Fixed)
+            ? image
+            : null;
+
+    /// <summary>
+    /// Places a block-level image at the top of the anonymous block that wraps it, below its own top
+    /// margin, and returns the bottom of its margin box, which is where the wrapper's content ends.
+    /// Returns <paramref name="bottom"/> and moves nothing if no line of the wrapper holds the image.
+    /// </summary>
+    private static double PlaceBlockLevelImage(CssBox blockBox, CssBoxImage image, double top, double bottom)
+    {
+        foreach (var line in blockBox.LineBoxes)
+        {
+            if (!line.Rectangles.TryGetValue(image, out RectangleF rect))
+                continue;
+
+            var word = image.Words[0];
+            double flowedTop = word.Top;
+            word.Top = top + ImageWordMarginTop(word);
+
+            // As the flow does for every word: in paged media, an image that would straddle a page
+            // break starts the next page instead.
+            if (!blockBox.IsFixed)
+                word.BreakPage();
+
+            double shift = word.Top - flowedTop;
+            var placed = new RectangleF(rect.X, (float)(rect.Y + shift), rect.Width, rect.Height);
+            line.Rectangles[image] = placed;
+            image.Rectangles[line] = placed;
+
+            // Baseline alignment gives an image it moves a position of its own
+            // (CssLineBox.SetBaseLine), and the geometry handed to script takes that in preference
+            // to the image's line rectangle. It is stale now the image is back at the top, so it
+            // goes: the image is placed by its line rectangle alone, as every image that alignment
+            // leaves where it is already is.
+            if (image.Size.Height != 0)
+            {
+                image.Location = new PointF(image.Location.X, placed.Y);
+                image.Size = SizeF.Empty;
+            }
+
+            return word.Bottom + ImageWordMarginBottom(word);
+        }
+
+        return bottom;
     }
 
     /// <summary>
