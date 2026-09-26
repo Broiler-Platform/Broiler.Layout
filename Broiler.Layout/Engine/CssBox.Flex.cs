@@ -596,6 +596,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double containerContentWidth,
         double? definiteCrossContentHeight)
     {
+        // The definite maximum, which caps the automatic minimum below too. An intrinsic keyword
+        // does not count: it is no length, and parsing one as 0 would cap the minimum at nothing.
+        double? definiteMaxBorderBoxWidth = null;
+
         if (!string.IsNullOrEmpty(child.MaxWidth) && !child.MaxWidth.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
             double length = ParseFlexLengthOrZero(child, child.MaxWidth, containerContentWidth);
@@ -603,6 +607,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (borderBoxWidth > maxWidth)
                 borderBoxWidth = maxWidth;
+
+            if (!IsIntrinsicSizingWidthKeyword(child.MaxWidth))
+                definiteMaxBorderBoxWidth = maxWidth;
         }
 
         bool useAutomaticMinWidth = !child.IsMinWidthSpecified || child.MinWidth.Equals("auto", StringComparison.OrdinalIgnoreCase);
@@ -662,6 +669,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (!double.IsNaN(minContentWidth) && minContentWidth > 0)
             {
                 double minBorderBoxWidth = minContentWidth + child.ActualBorderLeftWidth + child.ActualBorderRightWidth;
+
+                // §4.5 again: the content-based minimum is further clamped by the maximum main
+                // size when that is definite. Applied after the maximum, the minimum overrode it:
+                // content wider than an item's `max-width` widened the item instead of overflowing
+                // it, and an `<img>` with `max-width: 100%` in a narrower row kept its bitmap's
+                // width.
+                if (definiteMaxBorderBoxWidth is { } cap && minBorderBoxWidth > cap)
+                    minBorderBoxWidth = cap;
 
                 if (borderBoxWidth < minBorderBoxWidth)
                     borderBoxWidth = minBorderBoxWidth;
@@ -1272,6 +1287,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         double ContentHeight() => measured ??= MeasureFlexColumnItemContentBorderBoxHeight(g, child);
 
+        // The maximum, which caps the automatic minimum below too.
+        double? maxBorderBoxHeight = null;
+
         if (!string.IsNullOrEmpty(child.MaxHeight) && !child.MaxHeight.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
             // An intrinsic `max-height` is a content measurement, not a length: parsing it as one
@@ -1283,6 +1301,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (borderBoxHeight > maxHeight)
                 borderBoxHeight = maxHeight;
+
+            maxBorderBoxHeight = maxHeight;
         }
 
         bool useAutomaticMinHeight =
@@ -1317,6 +1337,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             {
                 minBorderBoxHeight = specified;
             }
+
+            // §4.5 caps the content-based minimum by the maximum main size. The content height
+            // measured through block layout is within `max-height` already, but a replaced item's
+            // natural height is read past it: an image held at 100px by its maximum still counted
+            // at its 150px bitmap here, and the items beside it were left that much less room.
+            if (maxBorderBoxHeight is { } cap && minBorderBoxHeight > cap)
+                minBorderBoxHeight = cap;
 
             if (borderBoxHeight < minBorderBoxHeight)
                 borderBoxHeight = minBorderBoxHeight;
