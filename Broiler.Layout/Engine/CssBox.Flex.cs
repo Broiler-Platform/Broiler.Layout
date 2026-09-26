@@ -807,7 +807,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     /// <summary>
     /// CSS Flexbox §9.7: distributes a <c>column</c> flex container's free space along its main
-    /// (block) axis, growing its items into what is left over and shrinking them into what is not.
+    /// (block) axis, growing its items into what is left over and shrinking them into what is not,
+    /// and places its <c>row-gap</c> between each two items.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -817,13 +818,20 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// This is the resolve-flexible-lengths step over that stack, applied afterwards.
     /// </para>
     /// <para>
-    /// It runs only when the container's main size is <b>definite</b>, which per §9.2 means a
+    /// It flexes only when the container's main size is <b>definite</b>, which per §9.2 means a
     /// specified <c>height</c> (then clamped by <c>min-height</c>/<c>max-height</c>) or a block
     /// size the box's own inset pair solves for — not a <c>min-height</c> alone. The distinction
     /// is exactly what css-flexbox/percentage-heights-003 pins: its <c>height: 0;
     /// min-height: 100%</c> containers flex their items to the clamped 100px, and its
     /// <c>min-height: 100%</c>-only containers, whose main size stays content-based, leave them at
     /// zero.
+    /// </para>
+    /// <para>
+    /// The row gap is placed either way. Block flow stacks the items touching, and the stack this
+    /// pass rebuilds was the only place a gap went in, so a column that flexed nothing, and every
+    /// column of <c>height: auto</c>, had none: three 16px items with a 10px row gap sat at 0, 16
+    /// and 32 in a 48px container, where browsers put them at 0, 26 and 52 in a 68px one. A
+    /// percentage gap resolves against the definite main size, and against zero without one.
     /// </para>
     /// <para>
     /// Each flexed item is laid out again at its target height rather than resized in place,
@@ -848,9 +856,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (IsVerticalWritingMode(WritingMode))
             return;
 
-        if (TryGetDefiniteMainAxisContentHeight() is not { } mainSize)
-            return;
-
+        double? mainSize = TryGetDefiniteMainAxisContentHeight();
         var items = new List<CssBox>();
 
         foreach (var child in Boxes)
@@ -864,9 +870,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (items.Count == 0)
             return;
 
-        double rowGap = ResolveFlexGap(RowGap, mainSize);
+        double rowGap = ResolveFlexGap(RowGap, mainSize ?? 0);
+        double[]? targets = null;
 
-        if (!ResolveFlexColumnMainSizes(g, items, mainSize, rowGap, out var targets))
+        bool flexes = mainSize is { } definiteMainSize
+            && ResolveFlexColumnMainSizes(g, items, definiteMainSize, rowGap, out targets);
+
+        if (!flexes && (rowGap <= 0 || items.Count < 2))
             return;
 
         double cursorY = ClientTop;
@@ -876,15 +886,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         {
             var child = items[i];
 
-            if (Math.Abs(targets[i] - GetFlexItemOuterHeight(child)) > 0.5)
+            if (flexes && Math.Abs(targets![i] - GetFlexItemOuterHeight(child)) > 0.5)
             {
                 LayoutFlexItemAtTargetHeight(g, child, Math.Max(0, targets[i]));
                 moved = true;
             }
 
             // Re-stack from the top even for an item that did not flex: an earlier sibling that
-            // did has moved everything after it.
+            // did has moved everything after it, and so has every gap before it. A relatively
+            // positioned item keeps its offset from the place the stack gives it (CSS2.1 §9.4.3),
+            // which it already carries: moving it to the place alone dropped the offset.
             double top = cursorY + child.ActualMarginTop;
+
+            if (child.Position == CssConstants.Relative)
+                top += CssBoxHelper.GetRelativeOffsetY(child);
+
             double dy = top - child.Location.Y;
 
             if (Math.Abs(dy) > 0.1)
