@@ -714,6 +714,36 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return true;
     }
 
+    /// <summary>
+    /// CSS Flexbox §9.7 over one row flex line: grows or shrinks its items from their hypothetical
+    /// main sizes into the container's content width, in proportion to their flex factors, with
+    /// each held within its own minimum and maximum width.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Holding an item within its limits is why this is a loop. When the distribution takes an
+    /// item below its minimum or past its maximum, the item is clamped to that limit (§9.7 step 4),
+    /// and the width it could not give or take is left over. So after each pass some items are
+    /// frozen at their clamped widths: those held at a minimum if clamping added width overall,
+    /// those held at a maximum if it removed width, and all of them if it did neither. The pass
+    /// then repeats for the unfrozen items, with the free space measured from the frozen ones'
+    /// clamped widths. Every pass but the last freezes at least one item, so there are never more
+    /// passes than items.
+    /// </para>
+    /// <para>
+    /// This used to stop after the first pass, so the width a clamped item left over was never
+    /// passed on. A 24px row holding items 8, 20 and 32px wide at max-content, and 8px each at
+    /// min-content, gave them 3.2, 8 and 12.8px, held the first at its 8px minimum, and overflowed
+    /// by 4.8px; browsers hold the first two at 8px and shrink the third to the 8px left. Growing
+    /// was the same: three <c>flex-grow: 1</c> items in a 200px row, the middle one capped at 30px,
+    /// left 36.7px of the row empty instead of giving it to the other two.
+    /// </para>
+    /// <para>
+    /// Clamping applies whichever way the line flexes: when only shrinking clamped, <c>flex: 1</c>
+    /// grew an item straight past its own <c>max-width</c>, and a <c>max-width: 10px</c> item in a
+    /// 40px row came out 40px wide (css-flexbox/image-as-flexitem-size-005).
+    /// </para>
+    /// </remarks>
     private static void ResolveFlexLineWidths(FlexLineLayout line, double contentWidth, double columnGap)
     {
         int itemCount = line.Items.Count;
@@ -721,61 +751,81 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (itemCount == 0)
             return;
 
-        double gapTotal = Math.Max(0, itemCount - 1) * columnGap;
-        double freeSpace = contentWidth - line.BaseOuterWidth - gapTotal;
+        double available = contentWidth - Math.Max(0, itemCount - 1) * columnGap;
+        double freeSpace = available - line.BaseOuterWidth;
 
-        if (freeSpace > 0.5)
+        if (Math.Abs(freeSpace) <= 0.5)
+            return;
+
+        bool growing = freeSpace > 0;
+
+        // §9.7 step 3: an item with no share to take, because its flex factor is zero or, when
+        // shrinking, its base size is, keeps its hypothetical main size, the target it starts with.
+        var frozen = new bool[itemCount];
+        var violations = new double[itemCount];
+
+        for (int i = 0; i < itemCount; i++)
+            frozen[i] = FlexWeight(line.Items[i], growing) <= 0;
+
+        for (int pass = 0; pass < itemCount; pass++)
         {
-            double growTotal = 0;
+            double remaining = available;
+            double weightTotal = 0;
 
-            foreach (var item in line.Items)
-                growTotal += item.Grow;
-
-            if (growTotal > 0)
+            for (int i = 0; i < itemCount; i++)
             {
-                // §9.7 step 4: every item's target main size is clamped by its used min and max
-                // main sizes, whether the distribution grew it or shrank it. Only the shrink
-                // branch below clamped, so `flex: 1` grew an item straight past its own
-                // `max-width` — a `max-width: 10px` item in a 40px row came out 40px wide
-                // (css-flexbox/image-as-flexitem-size-005).
-                foreach (var item in line.Items)
-                {
-                    double target = item.BaseOuterWidth + freeSpace * (item.Grow / growTotal);
-                    double marginWidth = item.Box.ActualMarginLeft + item.Box.ActualMarginRight;
+                var item = line.Items[i];
+                remaining -= frozen[i] ? item.TargetOuterWidth : item.BaseOuterWidth;
 
-                    item.TargetOuterWidth = marginWidth + ClampFlexItemBorderBoxWidth(
-                        item.Box,
-                        Math.Max(0, target - marginWidth),
-                        contentWidth,
-                        item.DefiniteCrossContentHeight);
-                }
+                if (!frozen[i])
+                    weightTotal += FlexWeight(item, growing);
             }
-        }
-        else if (freeSpace < -0.5)
-        {
-            double shrinkTotal = 0;
 
-            foreach (var item in line.Items)
-                shrinkTotal += item.Shrink * Math.Max(0, item.BaseOuterWidth);
+            if (weightTotal <= 0)
+                return;
 
-            if (shrinkTotal > 0)
+            double totalViolation = 0;
+
+            for (int i = 0; i < itemCount; i++)
             {
-                foreach (var item in line.Items)
-                {
-                    double shrinkShare = (item.Shrink * Math.Max(0, item.BaseOuterWidth)) / shrinkTotal;
-                    double target = item.BaseOuterWidth + freeSpace * shrinkShare;
-                    double marginWidth = item.Box.ActualMarginLeft + item.Box.ActualMarginRight;
-                    double borderBoxWidth = ClampFlexItemBorderBoxWidth(
-                        item.Box,
-                        Math.Max(0, target - marginWidth),
-                        contentWidth,
-                        item.DefiniteCrossContentHeight);
+                if (frozen[i])
+                    continue;
 
-                    item.TargetOuterWidth = borderBoxWidth + marginWidth;
-                }
+                var item = line.Items[i];
+                double share = FlexWeight(item, growing) / weightTotal;
+                double target = item.BaseOuterWidth + remaining * share;
+                double marginWidth = item.Box.ActualMarginLeft + item.Box.ActualMarginRight;
+                double unclamped = target - marginWidth;
+                double clamped = ClampFlexItemBorderBoxWidth(
+                    item.Box,
+                    Math.Max(0, unclamped),
+                    contentWidth,
+                    item.DefiniteCrossContentHeight);
+
+                item.TargetOuterWidth = clamped + marginWidth;
+                violations[i] = clamped - unclamped;
+                totalViolation += violations[i];
+            }
+
+            if (Math.Abs(totalViolation) < 0.01)
+                return;
+
+            for (int i = 0; i < itemCount; i++)
+            {
+                if (!frozen[i] && (totalViolation > 0 ? violations[i] > 0 : violations[i] < 0))
+                    frozen[i] = true;
             }
         }
     }
+
+    /// <summary>
+    /// An item's share of its line's free space, relative to the other items' (CSS Flexbox §9.7):
+    /// its <c>flex-grow</c> when the line grows, and when it shrinks its <c>flex-shrink</c> scaled
+    /// by its base size, so a large item gives up more of an overflow than a small one with the
+    /// same factor.
+    /// </summary>
+    private static double FlexWeight(FlexItemLayout item, bool growing) =>
+        growing ? item.Grow : item.Shrink * Math.Max(0, item.BaseOuterWidth);
 
     /// <summary>
     /// The column flex passes that follow line layout, which stacks a <c>column</c> container's
