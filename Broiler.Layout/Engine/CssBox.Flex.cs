@@ -2059,6 +2059,37 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// Whether this column flex container will lay <paramref name="item"/> out again at its
+    /// stretched width in <see cref="ApplyFlexColumnInlineAxisAlignment"/>, and so through block
+    /// layout.
+    /// </summary>
+    /// <remarks>
+    /// These are the conditions that pass stretches an item on, asked as soon as the item has its
+    /// shrink-to-fit width: it resolves to <c>stretch</c>, its width is <c>auto</c>, neither side
+    /// margin is <c>auto</c>, and its margin box is narrower than this container's content box by
+    /// more than half a pixel. The two have to agree: an item this answers yes for has its own
+    /// column passes left to that layout.
+    /// </remarks>
+    internal bool WillStretchColumnItem(CssBox item)
+    {
+        if (!IsColumnFlexContainer() || !IsInFlowFlexItem(item) || ResolveFlexItemAlignment(item) != "stretch")
+            return false;
+
+        if (!string.IsNullOrEmpty(item.Width) && item.Width != CssConstants.Auto)
+            return false;
+
+        if (item.IsSpecifiedMarginLeftAuto || item.IsSpecifiedMarginRightAuto)
+            return false;
+
+        double contentWidth = Math.Max(0, Size.Width
+            - ActualBorderLeftWidth - ActualBorderRightWidth
+            - ActualPaddingLeft - ActualPaddingRight);
+
+        return contentWidth > 0
+            && contentWidth - (item.Size.Width + item.ActualMarginLeft + item.ActualMarginRight) > 0.5;
+    }
+
+    /// <summary>
     /// CSS Flexbox §9.4 step 11: a flex item whose cross size is auto is stretched to fill its
     /// line. This is the initial value of <c>align-items</c>, so it is what happens to most flex
     /// items on most pages, and until now Broiler did none of it — an item was left at the size its
