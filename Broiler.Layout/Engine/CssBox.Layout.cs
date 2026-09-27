@@ -1151,12 +1151,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                             {
                                 double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
 
+                                // Only the border box may not overlap the float's margin box; this
+                                // box's own margin may lie under the float. Counting the margin on
+                                // top of the float's edge put a main column with margin-left:
+                                // 220px beside a 200px float 420px in, where browsers put it 220px
+                                // in, the classic sidebar layout 200px narrower than it is.
                                 if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
                                 {
                                     if (fb.Float == CssConstants.Left)
-                                        leftEdge = Math.Max(leftEdge, fb.Location.X + fb.Size.Width + fb.ActualMarginRight + ActualMarginLeft);
+                                        leftEdge = Math.Max(leftEdge, fb.Location.X + fb.Size.Width + fb.ActualMarginRight);
                                     else if (fb.Float == CssConstants.Right)
-                                        rightEdge = Math.Min(rightEdge, fb.Location.X - fb.ActualMarginLeft - ActualMarginRight);
+                                        rightEdge = Math.Min(rightEdge, fb.Location.X - fb.ActualMarginLeft);
                                 }
                             }
 
