@@ -117,6 +117,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         Overflow = CssConstants.Visible;
     }
 
+    /// <summary>
+    /// The height the host's DOM parser gives a <c>&lt;br&gt;</c> it takes to make an empty line
+    /// (see <see cref="PerformLayoutImp"/>).
+    /// </summary>
+    private const string ParserEmptyLineHeight = ".95em";
+
     protected virtual void PerformLayoutImp(ILayoutEnvironment g)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.BoxesLaidOut);
@@ -153,6 +159,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             && (CssLayoutEngine.EndsWithAtomicInlineBlock(previous) || CssLayoutEngine.HoldsInlineContent(previous)))
         {
             Height = CssConstants.Auto;
+        }
+
+        // The empty line a <br> does make, after a block, at the start of one or after another
+        // <br>, is a line box holding nothing but the <br>, as tall as the line height (CSS2.1
+        // §10.8). The parser's .95em is shorter than that: 15.2px against a 20px line height,
+        // where browsers make the line 20px, and against the 19px of a 16px font's own.
+        else if (IsBrElement && Height == ParserEmptyLineHeight && ActualLineHeight > 0)
+        {
+            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
         }
 
         // CSS Box Model 4 §6.2: margin-trim zeroes the block-axis margins of
