@@ -535,9 +535,24 @@ internal static class CssLayoutEngine
                     var r = linebox.Rectangles[box];
                     linebox.Rectangles[box] = new RectangleF(r.X, (float)(r.Y + shift), r.Width, r.Height);
 
-                    // For inline-block boxes, also update the CssBox's
-                    // own Location and ActualBottom (used by the paint system).
-                    if (box.Display == CssConstants.InlineBlock)
+                    // An inline-block, or an inline flex or grid container, that the flow placed on
+                    // this line whole moves with everything in it, as SetBaseLine moves one: what it
+                    // holds is positioned absolutely, on lines and in blocks of its own. Moving its
+                    // Location alone left that content behind, and adding the shift to ActualBottom
+                    // as well, which is the Location plus the height, made the box taller by the
+                    // shift. An inline flex or grid container was not moved at all, only its
+                    // rectangle on this line.
+                    //
+                    // The others are moved as before, because their words are on these lines and
+                    // are moved below: an inline-block holding words of its own, as a ::before with
+                    // `display: inline-block` does, and the block these lines belong to, which is on
+                    // them itself when it is an inline-block its content's rectangles bubble into.
+                    if (box != blockBox && box.Words.Count == 0
+                        && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
+                    {
+                        box.OffsetTop(shift);
+                    }
+                    else if (box.Display == CssConstants.InlineBlock)
                     {
                         box.Location = new PointF(box.Location.X, (float)(box.Location.Y + shift));
                         box.ActualBottom += shift;
