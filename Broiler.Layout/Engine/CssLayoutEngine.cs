@@ -2320,6 +2320,41 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
+    /// Returns whether <paramref name="box"/> is the anonymous block wrapper that the
+    /// block-inside-inline correction generates around inline content, and that content holds
+    /// text or an image, looking through the inline boxes it is in. A following
+    /// <c>&lt;br&gt;</c> ends the content's last line, as it ends the line of an inline-block (see
+    /// <see cref="EndsWithAtomicInlineBlock"/>), rather than making an empty one.
+    /// </summary>
+    /// <remarks>
+    /// The wrapper is the box without an element: <see cref="CssBoxProperties.Kind"/> is
+    /// <c>Anonymous</c> for every box the host does not classify, a <c>&lt;div&gt;</c> included, and
+    /// a <c>&lt;br&gt;</c> after a <c>&lt;div&gt;</c> does start an empty line.
+    /// </remarks>
+    internal static bool HoldsInlineContent(CssBox box) =>
+        box is { HtmlTag: null, IsInline: false } && box.Display != CssConstants.None && InlineRunHoldsContent(box);
+
+    private static bool InlineRunHoldsContent(CssBox box)
+    {
+        foreach (var word in box.Words)
+        {
+            if (word.IsImage || !word.IsSpaces)
+                return true;
+        }
+
+        foreach (var child in box.Boxes)
+        {
+            if (child.Display == CssConstants.Inline
+                && child.Position is not (CssConstants.Absolute or CssConstants.Fixed)
+                && child.Float == CssConstants.None
+                && InlineRunHoldsContent(child))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// How far below a box's top edge its baseline sits, for the purpose of aligning it on the line.
     /// </summary>
     /// <remarks>
