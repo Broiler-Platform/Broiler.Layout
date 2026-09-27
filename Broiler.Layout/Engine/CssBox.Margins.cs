@@ -399,15 +399,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             && lastInFlowChild.Display != CssConstants.Inline
             && lastInFlowChild.Display != CssConstants.InlineBlock;
 
-        // In a box that establishes a block formatting context, the margin that stays inside is the
-        // last child's bottom margin as it has collapsed with those of the child's own last
-        // children (CSS2.1 §8.3.1), as GetPropagatedMarginBottom gives it: a paragraph's margin
-        // that collapsed through an unpadded wrapper is the wrapper's margin here, not the
-        // wrapper's own zero, as its top margin is the wrapper's at the top.
+        // Wherever the last child's bottom margin stays inside this box, for any of the reasons
+        // above, what stays inside is that margin as it has collapsed with those of the child's
+        // own last children (CSS2.1 §8.3.1), as GetPropagatedMarginBottom gives it: a paragraph's
+        // margin that collapsed through an unpadded wrapper is the wrapper's margin here, not the
+        // wrapper's own zero, as its top margin is the wrapper's at the top. Taking the wrapper's
+        // own lost the paragraph's at a block with bottom padding: <div style="padding-bottom:
+        // 1px"><div><p>Text</p></div></div> ended 1 px below the paragraph, where browsers end it
+        // 17 px below.
         if (!collapseThrough && lastInFlowChild != null)
         {
-            maxChildBottom += isBfc
-                && lastInFlowChild.Float == CssConstants.None
+            maxChildBottom += lastInFlowChild.Float == CssConstants.None
                 && lastInFlowChild.Display is not (CssConstants.Inline or CssConstants.InlineBlock or CssConstants.None)
                     ? CssBoxHelper.GetPropagatedMarginBottom(lastInFlowChild)
                     : lastInFlowChild.ActualMarginBottom;
