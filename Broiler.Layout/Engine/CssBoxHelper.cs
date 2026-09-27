@@ -952,7 +952,9 @@ internal static class CssBoxHelper
         if (!IsEmptyCollapsible(box))
             return box.ActualMarginBottom;
 
-        double maxPos = 0, maxNeg = 0;
+        // The empty box's own margins join the set collapsed above it, as CssBox.MarginTopCollapse
+        // takes it for the box after the empty one.
+        double maxPos = box.CollapsedMarginTop, maxNeg = box.NegativeMarginTopAbove;
         CollectEmptyBoxMargins(box, ref maxPos, ref maxNeg);
 
         double collapsed = maxPos + maxNeg;

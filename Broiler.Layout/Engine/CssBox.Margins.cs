@@ -107,34 +107,31 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         CollapsedMarginTop = 0;
         _marginTopCollapsesWithParent = false;
         _negativeMarginTopAbove = 0;
-        _negativeMarginPulled = 0;
     }
 
     /// <summary>
     /// The most negative of the margins that <see cref="MarginTopCollapse"/> collapsed together
     /// above this box's top edge on this layout pass, or zero. CSS2.1 §8.3.1 collapses adjoining
     /// margins to the largest positive one plus the most negative one; <see
-    /// cref="CssBoxProperties.CollapsedMarginTop"/> carries the positive side for a first child,
-    /// and this the negative side.
+    /// cref="CssBoxProperties.CollapsedMarginTop"/> is the positive side of the same set, and this
+    /// the negative side.
     /// </summary>
     private double _negativeMarginTopAbove;
 
     /// <summary>
-    /// How far first children's negative top margins pulled this box's top edge up on this layout
-    /// pass, or zero: a pull moves every box of the run it collapses through, and a first child
-    /// sits at its parent's content top, where the parent's pulls left it. It is the part of the
-    /// margin spent above the top edge that <see cref="CssBoxProperties.CollapsedMarginTop"/>, the
-    /// positive side, does not carry.
+    /// The negative side of the set of margins collapsed above this box's top edge; see <see
+    /// cref="_negativeMarginTopAbove"/>.
     /// </summary>
-    private double _negativeMarginPulled;
+    internal double NegativeMarginTopAbove => _negativeMarginTopAbove;
 
     /// <summary>
-    /// The margin already spent above this box's top edge when it was placed: <see
-    /// cref="CssBoxProperties.CollapsedMarginTop"/>, less how far first children's negative
-    /// margins pulled the top edge up. An empty box hands its margins on to the box after it, which
-    /// subtracts this so that none of them is applied twice.
+    /// The margin spent above this box's top edge when it was placed: what the set of margins
+    /// collapsed above it comes to, its positive side, <see
+    /// cref="CssBoxProperties.CollapsedMarginTop"/>, plus its negative side. The box stands that
+    /// far below where the set begins. An empty box hands the set on to the box after it, which
+    /// goes as far as the set comes to with its own margins in it, less this.
     /// </summary>
-    internal double MarginSpentAboveTop => CollapsedMarginTop + _negativeMarginPulled;
+    internal double MarginSpentAboveTop => CollapsedMarginTop + _negativeMarginTopAbove;
 
     /// <summary>
     /// The boxes a first child's top margin collapses through: its <paramref name="parent"/>, and
@@ -165,11 +162,6 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         double value;
 
-        // How much margin ends up standing above this box's top edge, which is what a first
-        // in-flow child of this box collapses against. It equals `value` except where a
-        // collapse-through hands on a margin that was partly spent before it.
-        double? spentAboveThisBox = null;
-
         if (prevSibling != null)
         {
             // CSS2.1 §8.3.1: When the previous sibling is an "empty" box
@@ -179,43 +171,29 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // in collapsing with this element's top margin.
             if (prevSibling is CssBox prevBox && CssBoxHelper.IsEmptyCollapsible(prevBox))
             {
-                double maxPos = Math.Max(ActualMarginTop, 0);
-                double maxNeg = Math.Min(ActualMarginTop, 0);
+                // The empty box's margins adjoin the ones collapsed above it as well as this box's,
+                // so all of them are one set, and it starts where the set above the empty box
+                // starts. They were left out: after a block with margin-bottom: 20px and an empty
+                // <div>, a block began right below the first, where browsers begin it 20px below.
+                // The set above includes what the empty box collapsed with its parent's margin,
+                // so that is not cancelled either: www.mediawiki.org's empty #centralNotice sits
+                // under its container's 24px margin, and the block after it at the container's top.
+                double maxPos = Math.Max(prevBox.CollapsedMarginTop, Math.Max(ActualMarginTop, 0));
+                double maxNeg = Math.Min(prevBox._negativeMarginTopAbove, Math.Min(ActualMarginTop, 0));
                 CssBoxHelper.CollectEmptyBoxMargins(prevBox, ref maxPos, ref maxNeg);
-                double collapsed = maxPos + maxNeg; // maxNeg <= 0
 
-                // Subtract the portion of the collapsed margin already consumed when
-                // positioning the empty box itself (its CollapsedMarginTop was recorded during
-                // its own layout). The difference is taken whole — including when it comes out
-                // negative, which is how this box lands *above* the empty one's border edge.
-                // That is the correct outcome whenever the run's collapsed value is smaller
-                // than what was spent placing the empty box, and CSS2.1 §8.3.1's
-                // collapse-through rules produce exactly that as soon as anything in the run
-                // carries a negative margin: Acid2's `.empty` (margin 6.25em, one child with
-                // `margin-bottom: -6em`) spends 75px placing itself and collapses to 3px, so
-                // the `.smile` after it belongs 72px higher — high enough for its `clear: both`
-                // to take effect, without which the face was cut in half by a 15px gap.
-                value = collapsed - prevBox.MarginSpentAboveTop;
+                // The empty box stands as far below the start of the set as the part above it
+                // came to, so this box goes the rest of the way. The rest is negative whenever
+                // the set comes to less than was spent placing the empty box, which is how this
+                // box lands *above* the empty one's border edge: Acid2's `.empty` (margin 6.25em,
+                // one child with `margin-bottom: -6em`) spends 75px placing itself and collapses to
+                // 3px, so the `.smile` after it belongs 72px higher — high enough for its `clear:
+                // both` to take effect, without which the face was cut in half by a 15px gap.
+                value = maxPos + maxNeg - prevBox.MarginSpentAboveTop;
 
-                // The guard the old clamp was really after: a collapse may not pull a box above
-                // its parent's content edge unless the run itself collapsed to a negative
-                // margin. Margin already spent placing the empty box can come from the *parent*
-                // rather than from this sibling run — www.mediawiki.org's empty #centralNotice
-                // sits under its container's 24px margin — and cancelling that would draw the
-                // next box 18px above the box that owns it. Flooring the resulting position
-                // keeps that honest while leaving genuine negative margins free to lift the box.
-                if (_parentBox != null)
-                {
-                    double floorTop = _parentBox.ClientTop + Math.Min(collapsed, 0);
-                    if (prevBox.ActualBottom + value < floorTop)
-                        value = floorTop - prevBox.ActualBottom;
-                }
-
-                // What stands above this box's top edge is the whole set — the part this
-                // collapse adds and the part that was already there. A first in-flow child of
-                // *this* box collapses with that total, not with what was left to add, so
-                // recording only `value` makes a margin one level down reappear as a gap.
-                spentAboveThisBox = Math.Max(prevBox.CollapsedMarginTop, collapsed);
+                // A first in-flow child of *this* box collapses with the whole set, not with what
+                // was left to add, or a margin one level down reappears as a gap.
+                CollapsedMarginTop = maxPos;
                 _negativeMarginTopAbove = maxNeg;
             }
             else
@@ -240,11 +218,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     Math.Min(ActualMarginTop, 0));
 
                 value = maxPos + minNeg;
+                CollapsedMarginTop = maxPos;
                 _negativeMarginTopAbove = minNeg;
             }
-
-            CollapsedMarginTop = spentAboveThisBox ?? value;
-
         }
         // CSS2.1 §8.3.1: "Margins of absolutely positioned boxes do not collapse." This branch is
         // reached by any box with no previous *in-flow* sibling — GetPreviousSibling already skips
@@ -277,37 +253,45 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         {
             _marginTopCollapsesWithParent = true;
 
-            // The positive side of the margins collapsed above the parent, which is never below
-            // zero (CSS2.1 §8.3.1): a parent's own negative margin, taken for it, made a first
-            // child's zero margin look larger by as much, and the parent was moved back down by it.
-            double parentEffective = Math.Max(0, Math.Max(_parentBox.ActualMarginTop, _parentBox.CollapsedMarginTop));
-
-            // CSS2.1 §8.3.1: First in-flow child's top margin collapses
-            // with the parent's top margin when the parent has no top
-            // border and no top padding.  When the child's margin
-            // exceeds the parent's, propagate the excess upward by
-            // shifting the parent's position down.  Only do this for
-            // non-root containers (not html/body) to avoid disturbing
-            // the root element's established position.
-            bool parentMoves = _parentBox.ParentBox != null && _parentBox.ParentBox.ParentBox != null;
+            // CSS2.1 §8.3.1: First in-flow child's top margin collapses with the parent's top
+            // margin when the parent has no top border and no top padding, so it joins the set
+            // collapsed above the parent. The set's positive side is the largest positive margin
+            // in it and its negative side the most negative one, each recorded on its own. What
+            // the set came to after the parent's previous sibling stood for its positive side, so
+            // a negative margin in it made a first child's margin look larger by as much: after a
+            // block with margin-bottom: 10px, <div style="margin-top: -4px"><p style="margin-top:
+            // 8px"> began 8px below it, where browsers begin it 6px below.
+            double parentPositive = Math.Max(_parentBox.CollapsedMarginTop, Math.Max(_parentBox.ActualMarginTop, 0));
             double parentNegative = _parentBox._negativeMarginTopAbove;
+            double positive = Math.Max(parentPositive, Math.Max(ActualMarginTop, 0));
+            double negative = Math.Min(parentNegative, Math.Min(ActualMarginTop, 0));
 
-            if (ActualMarginTop > parentEffective + 0.1 && parentMoves)
+            // How much this box's margin changes what the set comes to: as much as it is larger
+            // than the positive side, or smaller than the negative side, and nothing when it is
+            // neither.
+            double growth = positive - parentPositive + (negative - parentNegative);
+
+            // The parent moves by as much, except the root element's box and what is above it,
+            // which keep their established position and take it inside instead.
+            bool parentMoves = _parentBox.ParentBox != null && _parentBox.ParentBox.ParentBox != null;
+
+            if (parentMoves && Math.Abs(growth) > 0.1)
             {
-                double propagation = ActualMarginTop - parentEffective;
-
                 // The margin collapses through every ancestor whose own top margin collapses with
                 // its parent's in turn, so what moves is the topmost of them that the condition
                 // above would move, carrying the rest inside it, and each box of the run has the
-                // whole margin above its top edge. Moving the parent alone kept the margin inside
-                // the grandparent: after a 10 px block, <div><div><p>Text</p></div></div> began
-                // right below it and held the paragraph 16 px down, where browsers begin it 16 px
-                // down with the paragraph at its top.
+                // whole set above its top edge. Moving the parent alone kept the margin inside the
+                // grandparent: after a 10 px block, <div><div><p>Text</p></div></div> began right
+                // below it and held the paragraph 16 px down, where browsers begin it 16 px down
+                // with the paragraph at its top. A negative margin moves the run up the same way:
+                // after a 10 px block, <div><p style="margin-top: -4px">Text</p></div> begins
+                // 4 px higher, over the block.
                 var moved = _parentBox;
 
                 foreach (var box in FirstChildMarginRun(_parentBox))
                 {
-                    box.CollapsedMarginTop = ActualMarginTop;
+                    box.CollapsedMarginTop = positive;
+                    box._negativeMarginTopAbove = negative;
                     moved = box;
                 }
 
@@ -317,60 +301,31 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // had put it, so the box's content rendered outside its own border box.
                 // www.mediawiki.org's site notice did exactly that: its border box moved down by
                 // the margin its first block child propagated, and the notice text stayed above it.
-                moved.OffsetTop(propagation);
-
-                value = 0;
-            }
-            // A negative margin collapses with the others as the most negative of them does
-            // (CSS2.1 §8.3.1), so one below the run's pulls the run up by the difference, where it
-            // was dropped: after a 10 px block, <div><p style="margin-top: -4px">Text</p></div>
-            // began right below it, where browsers begin it 4 px higher, over the block.
-            else if (ActualMarginTop < parentNegative - 0.1 && parentMoves)
-            {
-                double pull = ActualMarginTop - parentNegative;
-                var moved = _parentBox;
-
-                foreach (var box in FirstChildMarginRun(_parentBox))
-                {
-                    box._negativeMarginTopAbove = ActualMarginTop;
-                    box._negativeMarginPulled += pull;
-                    moved = box;
-                }
-
-                moved.OffsetTop(pull);
-
-                value = 0;
-            }
-            else
-            {
-                value = Math.Max(0, ActualMarginTop - parentEffective);
+                moved.OffsetTop(growth);
             }
 
-            // Record the margin already spent above this box's top edge — the collapsed set's,
-            // not merely this box's own, since the set is what positioned the parent. An
-            // empty-collapsible box hands its margins on to the next sibling (the prevSibling
-            // branch above), and that sibling has to subtract what was already spent or it is
-            // applied twice. www.mediawiki.org opens its article body with exactly that box —
-            // an empty <p> holding only a <style> and two abspos spans, `margin: 0.5em 0 1em` —
-            // and its 1em collapse-through was landing on top of the 1em already applied,
-            // pushing the whole article down.
-            CollapsedMarginTop = Math.Max(parentEffective, ActualMarginTop) - value;
-            _negativeMarginTopAbove = Math.Min(_parentBox._negativeMarginTopAbove, Math.Min(ActualMarginTop, 0));
+            value = parentMoves ? 0 : growth;
 
-            // This box sits where the run's pulls left its parent's content top, so they are
-            // spent above its top edge as well.
-            _negativeMarginPulled = _parentBox._negativeMarginPulled;
+            // Record the whole set above this box's top edge — not merely this box's own margin,
+            // since the set is what positioned the parent. An empty-collapsible box hands its
+            // margins on to the next sibling (the prevSibling branch above), and that sibling
+            // subtracts what the set already spent, or it is applied twice. www.mediawiki.org
+            // opens its article body with exactly that box — an empty <p> holding only a
+            // <style> and two abspos spans, `margin: 0.5em 0 1em` — and its 1em collapse-through
+            // was landing on top of the 1em already applied, pushing the whole article down.
+            CollapsedMarginTop = positive;
+            _negativeMarginTopAbove = negative;
         }
         else
         {
+            // Nothing above this box's top edge collapses with its margin, so the margin is the
+            // set, spent whole between the parent's content top and this box. It was recorded
+            // only when the parent establishes a formatting context, and the empty first child
+            // of a block with top padding handed its margin on to the block after it as though
+            // none of it was spent: with a 10px margin, that block began 20px down.
             value = ActualMarginTop;
+            CollapsedMarginTop = Math.Max(ActualMarginTop, 0);
             _negativeMarginTopAbove = Math.Min(ActualMarginTop, 0);
-
-            // When the parent establishes a BFC, the first child's margin is fully consumed for
-            // positioning. Record it so that an empty-collapsible sibling can subtract
-            // the already-consumed portion during its own collapse.
-            if (_parentBox != null && CssBoxHelper.EstablishesBfc(_parentBox))
-                CollapsedMarginTop = value;
         }
 
         // fix for hr tag
