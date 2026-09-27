@@ -62,6 +62,14 @@ internal sealed class CssLineBox
         double topspacing = box.ActualBorderTopWidth + box.ActualPaddingTop;
         double bottomspacing = box.ActualBorderBottomWidth + box.ActualPaddingBottom;
 
+        // What the box holds reaches as high and as low in the inline box around it as it does in
+        // this one: its own vertical padding and border lie outside its content area and take no
+        // part in its parent's (CSS2.1 §10.6.1), where its horizontal ones take up the parent's line.
+        // Carried out with the rest, they grew every inline box around it by as much, so a link
+        // with no padding holding one with 10px painted 10px above and below its words.
+        double contentTop = y;
+        double contentBottom = b;
+
         if ((box.FirstHostingLineBox != null && box.FirstHostingLineBox.Equals(this)) || box.IsImage)
             x -= leftspacing;
 
@@ -86,7 +94,7 @@ internal sealed class CssLineBox
         }
 
         if (box.ParentBox != null && box.ParentBox.IsInline)
-            UpdateRectangle(box.ParentBox, x, y, r, b);
+            UpdateRectangle(box.ParentBox, x, contentTop, r, contentBottom);
     }
 
     /// <summary>
