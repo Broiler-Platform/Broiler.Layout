@@ -1722,7 +1722,15 @@ internal sealed class CssLayoutEngineTable
                 int affectcol = Math.Min(col + colspan, _columnMinWidths.Length) - 1;
                 double spannedwidth = GetSpannedMinWidth(row, col, colspan) + (colspan - 1) * GetHorizontalSpacing();
 
-                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cell.GetMinimumWidth() - spannedwidth);
+                // CSS 2.1 §17.5.2.2: a column is at least as wide as its cells' minimum content
+                // width, the width their content needs not to overflow them. GetMinimumWidth is the
+                // longest word alone, so a block with a width of its own counted for nothing: a
+                // table with `width: 100px` stayed 100px wide around a 400px block in a cell, and the
+                // block ran out of it. The min-content width counts the block too.
+                cell.GetMinMaxWidth(out double minContentWidth, out _);
+                double cellMinWidth = Math.Max(cell.GetMinimumWidth(), double.IsNaN(minContentWidth) ? 0 : minContentWidth);
+
+                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cellMinWidth - spannedwidth);
             }
         }
 
