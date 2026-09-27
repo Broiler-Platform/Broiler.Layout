@@ -447,9 +447,21 @@ internal partial class CssBox
     {
         double bottom = 0;
         double top = double.MaxValue;
+        double inlineBoxBottom = 0;
+        double inlineBoxTop = double.MaxValue;
 
-        foreach (var rect in line.Rectangles.Values)
+        foreach (var (box, rect) in line.Rectangles)
         {
+            // An inline, non-replaced box reaches as far as its words, measured below: its
+            // vertical padding and border are not part of the line (CSS2.1 §10.6.1). As in
+            // CreateLineBoxes, its rectangle measures the line only when no word is on it.
+            if (box.IsInlineNonReplaced)
+            {
+                inlineBoxBottom = Math.Max(inlineBoxBottom, rect.Bottom);
+                inlineBoxTop = Math.Min(inlineBoxTop, rect.Top);
+                continue;
+            }
+
             bottom = Math.Max(bottom, rect.Bottom);
             top = Math.Min(top, rect.Top);
         }
@@ -458,6 +470,12 @@ internal partial class CssBox
         {
             bottom = Math.Max(bottom, word.Bottom);
             top = Math.Min(top, word.Top);
+        }
+
+        if (top == double.MaxValue)
+        {
+            bottom = Math.Max(bottom, inlineBoxBottom);
+            top = inlineBoxTop;
         }
 
         if (owner.ActualLineHeight > 0 && top < double.MaxValue)

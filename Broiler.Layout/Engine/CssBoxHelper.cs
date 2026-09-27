@@ -180,8 +180,18 @@ internal static class CssBoxHelper
 
     internal static double GetMaximumBottom(CssBox startBox, double currentMaxBottom)
     {
-        foreach (var line in startBox.Rectangles.Keys)
-            currentMaxBottom = Math.Max(currentMaxBottom, startBox.Rectangles[line].Bottom);
+        // CSS2.1 §10.6.1: an inline, non-replaced box's bottom padding and border are not part of
+        // its line, so what a table cell centres ends at its words, not at its rectangles.
+        if (startBox.IsInlineNonReplaced)
+        {
+            foreach (var word in startBox.Words)
+                currentMaxBottom = Math.Max(currentMaxBottom, word.Bottom);
+        }
+        else
+        {
+            foreach (var line in startBox.Rectangles.Keys)
+                currentMaxBottom = Math.Max(currentMaxBottom, startBox.Rectangles[line].Bottom);
+        }
 
         foreach (var b in startBox.Boxes)
         {
