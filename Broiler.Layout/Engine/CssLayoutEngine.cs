@@ -1517,6 +1517,14 @@ internal static class CssLayoutEngine
             // css-grid check-layout reference tests use throughout.
             CreateLineBoxes(g, b);
 
+            // CSS2.1 §9.5: the floats among its children are laid out as a block container lays
+            // out its own, and the lines flowed again beside them; and, as it establishes a
+            // formatting context of its own, the box contains them (§10.6.7). Neither happened
+            // here: a float in an inline-block, or in a flex item laid out as one, stayed 0×0 at
+            // the page's origin, painted nowhere, and the box ended at its lines.
+            b.LayOutFloatedChildren(g);
+            b.ContainDescendantFloats();
+
             // An inline-flex column container lands here too, and line layout only stacks its
             // items. A block-level column container gets the column passes after that; this
             // route stopped short of them, so the items kept their content width: not
