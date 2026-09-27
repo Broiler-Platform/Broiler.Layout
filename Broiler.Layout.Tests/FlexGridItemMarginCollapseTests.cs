@@ -115,9 +115,10 @@ public sealed class FlexGridItemMarginCollapseTests
 
     /// <summary>
     /// Controls, which pass before and after: an unpadded block in a block lets the paragraph's
-    /// margin collapse through its top (CSS 2.1 §8.3.1), so it starts 16px down its container at
-    /// the paragraph; and one with <c>overflow: hidden</c>, which establishes a block formatting
-    /// context, keeps it inside, at its top with the paragraph 16px down it.
+    /// margin collapse through its top (CSS 2.1 §8.3.1), and through its container's, which it is
+    /// the first child of, so it starts 16px down the page at the paragraph; and one with
+    /// <c>overflow: hidden</c>, which establishes a block formatting context, keeps it inside, at
+    /// the top of the page with the paragraph 16px down it.
     /// </summary>
     [Theory]
     [InlineData("block", 16, 0)]
@@ -127,7 +128,7 @@ public sealed class FlexGridItemMarginCollapseTests
     {
         var (container, item, paragraph) = Lay(layout);
 
-        Assert.Equal(itemTop, item.Location.Y - container.ClientTop, 1);
+        Assert.Equal(itemTop, item.Location.Y - container.ParentBox!.ClientTop, 1);
         Assert.Equal(paragraphInItem, paragraph.Location.Y - item.Location.Y, 1);
     }
 

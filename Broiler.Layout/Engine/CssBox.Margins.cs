@@ -101,7 +101,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// downstream of this.
     /// </para>
     /// </remarks>
-    protected void ResetCollapsedMarginState() => CollapsedMarginTop = 0;
+    protected void ResetCollapsedMarginState()
+    {
+        CollapsedMarginTop = 0;
+        _marginTopCollapsesWithParent = false;
+    }
+
+    /// <summary>
+    /// Whether <see cref="MarginTopCollapse"/> found this box's top margin collapsing with its
+    /// parent's on this layout pass: the box is the parent's first in-flow child and nothing
+    /// separates their top margins (CSS2.1 §8.3.1). A first child of this box whose margin is larger
+    /// moves the topmost box of such a run rather than this one.
+    /// </summary>
+    private bool _marginTopCollapsesWithParent;
 
     protected double MarginTopCollapse(CssBoxProperties prevSibling)
     {
@@ -215,6 +227,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // drew its whole flex container 10px below where it belongs.
             && !CssBoxHelper.EstablishesBfc(_parentBox))
         {
+            _marginTopCollapsesWithParent = true;
+
             double parentEffective = Math.Max(_parentBox.ActualMarginTop, _parentBox.CollapsedMarginTop);
 
             // CSS2.1 §8.3.1: First in-flow child's top margin collapses
@@ -230,14 +244,29 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             {
                 double propagation = ActualMarginTop - parentEffective;
 
+                // The margin collapses through every ancestor whose own top margin collapses with
+                // its parent's in turn, so what moves is the topmost of them that the condition
+                // above would move, carrying the rest inside it, and each box of the run has the
+                // whole margin above its top edge. Moving the parent alone kept the margin inside
+                // the grandparent: after a 10 px block, <div><div><p>Text</p></div></div> began
+                // right below it and held the paragraph 16 px down, where browsers begin it 16 px
+                // down with the paragraph at its top.
+                var moved = _parentBox;
+                moved.CollapsedMarginTop = ActualMarginTop;
+
+                while (moved._marginTopCollapsesWithParent && moved.ParentBox is { ParentBox.ParentBox: not null } next)
+                {
+                    moved = next;
+                    moved.CollapsedMarginTop = ActualMarginTop;
+                }
+
                 // Move what is already inside the parent with it. Only the parent's own origin
                 // used to move, and anything positioned before this box got there — a preceding
                 // float, or a whole subtree on a second layout pass — stayed where the old origin
                 // had put it, so the box's content rendered outside its own border box.
                 // www.mediawiki.org's site notice did exactly that: its border box moved down by
                 // the margin its first block child propagated, and the notice text stayed above it.
-                _parentBox.OffsetTop(propagation);
-                _parentBox.CollapsedMarginTop = ActualMarginTop;
+                moved.OffsetTop(propagation);
 
                 value = 0;
             }
