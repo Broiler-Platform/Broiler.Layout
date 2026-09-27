@@ -2364,6 +2364,13 @@ internal static class CssLayoutEngine
         || verticalAlign == CssConstants.TextTop
         || verticalAlign == CssConstants.TextBottom;
 
+    /// <summary>
+    /// Whether the box stands on the line's baseline: <c>vertical-align: baseline</c>, the initial
+    /// value (CSS2.1 §10.8.1).
+    /// </summary>
+    private static bool IsBaselineAligned(CssBox box) =>
+        string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline;
+
     private static void ApplyVerticalAlignment(CssLineBox lineBox)
     {
         // CSS 2.1 §10.8: The baseline is where text sits, approximated as
@@ -2441,10 +2448,16 @@ internal static class CssLayoutEngine
         //
         // It is the *margin* box that stands on the baseline, and the rectangle here is the border
         // box, so the bottom margin is added on both sides of the comparison.
+        //
+        // Only the boxes that stand on the baseline say where it is. One aligned `middle`,
+        // `text-top`, `super`, by a length or any other way stands somewhere else, and where the
+        // flow left its bottom says nothing about the baseline: a 60px inline-block aligned
+        // `middle` beside a 20px one aligned to the baseline pushed the 20px one 44px down the
+        // line, to its own bottom, where browsers put it about 14px down.
         double atomicInlineBottom = double.MinValue;
         foreach (var kvp in lineBox.Rectangles)
         {
-            if (kvp.Key.UsesBottomMarginEdgeBaseline && !topBottomBoxes.Contains(kvp.Key))
+            if (kvp.Key.UsesBottomMarginEdgeBaseline && IsBaselineAligned(kvp.Key))
                 atomicInlineBottom = Math.Max(atomicInlineBottom, kvp.Value.Bottom + kvp.Key.ActualMarginBottom);
         }
 
@@ -2455,10 +2468,7 @@ internal static class CssLayoutEngine
             if (topBottomBoxes.Contains(box))
                 continue;
 
-            bool usesDefaultVerticalAlign = string.IsNullOrEmpty(box.VerticalAlign)
-                || box.VerticalAlign == CssConstants.Baseline;
-
-            if (usesDefaultVerticalAlign
+            if (IsBaselineAligned(box)
                 && box.UsesBottomMarginEdgeBaseline
                 && atomicInlineBottom > double.MinValue)
             {
