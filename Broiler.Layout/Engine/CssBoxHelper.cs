@@ -796,8 +796,25 @@ internal static class CssBoxHelper
             || box.Position == CssConstants.Absolute
             || box.Position == CssConstants.Fixed
             || (box.Overflow != null && box.Overflow != CssConstants.Visible)
-            || (box.AlignContent != null && box.AlignContent != "normal");
+            || (box.AlignContent != null && box.AlignContent != "normal")
+            || IsFlexOrGridItem(box);
     }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is an item of a flex or grid container, which establishes an
+    /// independent formatting context for its contents (CSS Flexbox §4, CSS Grid §6.2) whatever its
+    /// own <c>display</c>, so its children's margins do not collapse through its edges.
+    /// </summary>
+    /// <remarks>
+    /// Without it, a block item's first child's top margin collapsed through the item's top: in a
+    /// column, an unpadded item holding a paragraph with 16px margins sat 16px low with the margin
+    /// outside it, and in a row or a grid, where the item is placed at the top of its line or area
+    /// whatever its margins, the paragraph's margin was lost.
+    /// </remarks>
+    private static bool IsFlexOrGridItem(CssBox box) =>
+        box.ParentBox is { Display: "flex" or "inline-flex" or "grid" or "inline-grid" }
+        && box.Display != CssConstants.None
+        && box.Position is not (CssConstants.Absolute or CssConstants.Fixed);
 
     private static void CollectFloatsInSubtree(CssBox root, List<CssBox> result)
     {
