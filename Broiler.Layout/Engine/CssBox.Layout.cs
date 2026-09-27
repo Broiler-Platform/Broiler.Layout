@@ -1166,32 +1166,43 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                             }
 
                             double availableWidth = rightEdge - leftEdge;
+                            bool autoWidth = Width == CssConstants.Auto || string.IsNullOrEmpty(Width);
 
-                            if (availableWidth >= Size.Width || availableWidth >= 0)
+                            // A box with a width of its own goes beside the floats only where it
+                            // fits; one with an auto width is narrowed to the space. The first
+                            // went beside them whenever any space was left, and overflowed it:
+                            // after a 100px float, a block with width: 100% and overflow: hidden
+                            // ran 100px past its container's right edge, where browsers place it
+                            // below the float.
+                            if (availableWidth + 0.01 >= Size.Width || (autoWidth && availableWidth >= 0))
                             {
                                 left = leftEdge;
 
-                                if (availableWidth < Size.Width && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width)))
+                                if (availableWidth < Size.Width && autoWidth)
                                     Size = new SizeF((float)availableWidth, Size.Height);
 
                                 break;
                             }
 
-                            // Cannot fit beside floats — clear below them.
-                            double maxFb = top;
+                            // Cannot fit beside floats — move down past the one that ends first
+                            // and try again, as the space beside the rest may be wide enough.
+                            // Going below all of them at once skipped that space: a 320px block
+                            // after a 20px-tall left float and a 40px-tall right one, in 500px,
+                            // went 40px down, where browsers put it 20px down, beside the second.
+                            double nextTop = double.MaxValue;
 
                             foreach (var fb in precedingFloats)
                             {
                                 double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
 
                                 if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
-                                    maxFb = Math.Max(maxFb, fbBottom);
+                                    nextTop = Math.Min(nextTop, fbBottom);
                             }
 
-                            if (maxFb <= top)
+                            if (nextTop == double.MaxValue || nextTop <= top)
                                 break;
 
-                            top = maxFb;
+                            top = nextTop;
                         }
                     }
                 }
