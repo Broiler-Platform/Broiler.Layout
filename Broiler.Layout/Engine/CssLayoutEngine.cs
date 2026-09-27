@@ -543,11 +543,10 @@ internal static class CssLayoutEngine
                     // shift. An inline flex or grid container was not moved at all, only its
                     // rectangle on this line.
                     //
-                    // The others are moved as before, because their words are on these lines and
-                    // are moved below: an inline-block holding words of its own, as a ::before with
-                    // `display: inline-block` does, and the block these lines belong to, which is on
-                    // them itself when it is an inline-block its content's rectangles bubble into.
-                    if (box != blockBox && box.Words.Count == 0
+                    // An inline-block holding words of its own, as a ::before with
+                    // `display: inline-block` does, is moved as before: its words are on these
+                    // lines, and are moved below.
+                    if (box.Words.Count == 0
                         && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
                     {
                         box.OffsetTop(shift);
@@ -628,6 +627,12 @@ internal static class CssLayoutEngine
             && blockBox.Overflow is CssConstants.Hidden or CssConstants.Auto or CssConstants.Scroll
             && blockBox.ActualBottom - blockBox.Location.Y > blockBox.ActualHeight)
             blockBox.ActualBottom = blockBox.Location.Y + blockBox.ActualHeight;
+
+        // The inline boxes an inline-block sits in wrap it only now that the lines are settled,
+        // and before the out-of-flow descendants below are laid out: one of them can be their
+        // containing block.
+        foreach (var linebox in blockBox.LineBoxes)
+            BubbleAtomicInlineRectangles(linebox);
 
         // CSS2.1 §9.6.1 / §10.3.7: An out-of-flow (absolutely/fixed positioned)
         // descendant of this inline formatting context was flowed by FlowBox only
@@ -1897,6 +1902,51 @@ internal static class CssLayoutEngine
             foreach (CssBox b in box.Boxes)
                 BubbleRectangles(b, line);
         }
+    }
+
+    /// <summary>
+    /// Gives the inline boxes an atomic inline-level box sits in a rectangle around it on
+    /// <paramref name="line"/>, as <see cref="BubbleRectangles"/> gives them one around their words.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The flow puts an inline-block, or an inline flex or grid container, on the line as a single
+    /// border box, and lays its content out on lines of its own, so bubbling the line's words finds
+    /// nothing of it. An inline box around one, an <c>&lt;a&gt;</c> wrapping an inline-block button,
+    /// used to get its rectangle from the atomic box's own lines instead, by
+    /// <see cref="CssLineBox.UpdateRectangle"/> bubbling out of them. That no longer happens, because
+    /// it made the atomic box part of its own line; the rectangle it gave was also where the box's
+    /// content was before this line was aligned, x=16 on a centred line that had moved the box to 154.
+    /// </para>
+    /// <para>
+    /// This runs once the lines are settled, so the inline box's own padding and border around the
+    /// atomic box do not move them: CSS 2.1 §10.6.1 leaves them out of the line box's height.
+    /// </para>
+    /// </remarks>
+    private static void BubbleAtomicInlineRectangles(CssLineBox line)
+    {
+        bool bubbled = false;
+
+        foreach (var box in new List<CssBox>(line.Rectangles.Keys))
+        {
+            if (!CssBoxHelper.IsAtomicInlineLevel(box.Display)
+                || box.ParentBox is not { IsInline: true } parent
+                || parent == line.OwnerBox
+                || IsInAbsposSubtree(box, line.OwnerBox))
+                continue;
+
+            // CSS 2.1 §9.4.3: a relative offset moves the box and nothing around it, so the inline
+            // box wraps where the flow put it.
+            RectangleF rect = line.Rectangles[box];
+            if (box.Position == CssConstants.Relative)
+                rect.Offset(-(float)CssBoxHelper.GetRelativeOffsetX(box), -(float)CssBoxHelper.GetRelativeOffsetY(box));
+
+            line.UpdateRectangle(parent, rect.Left, rect.Top, rect.Right, rect.Bottom);
+            bubbled = true;
+        }
+
+        if (bubbled)
+            line.AssignRectanglesToBoxes();
     }
 
     private static void ApplyHorizontalAlignment(CssLineBox lineBox, bool lineRtl)
