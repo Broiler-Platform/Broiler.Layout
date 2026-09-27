@@ -825,8 +825,15 @@ internal sealed class CssLayoutEngineTable
         double captionWidth = GetWidthSum() + GetHorizontalSpacing() * (_columnCount + 1);
         double topCaptionHeight = LayoutTopCaptions(g, captionWidth);
 
-        double startx = Math.Max(_tableBox.ClientLeft + GetHorizontalSpacing(), 0);
-        double starty = Math.Max(_tableBox.ClientTop + topCaptionHeight + GetVerticalSpacing(), 0);
+        // CSS2.1 §17.6.1: border spacing lies between the cells, and between them and the
+        // table's border, so a table with no cells has none. It was put on both sides of the
+        // cells whether there were any or not: an empty table was 4x4px with the default
+        // border-spacing: 2px, where browsers make it 0x0px.
+        double horizontalSpacing = _columnCount > 0 ? GetHorizontalSpacing() : 0;
+        double verticalSpacing = _columnCount > 0 ? GetVerticalSpacing() : 0;
+
+        double startx = Math.Max(_tableBox.ClientLeft + horizontalSpacing, 0);
+        double starty = Math.Max(_tableBox.ClientTop + topCaptionHeight + verticalSpacing, 0);
         double cury = starty;
         double maxRight = startx;
         double maxBottom = 0f;
@@ -945,7 +952,7 @@ internal sealed class CssLayoutEngineTable
             }
 
             rowBounds.Add((row, rowTop, maxBottom));
-            cury = maxBottom + GetVerticalSpacing();
+            cury = maxBottom + verticalSpacing;
 
             currentrow++;
         }
@@ -967,9 +974,9 @@ internal sealed class CssLayoutEngineTable
         // the right border and the spacing past it: `width: 320px` with a 10px border made a table
         // 330px wide, and 332px with 2px of border spacing, where browsers make it 320px.
         _tableBox.ActualRight = Math.Max(
-            maxRight + GetHorizontalSpacing() + _tableBox.ActualBorderRightWidth,
+            maxRight + horizontalSpacing + _tableBox.ActualBorderRightWidth,
             _tableBox.Location.X + _tableBox.ActualWidth);
-        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + GetVerticalSpacing() + _tableBox.ActualBorderBottomWidth;
+        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
         // extend the table's bottom to enclose them.
