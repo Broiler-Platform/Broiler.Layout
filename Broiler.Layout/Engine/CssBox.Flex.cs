@@ -330,8 +330,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 double crossOffset = ResolveFlexCrossOffset(child, line.CrossSize);
                 double itemTop = cursorY + crossOffset + child.ActualMarginTop;
 
-                double dx = itemLeft - child.Location.X;
-                double dy = itemTop - child.Location.Y;
+                // CSS2.1 §9.4.3: a relatively positioned item takes up the room the flex layout
+                // gives it and is then shifted by its offset, as its own layout shifted it. Moved
+                // to its place from where that layout left it, it lost the offset.
+                var (relativeX, relativeY) = child.RelativePositionOffset();
+                double dx = itemLeft + relativeX - child.Location.X;
+                double dy = itemTop + relativeY - child.Location.Y;
 
                 if (Math.Abs(dx) > 0.1)
                     child.OffsetLeft(dx);

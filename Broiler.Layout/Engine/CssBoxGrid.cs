@@ -907,8 +907,12 @@ internal partial class CssBox
                 targetTop += GridAxisAlignmentOffset(item.AlignSelf, AlignItems, free, false);
         }
 
-        double dx = targetLeft - item.Location.X;
-        double dy = targetTop - item.Location.Y;
+        // CSS2.1 §9.4.3: a relatively positioned item takes up its area and is then shifted by its
+        // offset, as its own layout shifted it. Moved into its area from where that layout left
+        // it, it lost the offset.
+        var (relativeX, relativeY) = item.RelativePositionOffset();
+        double dx = targetLeft + relativeX - item.Location.X;
+        double dy = targetTop + relativeY - item.Location.Y;
 
         if (Math.Abs(dx) > 0.01)
             item.OffsetLeft(dx);
