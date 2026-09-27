@@ -1759,7 +1759,7 @@ internal static class CssLayoutEngine
     /// so leaves the box zero-height. Requires at least one <c>&lt;br&gt;</c> so a
     /// genuinely block-only box is unaffected (it is not inline content).
     /// </summary>
-    private static bool InlineContentWithBrsOnly(CssBox box)
+    internal static bool InlineContentWithBrsOnly(CssBox box)
     {
         bool sawBr = false;
         foreach (var child in box.Boxes)
