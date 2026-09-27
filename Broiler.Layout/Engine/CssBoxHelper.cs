@@ -794,6 +794,10 @@ internal static class CssBoxHelper
             // back where it belongs and the child with it: <caption><p style="margin-top:
             // 16px"> lost the 16px, where browsers keep it inside the caption.
             || box.Display == CssConstants.TableCaption
+            // CSS2.1 §17.4: the table wrapper box, which the table's box stands for here,
+            // establishes a block formatting context of its own.
+            || box.Display == CssConstants.Table
+            || box.Display == CssConstants.InlineTable
             // CSS Display 3 §2.5: `flow-root` is exactly "block box that
             // establishes a new block formatting context".
             || box.Display == "flow-root"
