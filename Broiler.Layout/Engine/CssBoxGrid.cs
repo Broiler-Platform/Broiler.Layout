@@ -327,6 +327,11 @@ internal partial class CssBox
         foreach (var p in placements)
         {
             double colWidth = TrackSpan(colSizes, p.PlacedCol, p.ColSpan, colGap);
+
+            // The item's grid area is its containing block from here on, and its percentage
+            // margins and padding refer to the area's width, the padding counted into what follows.
+            UseGridAreaAsPercentageBasis(p.Item, colWidth);
+
             GridItemInlineContribution(p.Item, out _, out double maxW);
 
             double marginX = p.Item.ActualMarginLeft + p.Item.ActualMarginRight;
@@ -473,6 +478,46 @@ internal partial class CssBox
     /// <summary>Set once the definite-track pass has positioned this grid's items,
     /// so the flex/grid cross-axis approximation does not re-align them.</summary>
     private bool _gridTrackLayoutApplied;
+
+    /// <summary>
+    /// Makes the width of <paramref name="item"/>'s grid area, <paramref name="areaWidth"/>, the
+    /// width its percentage margins and padding refer to, and moves and grows what it was measured
+    /// with by the change in its padding.
+    /// </summary>
+    /// <remarks>
+    /// CSS Grid §6.2: a grid item's containing block is its grid area, which is known once the
+    /// grid's columns are sized. The item is measured before that, as wide as its content, and its
+    /// percentages referred to its own width then: an empty item with <c>padding-top: 50%</c> had
+    /// none, the rows were sized without it, and the item, stretched to a 100px column afterwards,
+    /// was as tall as its row where browsers make it 50px. So the height the rows are sized from
+    /// grows by the growth of the item's padding at its top and bottom, the item's content moves by
+    /// the growth at its top and left, where it would have been laid out with the area's padding, and
+    /// an item that keeps its own width grows by the growth at its left and right.
+    /// </remarks>
+    private static void UseGridAreaAsPercentageBasis(CssBox item, double areaWidth)
+    {
+        double top = item.ActualPaddingTop, right = item.ActualPaddingRight;
+        double bottom = item.ActualPaddingBottom, left = item.ActualPaddingLeft;
+
+        item.GridAreaWidth = areaWidth;
+
+        double growTop = item.ActualPaddingTop - top, growRight = item.ActualPaddingRight - right;
+        double growBottom = item.ActualPaddingBottom - bottom, growLeft = item.ActualPaddingLeft - left;
+
+        if (Math.Abs(growTop) < 0.01 && Math.Abs(growRight) < 0.01
+            && Math.Abs(growBottom) < 0.01 && Math.Abs(growLeft) < 0.01)
+            return;
+
+        // OffsetLeft and OffsetTop move the item with its content; only the content moves here.
+        var location = item.Location;
+        item.OffsetLeft(growLeft);
+        item.OffsetTop(growTop);
+        item.Location = location;
+
+        item.Size = new SizeF(
+            (float)(item.Size.Width + growLeft + growRight),
+            (float)(item.Size.Height + growTop + growBottom));
+    }
 
     /// <summary>
     /// An item's inline-axis content contribution (min-content, max-content) for

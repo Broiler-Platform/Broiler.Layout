@@ -642,6 +642,15 @@ internal abstract partial class CssBoxProperties
     internal RectangleF? GridAreaContainingBlock { get; set; }
 
     /// <summary>
+    /// When this box is an in-flow grid item, the width of the grid area the grid container's
+    /// track-sizing pass gave it, recorded once the grid's columns are sized. CSS Grid §6.2 makes
+    /// that area the item's containing block, so the item's percentage margins and padding refer to
+    /// it (see <see cref="CssBox.TryGetPercentageBasisWidth"/>). Null before then, and for every
+    /// other box.
+    /// </summary>
+    internal double? GridAreaWidth { get; set; }
+
+    /// <summary>
     /// CSS Grid Level 2 §7.3 (subgrid): when this box is a grid item whose
     /// <c>grid-template-columns</c> is <c>subgrid</c>, the parent grid's
     /// track-sizing pass records here the sizes (px) of the parent tracks this

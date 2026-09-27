@@ -72,17 +72,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     /// <remarks>
     /// The root, whose containing block is the initial one it takes its own width from, keeps its
-    /// own width. So do the parts of a table, which the table sizes in passes of its own, and grid
-    /// items, whose containing block is the grid area their track sizing gives them, not the grid
-    /// container's content box.
+    /// own width. So do the parts of a table, which the table sizes in passes of its own. A grid
+    /// item's containing block is the grid area its grid's track sizing gives it, not the grid
+    /// container's content box: see <see cref="TryGetGridItemPercentageBasisWidth"/>.
     /// </remarks>
     protected override bool TryGetPercentageBasisWidth(out double width)
     {
         width = 0;
         if (ParentBox == null
-            || Display.StartsWith("table-", StringComparison.Ordinal)
-            || ParentBox.Display is "grid" or "inline-grid")
+            || Display.StartsWith("table-", StringComparison.Ordinal))
             return false;
+
+        if (ParentBox.Display is "grid" or "inline-grid")
+            return TryGetGridItemPercentageBasisWidth(out width);
 
         if (IsInsideContentMeasurement())
             return true;
@@ -103,6 +105,39 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         width = Math.Max(0, cb.Size.Width
             - cb.ActualBorderLeftWidth - cb.ActualBorderRightWidth
             - cb.ActualPaddingLeft - cb.ActualPaddingRight);
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="TryGetPercentageBasisWidth"/> for a child of a grid container: the width of an
+    /// in-flow item's grid area (CSS Grid §6.2), once the grid's track sizing has recorded it in
+    /// <see cref="CssBoxProperties.GridAreaWidth"/>, and zero while the item's content is measured.
+    /// Otherwise, before the grid has sized its tracks, the item's own width stands in, as it did for
+    /// every child of a grid; an absolutely positioned child keeps its own width.
+    /// </summary>
+    /// <remarks>
+    /// The grid sizes its tracks from the widths its items measure, and the area a percentage
+    /// refers to comes from those tracks, so while an item is measured the percentage is cyclic and
+    /// resolves against zero (CSS Sizing 3 §5.2.1), as it does for a box inside the measurement of
+    /// another. Resolved against the item's own width instead, it carried each layout's result into
+    /// the next: an item with <c>padding-left: 50%</c> and an 8px word, in a column as wide as its
+    /// content, made that column 62.5px wide, then 27.6px and 18.9px on each layout after, where
+    /// browsers make it as wide as the word.
+    /// </remarks>
+    private bool TryGetGridItemPercentageBasisWidth(out double width)
+    {
+        width = 0;
+
+        if (Position is CssConstants.Absolute or CssConstants.Fixed)
+            return false;
+
+        if (_contentMeasurementDepth > 0 || IsInsideContentMeasurement())
+            return true;
+
+        if (GridAreaWidth is not { } area)
+            return false;
+
+        width = area;
         return true;
     }
 
