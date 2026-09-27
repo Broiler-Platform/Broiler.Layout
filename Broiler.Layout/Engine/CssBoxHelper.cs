@@ -651,6 +651,11 @@ internal static class CssBoxHelper
         if (IsRootElement(box))
             return mb;
 
+        // Nor do those of a box that establishes a new block formatting context with its
+        // children's: its last child's margin stays inside it (see MarginBottomCollapse).
+        if (EstablishesBfc(box))
+            return mb;
+
         if (box.Height != CssConstants.Auto && !string.IsNullOrEmpty(box.Height))
         {
             bool resolvedToAuto = box.Height.Contains('%')
