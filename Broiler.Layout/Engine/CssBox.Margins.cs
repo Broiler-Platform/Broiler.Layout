@@ -119,7 +119,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // own top and bottom margins — and its children's margins —
             // collapse through.  The resulting collapsed margin participates
             // in collapsing with this element's top margin.
-            if (prevSibling is CssBox prevBox && CssBoxHelper.IsEmptyCollapsible(prevBox))
+            //
+            // Only a block-level box collapses through. An inline box, such as the text before a
+            // float in its block, takes no part in margin collapsing and has no block position to
+            // measure from: its ActualBottom stays 0, and the floor below, taken from it, lowered
+            // the float by the whole of its block's distance from the top of the page.
+            if (prevSibling is CssBox prevBox
+                && prevBox.Display != CssConstants.Inline
+                && CssBoxHelper.IsEmptyCollapsible(prevBox))
             {
                 double maxPos = Math.Max(ActualMarginTop, 0);
                 double maxNeg = Math.Min(ActualMarginTop, 0);
