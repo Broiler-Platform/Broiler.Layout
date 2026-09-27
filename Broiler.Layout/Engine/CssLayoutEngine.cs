@@ -555,6 +555,11 @@ internal static class CssLayoutEngine
             }
         }
 
+        // CSS2.1 §9.4.3: the lines are settled, so the boxes the flow placed on them whole take
+        // their relative offsets now.
+        foreach (var linebox in blockBox.LineBoxes)
+            ApplyRelativeOffsets(linebox);
+
         // CSS2.1 §10.8: The "strut" — each line box starts with an
         // imaginary zero-width inline box with the block container's font
         // and line-height properties.  This establishes the minimum line
@@ -1091,9 +1096,7 @@ internal static class CssLayoutEngine
                 //    CSS Flexbox §4 / CSS Grid §6; since Broiler lacks a
                 //    true flex/grid engine, use FlowInlineBlock as a
                 //    reasonable approximation)
-                bool useInlineBlockFlow = b.Display == CssConstants.InlineBlock
-                    || b.Display is "inline-flex" or "inline-grid"
-                    || box.Display is "flex" or "inline-flex" or "grid" or "inline-grid";
+                bool useInlineBlockFlow = FlowsAsInlineBlock(b, box);
 
                 if (useInlineBlockFlow)
                 {
@@ -1686,26 +1689,81 @@ internal static class CssLayoutEngine
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
         maxbottom = Math.Max(maxbottom, b.ActualBottom + b.ActualMarginBottom);
 
-        // CSS2.1 §9.4.3: position:relative shifts the box (and its subtree) visually
-        // without affecting flow. FlowInlineBlock positions the inline-block from the
-        // in-flow line position above (overwriting any offset the box's own layout
-        // applied), so re-apply the relative offset here — after flow advancement and
-        // the line rectangle were computed from the in-flow position. Applied to the
-        // box subtree (OffsetLeft/Top) and to the line's own rectangle copy so paint
-        // and getBoundingClientRect agree. Block-level boxes get this from
-        // CssBox.ApplyRelativePositionOffset; inline-blocks never run that path.
-        if (b.Position == CssConstants.Relative)
+        // A relative offset waits for the line to be settled: see ApplyRelativeOffsets.
+    }
+
+    /// <summary>
+    /// Whether <see cref="FlowBox"/> places <paramref name="box"/>, a child of
+    /// <paramref name="parent"/> with no words of its own, on a line whole, through
+    /// <see cref="FlowInlineBlock"/>: an inline-block, an inline flex or grid container, or an item
+    /// of a flex or grid container, which this engine lays out as one.
+    /// </summary>
+    private static bool FlowsAsInlineBlock(CssBox box, CssBox parent) =>
+        box.Display == CssConstants.InlineBlock
+        || box.Display is "inline-flex" or "inline-grid"
+        || parent.Display is "flex" or "inline-flex" or "grid" or "inline-grid";
+
+    /// <summary>
+    /// Moves each box <see cref="FlowInlineBlock"/> placed on <paramref name="line"/> by its
+    /// relative offset, with its rectangle on the line.
+    /// </summary>
+    /// <remarks>
+    /// CSS2.1 §9.4.3: a relative offset moves a box and its content, and nothing around it; the line
+    /// is laid out as if the box were where the flow put it. The flow places such a box from its
+    /// position on the line, overwriting any offset the box's own layout applied, so the offset is
+    /// applied again. It was applied as the flow placed the box, and the line then measured and
+    /// aligned the box where the offset had put it: <c>top: 5px</c> made the line 5px taller and
+    /// stood an inline-block beside it 5px lower, and <c>top: -5px</c> moved the block's lines 5px
+    /// down. Vertical alignment, which places an inline-block afresh, and a right-to-left line,
+    /// which places everything on it again, dropped the offset. Applied once the lines are settled,
+    /// it moves only the box. Block-level boxes get their offset from
+    /// <c>CssBox.ApplyRelativePositionOffset</c>, which these boxes never run.
+    /// <para>
+    /// The flow places only boxes inside the line's block. The lines an inline-block lays its own
+    /// content out on can carry a rectangle for the inline-block too, bubbled out of its words, and
+    /// it takes its offset on the line it sits on, not on those.
+    /// </para>
+    /// </remarks>
+    private static void ApplyRelativeOffsets(CssLineBox line)
+    {
+        foreach (var box in new List<CssBox>(line.Rectangles.Keys))
         {
-            double rdx = CssBoxHelper.GetRelativeOffsetX(b);
-            double rdy = CssBoxHelper.GetRelativeOffsetY(b);
-            if (rdx != 0)
-                b.OffsetLeft(rdx);
-            if (rdy != 0)
-                b.OffsetTop(rdy);
-            if ((rdx != 0 || rdy != 0) && line.Rectangles.TryGetValue(b, out var ibRect))
-                line.Rectangles[b] = new RectangleF(
-                    (float)(ibRect.X + rdx), (float)(ibRect.Y + rdy), ibRect.Width, ibRect.Height);
+            if (box.Position != CssConstants.Relative
+                || box.Words.Count > 0
+                || box.ParentBox is not { } parent
+                || !FlowsAsInlineBlock(box, parent)
+                || !IsInside(box, line.OwnerBox))
+            {
+                continue;
+            }
+
+            double dx = CssBoxHelper.GetRelativeOffsetX(box);
+            double dy = CssBoxHelper.GetRelativeOffsetY(box);
+            if (dx == 0 && dy == 0)
+                continue;
+
+            if (dx != 0)
+                box.OffsetLeft(dx);
+            if (dy != 0)
+                box.OffsetTop(dy);
+
+            var rect = line.Rectangles[box];
+            line.Rectangles[box] = new RectangleF((float)(rect.X + dx), (float)(rect.Y + dy), rect.Width, rect.Height);
+            if (box.Rectangles.ContainsKey(line))
+                box.Rectangles[line] = line.Rectangles[box];
         }
+    }
+
+    /// <summary>Whether <paramref name="box"/> is a descendant of <paramref name="ancestor"/>.</summary>
+    private static bool IsInside(CssBox box, CssBox ancestor)
+    {
+        for (var parent = box.ParentBox; parent != null; parent = parent.ParentBox)
+        {
+            if (parent == ancestor)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
