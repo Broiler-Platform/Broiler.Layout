@@ -2240,8 +2240,14 @@ internal static class CssLayoutEngine
             if (!blockBox.IsFixed)
                 word.BreakPage();
 
+            // Across the wrapper too, the image is placed as a block-level box and not as the content
+            // of a line: its line put it where `text-align` put the line's content, and gave an
+            // `auto` margin nothing, as an inline box's is.
+            double shiftX = BlockLevelImageLeft(blockBox, image, rect.Width) - rect.X;
+            word.Left += shiftX;
+
             double shift = word.Top - flowedTop;
-            var placed = new RectangleF(rect.X, (float)(rect.Y + shift), rect.Width, rect.Height);
+            var placed = new RectangleF((float)(rect.X + shiftX), (float)(rect.Y + shift), rect.Width, rect.Height);
             line.Rectangles[image] = placed;
             image.Rectangles[line] = placed;
 
@@ -2260,6 +2266,46 @@ internal static class CssLayoutEngine
         }
 
         return bottom;
+    }
+
+    /// <summary>
+    /// Where the border box of a block-level image <paramref name="width"/> wide starts across the
+    /// anonymous block that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// CSS2.1 §10.3.4 places a block-level replaced element by the margin rules of §10.3.3. Both
+    /// margins <c>auto</c> centre it, which is how <c>img { display: block; margin: 0 auto }</c>
+    /// centres an image; one <c>auto</c> margin takes all the room there is. When the image does not
+    /// fit, an <c>auto</c> margin counts as zero, and when no margin is <c>auto</c> the one on the
+    /// end side of the containing block's direction gives way: the image starts at the left in a
+    /// left-to-right block and ends at the right in a right-to-left one. <c>text-align</c> does not
+    /// come into it, since the image is not inline content.
+    /// </remarks>
+    private static double BlockLevelImageLeft(CssBox blockBox, CssBoxImage image, double width)
+    {
+        double left = blockBox.ClientLeft;
+        double right = blockBox.ClientRight;
+        bool autoLeft = image.IsSpecifiedMarginLeftAuto;
+        bool autoRight = image.IsSpecifiedMarginRightAuto;
+        double marginLeft = autoLeft || double.IsNaN(image.ActualMarginLeft) ? 0 : image.ActualMarginLeft;
+        double marginRight = autoRight || double.IsNaN(image.ActualMarginRight) ? 0 : image.ActualMarginRight;
+        double free = right - left - marginLeft - width - marginRight;
+
+        if (free < 0)
+            autoLeft = autoRight = false;
+
+        if (autoLeft && autoRight)
+            return left + marginLeft + free / 2;
+
+        if (autoLeft)
+            return left + marginLeft + free;
+
+        if (autoRight)
+            return left + marginLeft;
+
+        return blockBox.Direction == CssConstants.Rtl
+            ? right - marginRight - width
+            : left + marginLeft;
     }
 
     /// <summary>
