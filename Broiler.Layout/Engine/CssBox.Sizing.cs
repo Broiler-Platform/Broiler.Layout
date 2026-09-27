@@ -531,8 +531,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         foreach (var child in Boxes)
         {
             // See CssBoxHelper.GetMinMaxSumWords: an absolutely or fixed positioned child is out of
-            // flow and takes no room on any line.
-            if (CssBoxHelper.IsOutOfFlowPositioned(child))
+            // flow and takes no room on any line, and a display: none one generates no box at all
+            // (CSS 2.1 §9.2.4). Its own width was taken all the same, so a hidden block 300px wide
+            // made a float around it 300px wide.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child) || child.Display == CssConstants.None)
                 continue;
 
             double childWidth;
@@ -1033,8 +1035,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in Boxes)
         {
-            // See CssBoxHelper.GetMinMaxSumWords: a positioned child is out of flow.
-            if (CssBoxHelper.IsOutOfFlowPositioned(child))
+            // See ComputeShrinkToFitWidth: a positioned child is out of flow, and a display: none
+            // one generates no box.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child) || child.Display == CssConstants.None)
                 continue;
 
             double childWidth;
