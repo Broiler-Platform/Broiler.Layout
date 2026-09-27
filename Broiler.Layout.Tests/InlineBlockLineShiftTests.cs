@@ -13,8 +13,8 @@ namespace Broiler.Layout.Tests;
 /// <para>
 /// <c>CreateLineBoxes</c> moves every line of a block down when something on them reaches above
 /// the block's content box, so the lines start at its top (CSS 2.1 §9.4.2). A 60px inline-block
-/// that <c>vertical-align: middle</c> raises above its line does that, and so here does a link
-/// whose vertical padding reaches above the first line. The move gave an inline-block a new
+/// that <c>vertical-align: middle</c> raises above its line does that: here the box being tested,
+/// or an empty one before it on the line. The move gave an inline-block a new
 /// <c>Location</c> and nothing else: what the box holds is positioned absolutely, on lines and in
 /// blocks of its own, and stayed where it was, above the box by as much as the box had moved. It
 /// then added the move to the box's <c>ActualBottom</c>, which is its <c>Location</c> plus its
@@ -23,8 +23,8 @@ namespace Broiler.Layout.Tests;
 /// </para>
 /// <para>
 /// Each word here is 8px wide and 16px tall. The tests assert where a box is against its content
-/// and its line rather than against the block, because a link's padding moving the lines is this
-/// engine's, not the browsers'.
+/// and its line rather than against the block: how far the lines move depends on where this engine
+/// puts the line's baseline, which is not what they test.
 /// </para>
 /// </remarks>
 public sealed class InlineBlockLineShiftTests
@@ -47,22 +47,21 @@ public sealed class InlineBlockLineShiftTests
     }
 
     /// <summary>
-    /// After a link with 5px padding on the block's first line, an inline-block holding a block,
-    /// an inline-block holding a word, and an inline flex or grid container holding an item are
-    /// each 60px tall, at their line rectangle, with their content at their top. The inline-blocks
-    /// were 65px tall with their content 5px above them, and the flex and grid containers 5px
-    /// above their rectangles.
+    /// After an empty 60px inline-block that <c>vertical-align: middle</c> raises above the block's
+    /// first line, an inline-block holding a block, an inline-block holding a word, and an inline
+    /// flex or grid container holding an item are each 60px tall, at their line rectangle, with
+    /// their content at their top. The inline-blocks were 67.6px tall with their content 7.6px above
+    /// them, and the flex and grid containers 7.6px above their rectangles.
     /// </summary>
     [Theory]
     [InlineData("inline-block", false)]
     [InlineData("inline-block", true)]
     [InlineData("inline-flex", false)]
     [InlineData("inline-grid", false)]
-    public void An_Atomic_Inline_Moves_With_Its_Content_When_A_Padded_Link_Moves_The_Lines(
+    public void An_Atomic_Inline_Moves_With_Its_Content_When_A_Raised_Box_Moves_The_Lines(
         string display, bool holdsWord)
     {
-        var (block, box, content) = Lay(display, link => link.PaddingTop = link.PaddingBottom = "5px", _ => { },
-            holdsWord: holdsWord);
+        var (block, box, content) = Lay(display, link: null, _ => { }, raisedBefore: true, holdsWord: holdsWord);
 
         AssertMovedWhole(block, box, content);
     }
@@ -74,8 +73,7 @@ public sealed class InlineBlockLineShiftTests
     [Fact(Timeout = 600000)]
     public void Content_Nested_In_An_Inline_Block_Moves_Once()
     {
-        var (_, box, content) = Lay("inline-block", link => link.PaddingTop = link.PaddingBottom = "5px", _ => { },
-            nestInlineBlock: true);
+        var (_, box, content) = Lay("inline-block", link: null, _ => { }, raisedBefore: true, nestInlineBlock: true);
 
         var block = (CssBox)content;
         var nested = block.ParentBox!;
@@ -100,15 +98,18 @@ public sealed class InlineBlockLineShiftTests
     /// <summary>
     /// Control, which passes before and after: the words on the lines are moved once. An
     /// inline-block that holds a word of its own, as a <c>::before</c> with
-    /// <c>display: inline-block</c> does, has it on the block's line, and it moves as far as the
-    /// link's word beside it.
+    /// <c>display: inline-block</c> does, has it on the block's line, and when a raised box moves
+    /// the lines it moves as far as the link's word beside it. The raised box is aligned to the
+    /// bottom of the line, which it reaches 44px above: one aligned to the middle would set where
+    /// the inline-block stands, since this engine stands an inline-block on the lowest bottom of the
+    /// inline-blocks beside it, whatever their alignment.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void Control_An_Inline_Block_Holding_Its_Own_Word_Moves_It_Once()
     {
         var (root, block) = Block();
+        Raised(block, "bottom");
         var link = new CssBox(block, new HtmlTag("a", false, null), BaseUrl) { Display = "inline" };
-        link.PaddingTop = link.PaddingBottom = "5px";
         var linkWord = Word(link);
         var marker = new CssBox(block, null, BaseUrl) { Display = "inline-block" };
         var markerWord = new CssRectWord(marker, "X", false, false);
@@ -116,6 +117,7 @@ public sealed class InlineBlockLineShiftTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
+        Assert.True(linkWord.Top > block.Location.Y, $"The lines did not move: the word is at {linkWord.Top}.");
         Assert.Equal(linkWord.Top, markerWord.Top, 1);
     }
 
@@ -155,10 +157,11 @@ public sealed class InlineBlockLineShiftTests
     }
 
     /// <summary>
-    /// A 320px block holding a word when <paramref name="wordBefore"/>, then a link holding a word
-    /// and styled by <paramref name="link"/> unless that is <see langword="null"/>, and then a
-    /// 10×60px box of <paramref name="display"/>, styled by <paramref name="styleBox"/>. The box
-    /// holds a 10px block, or a word when <paramref name="holdsWord"/>, or, when
+    /// A 320px block holding a word when <paramref name="wordBefore"/>, then a raised box when
+    /// <paramref name="raisedBefore"/> (see <see cref="Raised"/>), then a link holding a word and
+    /// styled by <paramref name="link"/> unless that is <see langword="null"/>, and then a 10×60px
+    /// box of <paramref name="display"/>, styled by <paramref name="styleBox"/>. The box holds a 10px
+    /// block, or a word when <paramref name="holdsWord"/>, or, when
     /// <paramref name="nestInlineBlock"/>, a 10px-wide inline-block holding the block.
     /// </summary>
     private static (CssBox Block, CssBox Box, object Content) Lay(
@@ -166,6 +169,7 @@ public sealed class InlineBlockLineShiftTests
         Action<CssBox>? link,
         Action<CssBox> styleBox,
         bool wordBefore = false,
+        bool raisedBefore = false,
         bool holdsWord = false,
         bool nestInlineBlock = false)
     {
@@ -173,6 +177,9 @@ public sealed class InlineBlockLineShiftTests
 
         if (wordBefore)
             Word(block);
+
+        if (raisedBefore)
+            Raised(block);
 
         if (link is not null)
         {
@@ -207,6 +214,20 @@ public sealed class InlineBlockLineShiftTests
         root.PerformLayout(root.LayoutEnvironment);
         return (block, box, content);
     }
+
+    /// <summary>
+    /// An empty 10×60px inline-block in <paramref name="block"/> that <paramref name="verticalAlign"/>
+    /// raises above its line, which moves the block's lines down: <c>middle</c> does on a line it
+    /// sets the height of, and <c>bottom</c> on a line shorter than it.
+    /// </summary>
+    private static void Raised(CssBox block, string verticalAlign = "middle") =>
+        _ = new CssBox(block, new HtmlTag("span", false, null), BaseUrl)
+        {
+            Display = "inline-block",
+            Width = "10px",
+            Height = "60px",
+            VerticalAlign = verticalAlign,
+        };
 
     /// <summary>A 320px block, the only box in the root.</summary>
     private static (CssBox Root, CssBox Block) Block()
