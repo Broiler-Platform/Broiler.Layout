@@ -199,7 +199,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // element was drawn at the float's margin rather than its own — which is what left
             // css-flexbox/flexbox_item-bottom-float's *reference* an em below its test.
             && Float == CssConstants.None
-            && _parentBox.ActualPaddingTop < 0.1 && _parentBox.ActualPaddingBottom < 0.1 && _parentBox.ActualBorderTopWidth < 0.1 && _parentBox.ActualBorderBottomWidth < 0.1
+            // CSS2.1 §8.3.1: only what separates the two top margins keeps them apart, the
+            // parent's top padding and border. Its bottom ones lie at the other end of its content,
+            // and asking for them too kept the margin of a padded box's first child inside it: a
+            // block with `padding-bottom: 10px` holding a paragraph with `margin-top: 20px` began
+            // where the box before it ended and held the paragraph 20px down, where browsers
+            // begin the block 20px down with the paragraph at its top.
+            && _parentBox.ActualPaddingTop < 0.1 && _parentBox.ActualBorderTopWidth < 0.1
             // CSS2.1 §8.3.1: "margins of elements that establish new block formatting contexts
             // do not collapse with their in-flow children" — so a parent that establishes one
             // contains its first child's top margin instead of taking it as its own. The two
