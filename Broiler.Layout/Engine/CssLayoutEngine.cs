@@ -487,43 +487,43 @@ internal static class CssLayoutEngine
                 minTop = Math.Min(minTop, word.Top - (word.IsImage ? ImageWordMarginTop(word) : 0));
             }
 
-            if (blockBox.ActualLineHeight > 0)
+            double lineTop = double.MaxValue;
+            double inlineBoxTop = double.MaxValue;
+            bool hasLineContent = false;
+
+            foreach (var rect in linebox.Rectangles)
             {
-                double lineTop = double.MaxValue;
-                double inlineBoxTop = double.MaxValue;
-                bool hasLineContent = false;
+                if (IsInAbsposSubtree(rect.Key, blockBox))
+                    continue;
 
-                foreach (var rect in linebox.Rectangles)
-                {
-                    if (IsInAbsposSubtree(rect.Key, blockBox))
-                        continue;
+                // An inline, non-replaced box starts where its words do, as above. Its
+                // rectangle is the line's top only when no word is on the line: that of an
+                // inline box given a width, which the flow records from the line's top.
+                if (rect.Key.IsInlineNonReplaced)
+                    inlineBoxTop = Math.Min(inlineBoxTop, rect.Value.Top);
+                else
+                    lineTop = Math.Min(lineTop, rect.Value.Top);
 
-                    // An inline, non-replaced box starts where its words do, as above. Its
-                    // rectangle is the line's top only when no word is on the line: that of an
-                    // inline box given a width, which the flow records from the line's top.
-                    if (rect.Key.IsInlineNonReplaced)
-                        inlineBoxTop = Math.Min(inlineBoxTop, rect.Value.Top);
-                    else
-                        lineTop = Math.Min(lineTop, rect.Value.Top);
-
-                    hasLineContent = true;
-                }
-
-                foreach (var word in linebox.Words)
-                {
-                    if (IsInAbsposSubtree(word.OwnerBox, blockBox))
-                        continue;
-
-                    lineTop = Math.Min(lineTop, word.Top);
-                    hasLineContent = true;
-                }
-
-                if (lineTop == double.MaxValue)
-                    lineTop = inlineBoxTop;
-
-                if (hasLineContent)
-                    maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
+                hasLineContent = true;
             }
+
+            foreach (var word in linebox.Words)
+            {
+                if (IsInAbsposSubtree(word.OwnerBox, blockBox))
+                    continue;
+
+                lineTop = Math.Min(lineTop, word.Top);
+                hasLineContent = true;
+            }
+
+            if (lineTop == double.MaxValue)
+                lineTop = inlineBoxTop;
+
+            if (hasLineContent && blockBox.ActualLineHeight > 0)
+                maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
+
+            if (hasLineContent)
+                maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, lineTop));
         }
 
         // CSS2.1 §10.8.1: The line box height is the distance between
@@ -975,8 +975,26 @@ internal static class CssLayoutEngine
                         ? box.ActualLineHeight
                         : box.ActualFont.Height * PtToCssPx;
 
-                    if (maxbottom - cury < boxLineHeight)
-                        maxbottom += boxLineHeight - (maxbottom - cury);
+                    // The word may yet wrap, so the line it would start on is only certain to be
+                    // as tall as the block's line height, which every line has; the rest goes to
+                    // the line the word lands on, below. All of it here left the line before a
+                    // wrapped word that tall too: a link with a taller line height whose first
+                    // word went to the next line made the line above it as tall.
+                    double blockLineHeight = blockbox.ActualLineHeight > 0
+                        ? blockbox.ActualLineHeight
+                        : blockbox.ActualFont.Height * PtToCssPx;
+                    double lineHeightBeforeWrap = Math.Min(boxLineHeight, blockLineHeight);
+
+                    // CSS2.1 §10.8: the line the word lands on is as tall as the line height of
+                    // the box it is in, and of the box holding it where that is taller: a span
+                    // holding its own text, with a taller line height than its parent's. A
+                    // replaced box's line height does not apply to it.
+                    double lineHeightAfterWrap = word.IsImage
+                        ? boxLineHeight
+                        : Math.Max(boxLineHeight, b.ActualLineHeight);
+
+                    if (maxbottom - cury < lineHeightBeforeWrap)
+                        maxbottom += lineHeightBeforeWrap - (maxbottom - cury);
 
                     // CSS2.1 §10.8: The "strut" — each line box has a minimum
                     // height from the block container's font and line-height.
@@ -1044,6 +1062,9 @@ internal static class CssLayoutEngine
                         if (word.IsImage || word.Equals(b.FirstWord))
                             curx += leftspacing;
                     }
+
+                    if (maxbottom - cury < lineHeightAfterWrap)
+                        maxbottom += lineHeightAfterWrap - (maxbottom - cury);
 
                     line.ReportExistanceOf(word);
 
@@ -2184,6 +2205,80 @@ internal static class CssLayoutEngine
 
         return Math.Min(word.Bottom, word.Top + ownerLineHeight);
     }
+
+    /// <summary>
+    /// The bottom of a line holding a word whose box's <c>line-height</c> is taller than the word
+    /// and than the block's line height, from <paramref name="lineTop"/>; for any other line
+    /// <see cref="double.MinValue"/>, which leaves it to its words and the block's line height.
+    /// </summary>
+    /// <remarks>
+    /// CSS2.1 §10.8.1 makes each inline box on a line as tall as its <c>line-height</c>, half the
+    /// leading above its glyphs and half below, and the line box as tall as all of them together,
+    /// the block's own (the strut) among them. A line counted a word's line height only where it was
+    /// shorter than the word, so <c>&lt;a style="line-height: 60px"&gt;</c> in a block of normal line
+    /// height left the block one word tall, where browsers make it 60px. The glyphs stay where they
+    /// are, at the line's top as this engine places them for the block's own line height, and the
+    /// line is as tall as the inline boxes together from there. Other lines keep the measure they
+    /// had, which leaves the half-leading out.
+    /// </remarks>
+    internal static double TallInlineBoxLineBottom(CssBox blockBox, CssLineBox line, double lineTop)
+    {
+        double blockLineHeight = blockBox.ActualLineHeight;
+        bool holdsTallerBox = false;
+
+        foreach (var word in line.Words)
+        {
+            double lineHeight = WordLineHeight(word);
+            if (lineHeight > word.Height && lineHeight > blockLineHeight
+                && !IsInAbsposSubtree(word.OwnerBox, blockBox))
+            {
+                holdsTallerBox = true;
+                break;
+            }
+        }
+
+        if (!holdsTallerBox)
+            return double.MinValue;
+
+        // The strut: the block's line height around its font's glyphs, at the line's top.
+        double fontHeight = blockBox.ActualFont.Height * PtToCssPx;
+        double strutLeading = blockLineHeight > 0 ? (blockLineHeight - fontHeight) / 2 : 0;
+        double top = lineTop - strutLeading;
+        double bottom = lineTop + fontHeight + strutLeading;
+
+        foreach (var word in line.Words)
+        {
+            if (IsInAbsposSubtree(word.OwnerBox, blockBox))
+                continue;
+
+            if (word.IsImage)
+            {
+                top = Math.Min(top, word.Top - ImageWordMarginTop(word));
+                bottom = Math.Max(bottom, word.Bottom + ImageWordMarginBottom(word));
+                continue;
+            }
+
+            double lineHeight = WordLineHeight(word);
+            double halfLeading = lineHeight > 0 ? (lineHeight - word.Height) / 2 : 0;
+            top = Math.Min(top, word.Top - halfLeading);
+            bottom = Math.Max(bottom, word.Bottom + halfLeading);
+        }
+
+        foreach (var (box, rect) in line.Rectangles)
+        {
+            if (box.IsInlineNonReplaced || IsInAbsposSubtree(box, blockBox))
+                continue;
+
+            top = Math.Min(top, rect.Top);
+            bottom = Math.Max(bottom, rect.Bottom);
+        }
+
+        return lineTop + (bottom - top);
+    }
+
+    /// <summary>The <c>line-height</c> of the box a word is in, or 0 for an image or a normal one.</summary>
+    private static double WordLineHeight(CssRect word) =>
+        word.IsImage ? 0 : word.OwnerBox?.ActualLineHeight ?? 0;
 
     /// <summary>
     /// The block-start margin of an inline replaced element, which CSS2.1 §10.8.1 makes part of
