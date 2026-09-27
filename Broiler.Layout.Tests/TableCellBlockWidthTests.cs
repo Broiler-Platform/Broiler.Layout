@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.Linq;
 using Broiler.CSS;
 using Broiler.Layout.Engine;
@@ -19,6 +21,12 @@ namespace Broiler.Layout.Tests;
 /// cells' words alone, so a block 400px wide in the cell of a table with <c>width: 100px</c>
 /// counted for nothing: the table stayed 100px wide and the block ran 300px out of it, where
 /// browsers make the table 400px wide.
+/// </para>
+/// <para>
+/// A cell spanning columns is left to its words, as before. The engine puts what a spanning cell's
+/// words need beyond the columns before its last on the last one alone; with its blocks counted
+/// too, a 400px block in a cell spanning two columns made the second column 400px wide, where
+/// browsers share the block out over both.
 /// </para>
 /// <para>
 /// Each table here is in a 500px block and has no border spacing; words are 16px tall and 8px wide
@@ -93,6 +101,96 @@ public sealed class TableCellBlockWidthTests
     }
 
     /// <summary>
+    /// A table with <c>width: 100px</c> whose second row holds a 400px block, or a word as wide,
+    /// beside an x, under a row of two x's, is 408px wide, the column 400px. With the word it was
+    /// 392px wide, the column taking the word less the x's the row above had in it and in the
+    /// column after it; with the block 100px, and so 392px once the block was counted.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Content_Under_A_Row_Of_Words_Widens_Its_Column_To_Its_Whole_Width(bool block)
+    {
+        var tree = Build("100px", 2);
+        Word(tree.Cells[0], "x");
+        Word(tree.Cells[1], "x");
+        var cells = AddRow(tree, 2);
+
+        if (block)
+            Block(cells[0], "400px");
+        else
+            Word(cells[0], new string('x', 50));
+
+        Word(cells[1], "x");
+        Layout(tree);
+
+        Assert.Equal(408, tree.Table.Size.Width, 1);
+        Assert.Equal(400, cells[0].Size.Width, 1);
+    }
+
+    /// <summary>
+    /// A table with <c>width: 100px</c> holding a 200px block in its first row's first cell and a
+    /// 300px block in its second row's second cell, each beside an x, is 500px wide, the columns
+    /// 200px and 300px. It was 100px wide, and with the blocks counted but the second less the x
+    /// above it, 492px.
+    /// </summary>
+    [Fact]
+    public void Blocks_In_Two_Rows_Widen_Each_Column()
+    {
+        var tree = Build("100px", 2);
+        Block(tree.Cells[0], "200px");
+        Word(tree.Cells[1], "x");
+        var cells = AddRow(tree, 2);
+        Word(cells[0], "x");
+        Block(cells[1], "300px");
+        Layout(tree);
+
+        Assert.Equal(500, tree.Table.Size.Width, 1);
+        Assert.Equal(200, cells[0].Size.Width, 1);
+        Assert.Equal(300, cells[1].Size.Width, 1);
+    }
+
+    /// <summary>
+    /// A cell spanning both columns and holding a 400px block, above or below a row of two cells
+    /// holding an x, leaves the two columns as wide as each other, as browsers do; with an auto
+    /// width the table is 400px wide, as in browsers, each column 200px. With a spanning cell's
+    /// blocks counted as its words are, the second column took the whole block, less the first
+    /// column's x when the x's were above: it was 400px or 392px wide, and the table 600px or
+    /// 592px, or with <c>width: 100px</c> 450px or 442px.
+    /// </summary>
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(null, false)]
+    [InlineData("100px", true)]
+    [InlineData("100px", false)]
+    public void A_Block_In_A_Cell_Spanning_Two_Columns_Leaves_Them_Equal(string? width, bool spanningAbove)
+    {
+        var tree = Build(width, 0);
+        CssBox[] spanning = [], cells = [];
+
+        for (int i = 0; i < 2; i++)
+        {
+            if (i == 0 == spanningAbove)
+                spanning = AddRow(tree, 1, 2);
+            else
+                cells = AddRow(tree, 2);
+        }
+
+        Block(spanning[0], "400px");
+        Word(cells[0], "x");
+        Word(cells[1], "x");
+        Layout(tree);
+
+        Assert.Equal(cells[0].Size.Width, cells[1].Size.Width, 1);
+
+        if (width == null)
+        {
+            Assert.Equal(400, tree.Table.Size.Width, 1);
+            Assert.Equal(200, cells[0].Size.Width, 1);
+        }
+    }
+
+    /// <summary>
     /// Control, which passes before and after: a table with an auto width fits the 400px block,
     /// 400px wide.
     /// </summary>
@@ -142,12 +240,12 @@ public sealed class TableCellBlockWidthTests
         Assert.Equal(100, tree.Table.Size.Width, 1);
     }
 
-    /// <summary>The root, the table, and the cells of its one row.</summary>
-    private sealed record Tree(CssBox Root, CssBox Table, CssBox[] Cells);
+    /// <summary>The root, the table, its row group, and the cells of its first row.</summary>
+    private sealed record Tree(CssBox Root, CssBox Table, CssBox Rows, CssBox[] Cells);
 
     /// <summary>
-    /// In a 500px block in the root, a table with the given width, auto when null, and one row of
-    /// <paramref name="cells"/> empty cells, none of them padded.
+    /// In a 500px block in the root, a table with the given width, auto when null, and a first row
+    /// of <paramref name="cells"/> empty cells, none of them padded; with no cells, no row.
     /// </summary>
     private static Tree Build(string? width, int cells)
     {
@@ -167,13 +265,24 @@ public sealed class TableCellBlockWidthTests
             table.Width = width;
 
         var rows = new CssBox(table, new HtmlTag("tbody", false, null), BaseUrl) { Display = "table-row-group" };
+
+        return new Tree(root, table, rows, cells > 0 ? Row(rows, cells, 1) : []);
+    }
+
+    /// <summary>
+    /// Adds to the table a row of <paramref name="cells"/> empty cells, none of them padded, each
+    /// spanning <paramref name="colspan"/> columns.
+    /// </summary>
+    private static CssBox[] AddRow(Tree tree, int cells, int colspan = 1) => Row(tree.Rows, cells, colspan);
+
+    private static CssBox[] Row(CssBox rows, int cells, int colspan)
+    {
         var row = new CssBox(rows, new HtmlTag("tr", false, null), BaseUrl) { Display = "table-row" };
+        var attributes = new Dictionary<string, string> { ["colspan"] = colspan.ToString(CultureInfo.InvariantCulture) };
 
-        var cellBoxes = Enumerable.Range(0, cells)
-            .Select(_ => new CssBox(row, new HtmlTag("td", false, null), BaseUrl) { Display = "table-cell" })
+        return Enumerable.Range(0, cells)
+            .Select(_ => new CssBox(row, new HtmlTag("td", false, attributes), BaseUrl) { Display = "table-cell" })
             .ToArray();
-
-        return new Tree(root, table, cellBoxes);
     }
 
     /// <summary>Adds to <paramref name="parent"/> a 20px tall block with the given width.</summary>
