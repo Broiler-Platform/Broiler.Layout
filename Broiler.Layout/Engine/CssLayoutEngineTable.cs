@@ -1757,9 +1757,30 @@ internal sealed class CssLayoutEngineTable
                 int colspan = GetColSpan(cell);
                 int col = GetCellRealColumnIndex(row, cell);
                 int affectcol = Math.Min(col + colspan, _columnMinWidths.Length) - 1;
-                double spannedwidth = GetSpannedMinWidth(row, col, colspan) + (colspan - 1) * GetHorizontalSpacing();
 
-                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cell.GetMinimumWidth() - spannedwidth);
+                if (colspan > 1)
+                {
+                    // A cell spanning columns puts what its longest word needs beyond the columns
+                    // before its last on the last one alone. Its blocks are left out of that: a
+                    // 400px block in a cell spanning two columns made the second column 400px wide,
+                    // where browsers share the block out over both.
+                    double spannedwidth = GetSpannedMinWidth(row, col, colspan) + (colspan - 1) * GetHorizontalSpacing();
+                    _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cell.GetMinimumWidth() - spannedwidth);
+                    continue;
+                }
+
+                // CSS 2.1 §17.5.2.2: a column is at least as wide as its cells' minimum content
+                // width, the width their content needs not to overflow them. GetMinimumWidth is the
+                // longest word alone, so a block with a width of its own counted for nothing: a
+                // table with `width: 100px` stayed 100px wide around a 400px block in a cell, and the
+                // block ran out of it. The min-content width counts the block too.
+                cell.GetMinMaxWidth(out double minContentWidth, out _);
+                double cellMinWidth = Math.Max(cell.GetMinimumWidth(), double.IsNaN(minContentWidth) ? 0 : minContentWidth);
+
+                // The whole of it: less the minimums the columns from this one to its row's end had
+                // from the rows above, a block or a long word under a row of words left its column
+                // short of it.
+                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cellMinWidth);
             }
         }
 
