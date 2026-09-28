@@ -101,6 +101,40 @@ public sealed class RaisedLineRestackTests
     }
 
     /// <summary>
+    /// A 40px box aligned <c>bottom</c> on the second line ends where the rest of the line does,
+    /// 20px below its top, and so reaches 20px above it: the line moves down 20px, the box starts at
+    /// its top, 20px down, "delta" stands at its bottom, 42px down, and the block is 60px tall. The
+    /// box started at the block's top, over the first line, and the block was 40px.
+    /// </summary>
+    [Fact]
+    public void A_Tall_Box_Aligned_Bottom_Moves_The_Line_Down()
+    {
+        var t = Build(b => { Text(b, "alpha beta gamma delta"); Raised(b, CssConstants.Bottom, height: 40); Text(b, " omega"); });
+        Layout(t);
+
+        Assert.Equal(20, t.Raised[0].Location.Y - t.Block.ClientTop, 1);
+        Assert.Equal(42, WordTop(t, "delta"), 1);
+        Assert.Equal(42, WordTop(t, "omega"), 1);
+        Assert.Equal(60, t.Block.Size.Height, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a 40px box aligned <c>top</c> on the second line
+    /// starts at the line's top, 20px down, with "delta" 22px down beside it, and the block is 60px
+    /// tall.
+    /// </summary>
+    [Fact]
+    public void Control_A_Tall_Box_Aligned_Top_On_The_Second_Line()
+    {
+        var t = Build(b => { Text(b, "alpha beta gamma delta"); Raised(b, CssConstants.Top, height: 40); Text(b, " omega"); });
+        Layout(t);
+
+        Assert.Equal(20, t.Raised[0].Location.Y - t.Block.ClientTop, 1);
+        Assert.Equal(22, WordTop(t, "delta"), 1);
+        Assert.Equal(60, t.Block.Size.Height, 1);
+    }
+
+    /// <summary>
     /// Laid out a second time, the second line is 5.2px down still, and the block 45.2px tall.
     /// </summary>
     [Fact]
