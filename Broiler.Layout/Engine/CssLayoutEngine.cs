@@ -425,11 +425,20 @@ internal static class CssLayoutEngine
                 if (IsInAbsposSubtree(rect.Key, blockBox))
                     continue;
 
-                maxBottom = Math.Max(maxBottom, InlineRectLineBoxBottom(rect.Key, rect.Value));
+                // CSS2.1 §10.6.1: an inline, non-replaced box's vertical padding and border are
+                // not part of its line. Its rectangle reaches above and below its words by them,
+                // so a link with 10px of padding on a block's first line moved every line of the
+                // block 10px down and made the block 10px taller. Its words, measured below, and
+                // the atomic boxes inside it, which have rectangles of their own, are what it puts
+                // on the line.
+                if (rect.Key.IsInlineNonReplaced)
+                    continue;
+
+                maxBottom = Math.Max(maxBottom, rect.Value.Bottom);
                 // CSS2.1 §10.8: an atomic inline-block contributes its *margin*
                 // box plus the line's strut descent below the baseline to the
-                // line-box height.  InlineRectLineBoxBottom returns only the
-                // border box (its rectangle excludes the bottom margin), so for
+                // line-box height.  Its rectangle is only the border box (it
+                // excludes the bottom margin), so for
                 // an *anonymous* block — which has no visual box of its own and
                 // exists purely to position the next block-level sibling (e.g.
                 // the anonymous wrappers a <br> splits inline content into) —
@@ -489,6 +498,7 @@ internal static class CssLayoutEngine
             if (blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
             {
                 double lineTop = double.MaxValue;
+                double inlineBoxTop = double.MaxValue;
                 bool hasLineContent = false;
 
                 foreach (var rect in linebox.Rectangles)
@@ -496,7 +506,14 @@ internal static class CssLayoutEngine
                     if (IsInAbsposSubtree(rect.Key, blockBox))
                         continue;
 
-                    lineTop = Math.Min(lineTop, rect.Value.Top);
+                    // An inline, non-replaced box starts where its words do, as above. Its
+                    // rectangle is the line's top only when no word is on the line: that of an
+                    // inline box given a width, which the flow records from the line's top.
+                    if (rect.Key.IsInlineNonReplaced)
+                        inlineBoxTop = Math.Min(inlineBoxTop, rect.Value.Top);
+                    else
+                        lineTop = Math.Min(lineTop, rect.Value.Top);
+
                     hasLineContent = true;
                 }
 
@@ -508,6 +525,9 @@ internal static class CssLayoutEngine
                     lineTop = Math.Min(lineTop, word.Top);
                     hasLineContent = true;
                 }
+
+                if (lineTop == double.MaxValue)
+                    lineTop = inlineBoxTop;
 
                 if (hasLineContent)
                     maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
@@ -2385,29 +2405,6 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
-    /// Same line-height clamp as <see cref="InlineWordLineBoxBottom"/> but for a
-    /// non-atomic inline box's accumulated rectangle.  Inline boxes (incl. the
-    /// anonymous inline box that wraps a block's direct text) contribute their
-    /// line-height to the line box, not their font content area.  Replaced
-    /// inline content (images) and inline-block boxes keep their full margin
-    /// box, which legitimately establishes the line box extent.
-    /// </summary>
-    private static double InlineRectLineBoxBottom(CssBox box, RectangleF rect)
-    {
-        if (box.IsImage
-            || box.Display == CssConstants.InlineBlock
-            || box.Display is "inline-flex" or "inline-grid"
-            || !box.IsInline)
-            return rect.Bottom;
-
-        double lineHeight = box.ActualLineHeight;
-        if (lineHeight <= 0)
-            return rect.Bottom;
-
-        return Math.Min(rect.Bottom, rect.Top + lineHeight);
-    }
-
-    /// <summary>
     /// Returns whether <paramref name="box"/> ends with atomic inline-level
     /// content (an <c>inline-block</c>/<c>inline-flex</c>/<c>inline-grid</c>
     /// box), looking through the anonymous block wrapper that the
@@ -2684,9 +2681,11 @@ internal static class CssLayoutEngine
             double finalTop = double.MaxValue;
             double finalBottom = double.MinValue;
 
+            // An inline, non-replaced box reaches as far as its words, which the next loop
+            // measures: its vertical padding and border are not part of the line (CSS2.1 §10.6.1).
             foreach (var kvp in lineBox.Rectangles)
             {
-                if (!topBottomBoxes.Contains(kvp.Key))
+                if (!topBottomBoxes.Contains(kvp.Key) && !kvp.Key.IsInlineNonReplaced)
                 {
                     finalTop = Math.Min(finalTop, kvp.Value.Top);
                     finalBottom = Math.Max(finalBottom, kvp.Value.Bottom);
