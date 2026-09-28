@@ -157,9 +157,22 @@ internal static class CssBoxHelper
         else
         {
             foreach (CssBox childBox in box.Boxes)
+            {
+                // See GetMinMaxSumWords: a positioned child's words are out of flow with it.
+                if (IsOutOfFlowPositioned(childBox))
+                    continue;
+
                 GetMinimumWidth_LongestWord(childBox, ref maxWidth, ref maxWidthWord);
+            }
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is absolutely or fixed positioned, and so out of flow: it
+    /// takes no room in its parent's content (CSS 2.1 §9.6).
+    /// </summary>
+    internal static bool IsOutOfFlowPositioned(CssBox box) =>
+        box.Position == CssConstants.Absolute || box.Position == CssConstants.Fixed;
 
     public static double GetWidthMarginDeep(CssBox box)
     {
@@ -385,6 +398,14 @@ internal static class CssBoxHelper
             for (int i = 0; i < box.Boxes.Count; i++)
             {
                 CssBox childBox = box.Boxes[i];
+
+                // CSS Sizing 3 §5: a box's intrinsic sizes come from its in-flow content, and an
+                // absolutely or fixed positioned child is out of flow: it takes no room on any line
+                // or in any word's path. This walk measured it like any other child, so a dropdown
+                // menu 300px wide, positioned in an inline-block, a float or a table cell, made the
+                // box around it 300px wide, where browsers size that box to the rest of its content.
+                if (IsOutOfFlowPositioned(childBox))
+                    continue;
 
                 // A <br> forces a line break, so max-content is the widest line:
                 // close the running line here and start a fresh one. Otherwise the
@@ -661,6 +682,11 @@ internal static class CssBoxHelper
         if (IsRootElement(box))
             return mb;
 
+        // Nor do those of a box that establishes a new block formatting context with its
+        // children's: its last child's margin stays inside it (see MarginBottomCollapse).
+        if (EstablishesBfc(box))
+            return mb;
+
         if (box.Height != CssConstants.Auto && !string.IsNullOrEmpty(box.Height))
         {
             bool resolvedToAuto = box.Height.Contains('%')
@@ -799,6 +825,15 @@ internal static class CssBoxHelper
         return box.Float != CssConstants.None
             || box.Display == CssConstants.InlineBlock
             || box.Display == CssConstants.TableCell
+            // CSS2.1 §9.4.1 names table captions with table cells. A caption's first child's
+            // top margin collapsed through the caption's top, and the table put the caption
+            // back where it belongs and the child with it: <caption><p style="margin-top:
+            // 16px"> lost the 16px, where browsers keep it inside the caption.
+            || box.Display == CssConstants.TableCaption
+            // CSS2.1 §17.4: the table wrapper box, which the table's box stands for here,
+            // establishes a block formatting context of its own.
+            || box.Display == CssConstants.Table
+            || box.Display == CssConstants.InlineTable
             // CSS Display 3 §2.5: `flow-root` is exactly "block box that
             // establishes a new block formatting context".
             || box.Display == "flow-root"
@@ -806,8 +841,25 @@ internal static class CssBoxHelper
             || box.Position == CssConstants.Absolute
             || box.Position == CssConstants.Fixed
             || (box.Overflow != null && box.Overflow != CssConstants.Visible)
-            || (box.AlignContent != null && box.AlignContent != "normal");
+            || (box.AlignContent != null && box.AlignContent != "normal")
+            || IsFlexOrGridItem(box);
     }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is an item of a flex or grid container, which establishes an
+    /// independent formatting context for its contents (CSS Flexbox §4, CSS Grid §6.2) whatever its
+    /// own <c>display</c>, so its children's margins do not collapse through its edges.
+    /// </summary>
+    /// <remarks>
+    /// Without it, a block item's first child's top margin collapsed through the item's top: in a
+    /// column, an unpadded item holding a paragraph with 16px margins sat 16px low with the margin
+    /// outside it, and in a row or a grid, where the item is placed at the top of its line or area
+    /// whatever its margins, the paragraph's margin was lost.
+    /// </remarks>
+    private static bool IsFlexOrGridItem(CssBox box) =>
+        box.ParentBox is { Display: "flex" or "inline-flex" or "grid" or "inline-grid" }
+        && box.Display != CssConstants.None
+        && box.Position is not (CssConstants.Absolute or CssConstants.Fixed);
 
     private static void CollectFloatsInSubtree(CssBox root, List<CssBox> result)
     {
@@ -945,10 +997,12 @@ internal static class CssBoxHelper
         if (!IsEmptyCollapsible(box))
             return box.ActualMarginBottom;
 
-        double maxPos = 0, maxNeg = 0;
+        // The empty box's own margins join the set collapsed above it, as CssBox.MarginTopCollapse
+        // takes it for the box after the empty one.
+        double maxPos = box.CollapsedMarginTop, maxNeg = box.NegativeMarginTopAbove;
         CollectEmptyBoxMargins(box, ref maxPos, ref maxNeg);
 
         double collapsed = maxPos + maxNeg;
-        return collapsed - box.CollapsedMarginTop;
+        return collapsed - box.MarginSpentAboveTop;
     }
 }

@@ -385,10 +385,66 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return true;
     }
 
+    // The intrinsic-width measurements of this box's content in progress, and of any box's content
+    // on this thread: see IsInsideContentMeasurement.
+    private int _contentMeasurementDepth;
+
+    [ThreadStatic] private static int _contentMeasurements;
+
+    /// <summary>
+    /// Marks this box's content as being measured for its intrinsic width until disposed.
+    /// </summary>
+    private ContentMeasurement MeasureContent() => new(this);
+
+    private readonly struct ContentMeasurement : IDisposable
+    {
+        private readonly CssBox _box;
+
+        public ContentMeasurement(CssBox box)
+        {
+            _box = box;
+            box._contentMeasurementDepth++;
+            _contentMeasurements++;
+        }
+
+        public void Dispose()
+        {
+            _box._contentMeasurementDepth--;
+            _contentMeasurements--;
+        }
+    }
+
+    /// <summary>
+    /// Whether the content of a box around this one is being measured for its intrinsic width.
+    /// </summary>
+    /// <remarks>
+    /// A percentage margin or padding of this box then refers to a width that depends on the
+    /// measurement, and CSS Sizing 3 §5.2.1 resolves such a cyclic percentage against zero for
+    /// intrinsic size contributions: a float holding a block with <c>padding-left: 10%</c> and a
+    /// word is as wide as the word, and the padding a tenth of that. The same section takes a
+    /// cyclic percentage width for auto, as <see cref="ComputeShrinkToFitWidth"/> does. A float,
+    /// or an absolutely positioned box, takes the width it has room for before it measures its
+    /// content, and a percentage resolved against that made it as much wider.
+    /// </remarks>
+    private bool IsInsideContentMeasurement()
+    {
+        if (_contentMeasurements == 0)
+            return false;
+
+        for (var box = ParentBox; box != null; box = box.ParentBox)
+        {
+            if (box._contentMeasurementDepth > 0)
+                return true;
+        }
+
+        return false;
+    }
+
     internal double GetMinimumWidth()
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         double maxWidth = 0;
         CssRect maxWidthWord = null;
@@ -418,6 +474,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // CSS Containment 2 §3.2: a size-contained box measures as though it were empty, so there
         // are no contents here to measure.
@@ -443,6 +500,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // CSS Containment 2 §3.2: a size-contained box measures as though it were empty. Ahead of
         // the grid branch below for the same reason it is ahead of the word walk: a contained
@@ -508,6 +566,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // A grid with a fixed track template shrink-to-fits to its physical-width
         // track sum (+ gaps), not the max-content of its inline content — an empty
@@ -530,6 +589,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in Boxes)
         {
+            // See CssBoxHelper.GetMinMaxSumWords: an absolutely or fixed positioned child is out of
+            // flow and takes no room on any line, and a display: none one generates no box at all
+            // (CSS 2.1 §9.2.4). Its own width was taken all the same, so a hidden block 300px wide
+            // made a float around it 300px wide.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child) || child.Display == CssConstants.None)
+                continue;
+
             double childWidth;
 
             if (child.Width != CssConstants.Auto && !string.IsNullOrEmpty(child.Width)
@@ -1019,6 +1085,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     private double ComputeIntrinsicInlineSize(bool useMin)
     {
+        using var measuring = MeasureContent();
+
         // CSS Flexbox §9.9.1: a row flex container's items sit side by side, so they add up,
         // where the loop below takes each blockified item for a line of its own.
         if (TryGetFlexRowIntrinsicContentWidths(out double flexMinContent, out double flexMaxContent))
@@ -1028,6 +1096,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in Boxes)
         {
+            // See ComputeShrinkToFitWidth: a positioned child is out of flow, and a display: none
+            // one generates no box.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child) || child.Display == CssConstants.None)
+                continue;
+
             double childWidth;
 
             if (child.Width != CssConstants.Auto && !string.IsNullOrEmpty(child.Width)
@@ -1121,6 +1194,27 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
 
         return maxBottom + ActualPaddingBottom + ActualBorderBottomWidth;
+    }
+
+    /// <summary>
+    /// CSS2.1 §10.6.7: extends this box, the root of a formatting context laid out through line
+    /// layout, to the bottom margin edge of the lowest float inside it, where its lines end above
+    /// that.
+    /// </summary>
+    /// <remarks>
+    /// A block-level root laid out that way gets this from <see cref="MarginBottomCollapse"/>.
+    /// An atomic inline-level box, or a flex or grid item laid out as one, is laid out through
+    /// <c>CssLayoutEngine.FlowInlineBlock</c> instead, which took its height from its lines alone.
+    /// </remarks>
+    internal void ContainDescendantFloats()
+    {
+        double contentBottom = ActualBottom - ActualPaddingBottom - ActualBorderBottomWidth;
+        double floatBottom = contentBottom;
+
+        FindMaxDescendantFloatBottom(this, ref floatBottom);
+
+        if (floatBottom > contentBottom)
+            ActualBottom = floatBottom + ActualPaddingBottom + ActualBorderBottomWidth;
     }
 
     /// <summary>
