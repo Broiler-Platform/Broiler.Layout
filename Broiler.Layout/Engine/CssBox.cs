@@ -349,9 +349,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <c>overflow: hidden</c>) were left at the top of the line instead of standing on its
     /// baseline, so two of different heights came out top-aligned rather than bottom-aligned.
     /// <para>
-    /// An <c>inline-block</c> that does have line boxes and clips nothing is deliberately not
-    /// covered: its baseline comes from its own text, which this engine does not yet track, and
-    /// leaving it at the flow position is the answer it has always given.
+    /// An <c>inline-block</c> that does have line boxes and clips nothing is not covered: its
+    /// baseline is its last line's, which <see cref="CssLayoutEngine.LastLineBaseline"/> finds.
     /// </para>
     /// </remarks>
     internal bool UsesBottomMarginEdgeBaseline =>
