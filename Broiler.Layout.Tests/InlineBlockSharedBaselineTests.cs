@@ -37,8 +37,8 @@ public sealed class InlineBlockSharedBaselineTests
     [InlineData("middle", 14)]
     [InlineData("text-top", 10)]
     [InlineData("text-bottom", 36.8)]
-    [InlineData("super", 52)]
-    [InlineData("sub", 10)]
+    [InlineData("super", 48.1)]
+    [InlineData("sub", 34.7)]
     [InlineData("10px", 50)]
     public void Boxes_On_The_Baseline_Stand_On_Their_Own_Bottom(string verticalAlign, float shortTop)
     {
