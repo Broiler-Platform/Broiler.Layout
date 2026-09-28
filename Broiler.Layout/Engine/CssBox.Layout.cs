@@ -914,14 +914,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // absolute ActualBottom, so its advance is (flowPrevBottom - baseTop);
             // an inline/text preceding sibling records no block bottom
             // (flowPrevBottom == 0), which must NOT drag the box above the parent's
-            // content top — clamp the advance to ≥ 0. This keeps a block-after-block
-            // static position byte-identical while fixing an abspos box that follows
-            // inline content in a nested block (e.g. `<div>text<div
+            // content top — so its advance is clamped to ≥ 0. That fixed an abspos box
+            // that follows inline content in a nested block (e.g. `<div>text<div
             // style="position:absolute"></div></div>`), which previously resolved to
             // the containing block's top (y = 0) instead of its parent's content top.
+            // A block's advance is not clamped: a negative margin can pull a block
+            // above the content top, and the box after it goes right below it. The
+            // clamp put the block after a 5px block with margin-top: -20px at the
+            // content top, where browsers put it right below that block, 15px higher.
             double baseTop = ParentBox == null ? Location.Y : ParentBox.ClientTop;
-            double top = baseTop + marginCollapse
-                + (flowPrev != null ? Math.Max(0, flowPrevBottom - baseTop) : 0);
+            double advance = flowPrev != null ? flowPrevBottom - baseTop : 0;
+
+            if (flowPrev is { IsInline: true })
+                advance = Math.Max(0, advance);
+
+            double top = baseTop + marginCollapse + advance;
 
             // CSS2.1 §10.3.7 / §10.6.4: an out-of-flow box that was flowed
             // through an inline formatting context takes its *static* position
