@@ -303,6 +303,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (lines.Count == 1 && definiteContentHeight is { } definite && definite > line.CrossSize)
                 line.CrossSize = definite;
 
+            // CSS Flexbox §9.4 step 8: a single-line container's line is clamped to the container's
+            // own min and max cross sizes. The container's min-height made it taller than its line
+            // and no more, so the items were aligned in the line alone: an icon centred in an
+            // inline-flex button 32px tall by its min-height stood at the button's top, where
+            // browsers centre it, 6px down.
+            if (lines.Count == 1)
+                line.CrossSize = ClampToContentHeightBounds(line.CrossSize);
+
             StretchFlexLineItems(line);
 
             double usedWidth = 0;
@@ -1958,6 +1966,25 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return height > 0 ? height : null;
     }
 
+    /// <summary>
+    /// <paramref name="contentHeight"/> clamped to this box's <c>min-height</c> and
+    /// <c>max-height</c>, taken as content heights; <c>min-height</c> wins where they conflict.
+    /// </summary>
+    private double ClampToContentHeightBounds(double contentHeight)
+    {
+        var bounds = ResolveBlockSizeBounds();
+        if (bounds.IsUnconstrained)
+            return contentHeight;
+
+        double edges = UsesBorderBoxSizing
+            ? ActualPaddingTop + ActualPaddingBottom + ActualBorderTopWidth + ActualBorderBottomWidth
+            : 0;
+        double min = Math.Max(0, bounds.Min - edges);
+        double max = double.IsPositiveInfinity(bounds.Max) ? double.PositiveInfinity : Math.Max(0, bounds.Max - edges);
+
+        return Math.Max(Math.Min(contentHeight, max), min);
+    }
+
     private static void LayoutFlexItemAtTargetHeight(ILayoutEnvironment g, CssBox child, double targetOuterHeight)
     {
         double targetBorderBoxHeight = Math.Max(0, targetOuterHeight - child.ActualMarginTop - child.ActualMarginBottom);
@@ -2225,10 +2252,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (align is "" or "auto" or "normal")
             align = NormalizeBoxAlignment(AlignItems);
 
+        // CSS Box Alignment 3 §4.4: a flex item's alignment is unsafe unless it says otherwise, so
+        // an item taller than its line, as one is in a line its container's max-height clamps
+        // (§9.4 step 8), overflows it on both sides when centred and above it when aligned to
+        // the end.
         double itemOuterHeight = GetFlexItemOuterHeight(child);
         double freeSpace = lineCrossSize - itemOuterHeight;
-        if (freeSpace <= 0)
-            return 0;
 
         return align switch
         {
