@@ -33,15 +33,6 @@ internal static class CssLayoutEngine
     private const double TypicalAscentRatio = 0.8;
 
     /// <summary>
-    /// Ratio to convert typographic points to CSS pixels (96 DPI / 72 DPI).
-    /// Layout coordinates are in CSS px, but font metrics from the layout
-    /// font are at pt-scale (the layout font is created in canvas units, and
-    /// the layout font is created at pt size).  This factor bridges the gap
-    /// for line-height calculations where font.Height is the fallback.
-    /// </summary>
-    private const double PtToCssPx = CssMetrics.PtToPx;
-
-    /// <summary>
     /// Resolves a replaced element's specified width/height to a definite pixel
     /// length when it is neither <c>auto</c>, a percentage, nor an intrinsic-size
     /// keyword. Unlike a raw <see cref="CssLength"/> pixel check this resolves
@@ -336,7 +327,7 @@ internal static class CssLayoutEngine
 
         double firstLineHeight = blockBox.ActualLineHeight > 0
             ? blockBox.ActualLineHeight
-            : blockBox.ActualFont.Height * PtToCssPx;
+            : blockBox.ActualFont.Height;
 
         double curx = BandLeftAt(blockBox, starty, firstLineHeight, startx) + blockBox.ActualTextIndent;
         double cury = starty;
@@ -459,7 +450,7 @@ internal static class CssLayoutEngine
                 {
                     double lineStrut = blockBox.ActualLineHeight > 0
                         ? blockBox.ActualLineHeight
-                        : blockBox.ActualFont.Height * PtToCssPx;
+                        : blockBox.ActualFont.Height;
                     double marginBoxBottom = rect.Value.Bottom + rect.Key.ActualMarginBottom
                         + lineStrut * (1.0 - TypicalAscentRatio);
 
@@ -491,7 +482,7 @@ internal static class CssLayoutEngine
                 {
                     double lineStrut = blockBox.ActualLineHeight > 0
                         ? blockBox.ActualLineHeight
-                        : blockBox.ActualFont.Height * PtToCssPx;
+                        : blockBox.ActualFont.Height;
 
                     maxBottom = Math.Max(maxBottom,
                         word.Bottom + ImageWordMarginBottom(word)
@@ -1006,13 +997,11 @@ internal static class CssLayoutEngine
                 {
                     // CSS2.1 §10.8: Every line box has a minimum height
                     // from the block container's line-height (the "strut").
-                    // When line-height is 'normal' (ActualLineHeight == 0),
-                    // the minimum comes from the font metrics, scaled to CSS
-                    // px (font.Height is at pt-scale because the layout font
-                    // is created at pt size in canvas units).
+                    // When ActualLineHeight is 0, the minimum comes from the
+                    // font's height, which ILayoutFont gives in CSS pixels.
                     double boxLineHeight = box.ActualLineHeight > 0
                         ? box.ActualLineHeight
-                        : box.ActualFont.Height * PtToCssPx;
+                        : box.ActualFont.Height;
 
                     // The word may yet wrap, so the line it would start on is only certain to be
                     // as tall as the block's line height, which every line has; the rest goes to
@@ -1021,7 +1010,7 @@ internal static class CssLayoutEngine
                     // word went to the next line made the line above it as tall.
                     double blockLineHeight = blockbox.ActualLineHeight > 0
                         ? blockbox.ActualLineHeight
-                        : blockbox.ActualFont.Height * PtToCssPx;
+                        : blockbox.ActualFont.Height;
                     double lineHeightBeforeWrap = Math.Min(boxLineHeight, blockLineHeight);
 
                     // CSS2.1 §10.8: the line the word lands on is as tall as the line height of
@@ -1057,7 +1046,7 @@ internal static class CssLayoutEngine
                         strutHeight = blockbox.ActualLineHeight;
 
                         if (strutHeight <= 0)
-                            strutHeight = blockbox.ActualFont.Height * PtToCssPx;
+                            strutHeight = blockbox.ActualFont.Height;
 
                         if (maxbottom - cury < strutHeight)
                             maxbottom += strutHeight - (maxbottom - cury);
@@ -1115,7 +1104,7 @@ internal static class CssLayoutEngine
                     // within the strut is at the font's ascent from the top.
                     if (word.IsImage && strutHeight > imageMarginBoxHeight)
                     {
-                        double fontHeight = blockbox.ActualFont.Height * PtToCssPx;
+                        double fontHeight = blockbox.ActualFont.Height;
                         double baseline = fontHeight * TypicalAscentRatio;
                         word.Top = Math.Max(cury, cury + baseline - imageMarginBoxHeight) + imageMarginTop;
                     }
@@ -1148,7 +1137,7 @@ internal static class CssLayoutEngine
                     {
                         double lineStrut = blockbox.ActualLineHeight > 0
                             ? blockbox.ActualLineHeight
-                            : blockbox.ActualFont.Height * PtToCssPx;
+                            : blockbox.ActualFont.Height;
                         maxbottom = Math.Max(maxbottom,
                             word.Bottom + imageMarginBottom
                             + lineStrut * (1.0 - TypicalAscentRatio));
@@ -1522,7 +1511,7 @@ internal static class CssLayoutEngine
         {
             double lineStrut = blockbox.ActualLineHeight > 0
                 ? blockbox.ActualLineHeight
-                : blockbox.ActualFont.Height * PtToCssPx;
+                : blockbox.ActualFont.Height;
             double baselineDescent = lineStrut * (1.0 - TypicalAscentRatio);
 
             curx = startx + leftspacing;
@@ -2435,7 +2424,7 @@ internal static class CssLayoutEngine
             return double.MinValue;
 
         // The strut: the block's line height around its font's glyphs, at the line's top.
-        double fontHeight = blockBox.ActualFont.Height * PtToCssPx;
+        double fontHeight = blockBox.ActualFont.Height;
         double strutLeading = blockLineHeight > 0 ? (blockLineHeight - fontHeight) / 2 : 0;
         double top = lineTop - strutLeading;
         double bottom = lineTop + fontHeight + strutLeading;
@@ -2708,7 +2697,7 @@ internal static class CssLayoutEngine
     private static double BaselineAscentOf(CssBox box, CssLineBox lineBox)
     {
         if (!IsAtomicInline(box) || !lineBox.Rectangles.TryGetValue(box, out RectangleF rect))
-            return box.ActualFont.Height * PtToCssPx * TypicalAscentRatio;
+            return box.ActualFont.Height * TypicalAscentRatio;
 
         // An inline-block with a line of text in it and nothing clipped has that line's baseline.
         return box.Display == CssConstants.InlineBlock && LastLineBaseline(box) is double baseline
@@ -2758,7 +2747,7 @@ internal static class CssLayoutEngine
 
             double wordBaseline = word.Top + (word.IsImage
                 ? word.Height
-                : word.OwnerBox.ActualFont.Height * PtToCssPx * TypicalAscentRatio);
+                : word.OwnerBox.ActualFont.Height * TypicalAscentRatio);
 
             any = Math.Max(any, wordBaseline);
 
@@ -2878,7 +2867,7 @@ internal static class CssLayoutEngine
         }
 
         // Start with the strut baseline (parent's font ascent from line top).
-        double parentFontHeight = (lineBox.OwnerBox?.ActualFont.Height ?? 0) * PtToCssPx;
+        double parentFontHeight = lineBox.OwnerBox?.ActualFont.Height ?? 0;
         double baseline = (lineTop < double.MaxValue)
             ? lineTop + parentFontHeight * TypicalAscentRatio
             : float.MinValue;
@@ -3018,7 +3007,7 @@ internal static class CssLayoutEngine
                     if (lineBox.Rectangles.TryGetValue(box, out RectangleF value1) && baseline > float.MinValue)
                     {
                         double boxHeight = value1.Height;
-                        double parentFont = (box.ParentBox?.ActualFont.Height ?? 0) * PtToCssPx;
+                        double parentFont = box.ParentBox?.ActualFont.Height ?? 0;
                         double halfXHeight = parentFont * 0.25;
                         lineBox.SetBaseLine(box, baseline - halfXHeight - boxHeight / 2);
                     }
@@ -3035,7 +3024,7 @@ internal static class CssLayoutEngine
                     {
                         double lineHeight = box.ActualLineHeight > 0
                             ? box.ActualLineHeight
-                            : box.ActualFont.Height * PtToCssPx;
+                            : box.ActualFont.Height;
                         double offset = CssLengthParser.ParseLength(
                             box.VerticalAlign, lineHeight, box.GetEmHeight());
 

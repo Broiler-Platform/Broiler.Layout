@@ -16,26 +16,26 @@ namespace Broiler.Layout.Tests;
 /// CSS 2.1 §10.8.1: <c>vertical-align: middle</c> aligns the vertical midpoint of the box with the
 /// baseline of the parent box plus half the x-height of the parent. As for a length, plus raises.
 /// The engine added the half x-height to the baseline's y instead, which lowered the midpoint by as
-/// much: an empty 10px inline-block aligned middle in 16px text hung 17.4px below the line's top,
+/// much: an empty 10px inline-block aligned middle in 16px text hung 11.8px below the line's top,
 /// its bottom well under the text, where browsers centre it on the text's lowercase letters.
 /// </para>
 /// <para>
 /// Each line here is in a 320px block and is 16px tall; words are 16px tall and 8px wide a letter.
-/// The engine puts the baseline of such a line 17.07px below its top, and takes half the font's
-/// x-height as 5.33px.
+/// The baseline of such a line is 12.8px below its top, and the engine takes half the font's
+/// x-height as 4px.
 /// </para>
 /// </remarks>
 public sealed class VerticalAlignMiddleTests
 {
     private static readonly Uri BaseUrl = new("file:///vertical-align-middle.html");
 
-    private const double Baseline = 17.07;
+    private const double Baseline = 12.8;
 
-    private const double HalfXHeight = 5.33;
+    private const double HalfXHeight = 4;
 
     /// <summary>
     /// An empty 10px inline-block aligned middle between "a" and "b" has its middle half an
-    /// x-height above the baseline, 11.73px down, so its top is 6.73px down. Its top was 17.4px
+    /// x-height above the baseline, 8.8px down, so its top is 3.8px down. Its top was 11.8px
     /// down, its middle as far below the baseline.
     /// </summary>
     [Fact]
@@ -51,8 +51,8 @@ public sealed class VerticalAlignMiddleTests
 
     /// <summary>
     /// Beside a 30px image on the baseline, whose bottom is the baseline, an empty 10px inline-block
-    /// aligned middle has its middle half an x-height above the image's bottom: 19.67px down. It was
-    /// 30.33px down, its top below the image's bottom.
+    /// aligned middle has its middle half an x-height above the image's bottom: 21px down. It was
+    /// 29px down, its middle as far below the image's bottom.
     /// </summary>
     [Fact]
     public void A_Box_Aligned_Middle_Beside_An_Image_Centres_Above_The_Images_Bottom()
@@ -68,9 +68,9 @@ public sealed class VerticalAlignMiddleTests
     }
 
     /// <summary>
-    /// An empty 40px inline-block aligned middle reaches 8.27px above the line's top, so the line
-    /// moves down by as much: the box is at the top, the words 8.27px down. The box was 2.4px down
-    /// and the words at the top.
+    /// An empty 40px inline-block aligned middle reaches 11.2px above the line's top, so the line
+    /// moves down by as much: the box is at the top, the words 11.2px down. The box was 3.2px
+    /// down.
     /// </summary>
     [Fact]
     public void A_Tall_Box_Aligned_Middle_Reaches_Above_The_Words_And_Moves_Them_Down()
@@ -87,7 +87,7 @@ public sealed class VerticalAlignMiddleTests
 
     /// <summary>
     /// A 16px word aligned middle has its middle half an x-height above the baseline, so it stands
-    /// 3.73px down. It stood 14.4px down, nearly a line below the words beside it.
+    /// 0.8px down. It stood 8.8px down, half a line below the words beside it.
     /// </summary>
     [Fact]
     public void A_Word_Aligned_Middle_Centres_Above_The_Baseline()
@@ -102,7 +102,7 @@ public sealed class VerticalAlignMiddleTests
     }
 
     /// <summary>
-    /// Laid out a second time, the 10px inline-block aligned middle is 6.73px down still.
+    /// Laid out a second time, the 10px inline-block aligned middle is 3.8px down still.
     /// </summary>
     [Fact]
     public void A_Second_Layout_Gives_The_Same_Position()
