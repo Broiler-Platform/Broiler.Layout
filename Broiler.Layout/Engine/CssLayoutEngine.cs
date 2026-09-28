@@ -1073,9 +1073,15 @@ internal static class CssLayoutEngine
                     // 3000px Ahem word in a 200px line was wrapping to a second
                     // line, so #red-parent grew to ~400px and red showed above
                     // the green). Words are added to the line via
-                    // ReportExistanceOf below, so Words.Count == 0 means this
-                    // word is the first on the current line.
-                    bool lineHasContent = line.Words.Count > 0;
+                    // ReportExistanceOf below, and a box placed on it whole, as
+                    // an inline-block is, is in its rectangles: with neither,
+                    // this word is the first on the current line. Such a box
+                    // did not count, so a word after an inline-block that it
+                    // did not fit beside never wrapped and ran on past the
+                    // block's edge: in a 100px block, "abcdefgh" after a 90px
+                    // inline-block stayed 90px in, where browsers put it on
+                    // the next line.
+                    bool lineHasContent = LineHoldsContent(line);
                     double lineRight = BandRightAt(blockbox, cury, boxLineHeight, limitRight);
                     if ((b.WhiteSpace != CssConstants.NoWrap && b.WhiteSpace != CssConstants.Pre && curx + word.Width + rightspacing > lineRight
                          && (b.WhiteSpace != CssConstants.PreWrap || !word.IsSpaces)
@@ -1109,7 +1115,7 @@ internal static class CssLayoutEngine
                     // that wrapped was: the first word on the block's first line, or after a
                     // <br>, stayed beside a float it did not fit beside and ran on across the
                     // float's side, where browsers put it below the float.
-                    else if (!word.IsLineBreak && !word.IsSpaces && !LineHoldsContent(line)
+                    else if (!word.IsLineBreak && !word.IsSpaces && !lineHasContent
                         && curx + word.Width + rightspacing > lineRight)
                     {
                         double bandLeft = BandLeftAt(blockbox, cury, boxLineHeight, startx);
