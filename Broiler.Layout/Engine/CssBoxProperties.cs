@@ -632,6 +632,20 @@ internal abstract partial class CssBoxProperties
     internal PointF? InlineStaticPosition { get; set; }
 
     /// <summary>
+    /// For a float among a block's inline content: where the content before it left it in the
+    /// block's last line layout, which decides the line it is placed on (see
+    /// <see cref="InlineFloats"/>). Null when the float was not flowed through inline content.
+    /// </summary>
+    internal InlineFloatPlacement? InlineFloatPlacement { get; set; }
+
+    /// <summary>
+    /// For a float placed from <see cref="InlineFloatPlacement"/>: the highest its margin box
+    /// could go, from where the content before it was then. The block lays its lines out again
+    /// beside its floats and places them again only when that has moved.
+    /// </summary>
+    internal double? InlineFloatTopFloor { get; set; }
+
+    /// <summary>
     /// When this box is an absolutely-positioned grid item, the grid container's
     /// track-sizing pass records the item's resolved grid area here in absolute
     /// coordinates (X/Y = area origin, Width/Height = area size). CSS Grid §9

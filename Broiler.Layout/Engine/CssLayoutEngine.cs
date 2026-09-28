@@ -341,6 +341,7 @@ internal static class CssLayoutEngine
 
         //Flow words and boxes
         FlowBox(g, blockBox, blockBox, limitRight, 0, startx, ref line, ref curx, ref cury, ref maxRight, ref maxBottom);
+        line.FlowBottom = maxBottom;
 
         DropTrailingForcedBreakLine(blockBox);
 
@@ -945,6 +946,33 @@ internal static class CssLayoutEngine
     /// </summary>
     private static bool LineHoldsContent(CssLineBox line) => line.Words.Count > 0 || line.Rectangles.Count > 0;
 
+    /// <summary>
+    /// How much of <paramref name="line"/>'s width what is on it takes, up to <paramref name="curx"/>:
+    /// from its first word, or the margin edge of its first box placed whole, to there.
+    /// </summary>
+    private static double LineContentWidth(CssLineBox line, double curx)
+    {
+        double left = double.MaxValue;
+
+        foreach (var word in line.Words)
+            left = Math.Min(left, word.Left);
+
+        foreach (var (box, rect) in line.Rectangles)
+            left = Math.Min(left, rect.X - box.ActualMarginLeft);
+
+        return left == double.MaxValue ? 0 : Math.Max(0, curx - left);
+    }
+
+    /// <summary>
+    /// Begins a line at <paramref name="top"/> and ends <paramref name="previous"/> at
+    /// <paramref name="bottom"/>, the lowest the flow has reached on it.
+    /// </summary>
+    private static CssLineBox NextLine(CssBox blockbox, CssLineBox previous, double bottom, double top)
+    {
+        previous.FlowBottom = bottom;
+        return new CssLineBox(blockbox) { FlowTop = top };
+    }
+
     private static void FlowBox(ILayoutEnvironment g, CssBox blockbox, CssBox box, double limitRight, double linespacing, double startx, ref CssLineBox line, ref double curx, ref double cury, ref double maxRight, ref double maxbottom)
     {
         var startX = curx;
@@ -963,9 +991,16 @@ internal static class CssLayoutEngine
 
             // CSS2.1 §9.5: Floated elements are out of normal flow and
             // must not participate in the inline formatting context.
-            // Their positioning is handled separately in PerformLayoutImp.
+            // Their positioning is handled separately in PerformLayoutImp, on the line the content
+            // before them has reached (§9.5.1): note which line that is, and how much of it the
+            // content takes.
             if (b.Float != CssConstants.None)
+            {
+                if (!InlineFloats.IsFlexOrGridContainer(blockbox))
+                    b.InlineFloatPlacement = new InlineFloatPlacement(line, line.FlowTop ?? cury, LineContentWidth(line, curx));
+
                 continue;
+            }
 
             // CSS2.1 §9.6.1: Absolutely and fixed positioned elements are
             // out of normal flow.  Save the current flow state so we can
@@ -1111,7 +1146,7 @@ internal static class CssLayoutEngine
                         if (b == box.Boxes[0] && !word.IsLineBreak && (word == b.Words[0] || (box.ParentBox != null && box.ParentBox.IsBlock)))
                             curx += box.ActualMarginLeft + box.ActualBorderLeftWidth + box.ActualPaddingLeft;
 
-                        line = new CssLineBox(blockbox) { FlowTop = cury };
+                        line = NextLine(blockbox, line, maxbottom, cury);
 
                         if (word.IsImage || word.Equals(b.FirstWord))
                             curx += leftspacing;
@@ -1226,7 +1261,7 @@ internal static class CssLayoutEngine
                     {
                         cury = maxbottom;
                         curx = startx;
-                        line = new CssLineBox(blockbox) { FlowTop = cury };
+                        line = NextLine(blockbox, line, maxbottom, cury);
 
                         // The item's right margin, border and padding end the line the item was
                         // on. The next line starts at the content edge, so they are not carried
@@ -1258,7 +1293,7 @@ internal static class CssLayoutEngine
                         {
                             cury = maxbottom;
                             curx = startx;
-                            line = new CssLineBox(blockbox) { FlowTop = cury };
+                            line = NextLine(blockbox, line, maxbottom, cury);
                         }
                     }
 
@@ -1268,7 +1303,7 @@ internal static class CssLayoutEngine
                     {
                         cury = maxbottom;
                         curx = startx;
-                        line = new CssLineBox(blockbox) { FlowTop = cury };
+                        line = NextLine(blockbox, line, maxbottom, cury);
                     }
                 }
             }
@@ -1573,7 +1608,7 @@ internal static class CssLayoutEngine
                 cury = DropLineBelowNarrowBands(
                     blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
                 curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
-                line = new CssLineBox(blockbox) { FlowTop = cury };
+                line = NextLine(blockbox, line, maxbottom, cury);
             }
             else
             {

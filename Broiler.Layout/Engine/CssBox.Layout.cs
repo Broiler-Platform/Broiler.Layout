@@ -983,6 +983,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // those nested inside non-BFC siblings (CSS2.1 §9.5.1).
                 var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
 
+                // CSS2.1 §9.5.1 rule 7: among inline content, the float goes no higher than the
+                // line the content before it reached, at that line's top when it fits beside what
+                // is on the line and below the line when it does not (see InlineFloats). It went to
+                // the top of its block, beside lines its content had not reached. The line is inside
+                // the containing block, which keeps rule 4; and the float's parent, which may be an
+                // inline box with no place of its own, is not asked.
+                InlineFloatTopFloor = InlineFloats.TopFloor(this, precedingFloats, containerLeft, containerRight);
+
+                if (InlineFloatTopFloor is double lineFloor)
+                {
+                    top = lineFloor + ActualMarginTop;
+                }
+
                 // CSS2.1 §9.5.1 rule 4: A floating box's outer top
                 // (margin edge) may not be higher than the top of its
                 // containing block.  `top` already includes the margin
@@ -992,8 +1005,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 //   top >= ClientTop + ActualMarginTop
                 // This allows negative margins to pull the float above
                 // the content-area edge while still honoring the rule.
-                if (ParentBox != null)
+                else if (ParentBox != null)
+                {
                     top = Math.Max(top, ParentBox.ClientTop + ActualMarginTop);
+                }
 
                 // CSS2.1 §9.5.1 rule 6: The outer top of a floating
                 // box may not be higher than the outer top of any
@@ -1466,43 +1481,80 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
-    /// CSS2.1 §9.5: lays out the floated children of this box, whose content
+    /// CSS2.1 §9.5: lays out the floats among this box's inline content, which
     /// <c>CssLayoutEngine.CreateLineBoxes</c> has just flowed, skipping them as out of flow, so
     /// they are positioned and painted; and flows the lines again beside them.
     /// </summary>
+    /// <remarks>
+    /// The floats inside the inline boxes this box holds are among them: they were never laid out,
+    /// and a float in a <c>&lt;span&gt;</c> was left 0 × 0 where it was built.
+    /// </remarks>
     internal void LayOutFloatedChildren(ILayoutEnvironment g)
     {
-        bool laidOutOwnFloat = false;
+        var floats = InlineFloats.Of(this);
 
-        foreach (var childBox in Boxes)
-        {
-            if (childBox.Float != CssConstants.None)
-            {
-                childBox.PerformLayout(g);
-                laidOutOwnFloat |= childBox.Display != CssConstants.None
-                    && childBox.Size is { Width: > 0, Height: > 0 };
-
-                // CSS2.1 §13.3.1: When page-break-inside:avoid is
-                // set on a float's containing block, move the float
-                // to the next page if it would otherwise cross a
-                // page boundary.
-                if (PageBreakInside == CssConstants.Avoid)
-                    childBox.BreakPage();
-            }
-        }
+        if (floats.Count == 0)
+            return;
 
         // A float's own vertical position is decided by the content before it, so it can
         // only be placed after that content has flowed — which leaves the lines that
         // should have been shortened beside it already flowed at full width. Re-flow them
-        // now that the geometry exists; the float's position does not depend on the
-        // narrower lines (its top is where the flow had already reached), so one extra
-        // pass settles it rather than oscillating. Blocks with no float of their own —
-        // nearly all of them — never pay for this.
-        if (laidOutOwnFloat)
+        // now that the geometry exists. Blocks with no float of their own — nearly all of
+        // them — never pay for this.
+        //
+        // The float goes on the line its content reached (see InlineFloats), and the lines laid
+        // out beside the floats can move that content to another line: past the first float,
+        // the text before a second one runs over more, narrower lines. So the floats whose line
+        // has moved are placed again from the lines just laid out, and the lines laid out again
+        // beside them, until none moves: a float after text that no float before it narrows is
+        // placed right the first time. The passes are bounded, a pass for each float and no more
+        // than MaxInlineFloatPasses, for floats that would go on moving each other.
+        if (!PlaceInlineFloats(g, floats))
+            return;
+
+        int passes = Math.Min(floats.Count, MaxInlineFloatPasses);
+
+        for (int pass = 0; pass <= passes; pass++)
         {
             ActualBottom = Location.Y;
             CssLayoutEngine.CreateLineBoxes(g, this);
+
+            if (pass == passes || !InlineFloats.AnyMoved(floats))
+                break;
+
+            PlaceInlineFloats(g, floats);
         }
+    }
+
+    /// <summary>
+    /// The most times a block places its inline floats again after laying its lines out beside
+    /// them (see <see cref="LayOutFloatedChildren"/>).
+    /// </summary>
+    private const int MaxInlineFloatPasses = 8;
+
+    /// <summary>
+    /// Lays out <paramref name="floats"/> in document order, each placed from the lines this box
+    /// has just laid out, and returns whether any of them takes room.
+    /// </summary>
+    private bool PlaceInlineFloats(ILayoutEnvironment g, IReadOnlyList<CssBox> floats)
+    {
+        bool laidOutOwnFloat = false;
+
+        foreach (var childBox in floats)
+        {
+            childBox.PerformLayout(g);
+            laidOutOwnFloat |= childBox.Display != CssConstants.None
+                && childBox.Size is { Width: > 0, Height: > 0 };
+
+            // CSS2.1 §13.3.1: When page-break-inside:avoid is
+            // set on a float's containing block, move the float
+            // to the next page if it would otherwise cross a
+            // page boundary.
+            if (PageBreakInside == CssConstants.Avoid)
+                childBox.BreakPage();
+        }
+
+        return laidOutOwnFloat;
     }
 
     /// <summary>
