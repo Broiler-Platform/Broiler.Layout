@@ -1329,6 +1329,30 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
+    /// Whether <paramref name="box"/>, or a flex item it is in, is an item its column flex
+    /// container will lay out again at its stretched width, so that this layout of the box is a
+    /// first one the stretch redoes.
+    /// </summary>
+    /// <remarks>
+    /// Inside such an item as well as for the item itself, the column passes wait for the layout
+    /// that counts. They stretch the items of the container they run for, and each stretch lays an
+    /// item out again; run in a first layout too, they doubled the work at every stretched level of
+    /// a nest, 65 layouts for twelve levels aligned in turn <c>flex-start</c> and <c>stretch</c>,
+    /// and eight times as many for every six more. The stretch sets the item's width while it lays
+    /// it out again, so in that layout the item no longer reads as one to stretch.
+    /// </remarks>
+    private static bool IsLaidOutAgainByAStretch(CssBox box)
+    {
+        for (var item = box; item.ParentBox is { } container; item = container)
+        {
+            if (container.WillStretchColumnItem(item))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// CSS 2.1 §10.3.9 / §10.6.6: Lay out an inline-block box as a
     /// block internally, then place it atomically in the inline flow.
     /// The inline-block establishes a new block formatting context for
@@ -1550,12 +1574,15 @@ internal static class CssLayoutEngine
             // route stopped short of them, so the items kept their content width: not
             // stretched, not aligned, not reversed under column-reverse and not flexed.
             //
-            // Not for a flex item that is itself a column container, which comes this way as
-            // well. Its own container lays it out again, through block layout and so with the
-            // passes, whenever it stretches it. Running them here too would lay out each level
-            // of nested column containers twice, and a twelve-level nest 6,145 times instead
-            // of 26.
-            if (b.Display == "inline-flex" && b.IsColumnFlexContainer())
+            // A flex item that is itself a column container comes this way as well. When its
+            // container stretches it, it lays it out again, through block layout and so with the
+            // passes, and running them here too would lay out each level of nested column
+            // containers twice, a twelve-level nest 6,145 times instead of 26. Every other one
+            // runs them here, as nothing else will: one its container aligns `flex-start` or
+            // `center`, one with a width or an `auto` margin of its own, and one in a grid, which
+            // stretches an item without laying it out again. Those had no row gaps, no flexing,
+            // no alignment of their items and no `column-reverse`.
+            if (b.IsColumnFlexContainer() && (b.Display == "inline-flex" || !IsLaidOutAgainByAStretch(b)))
                 b.FinishFlexColumnLayout(g);
         }
         else if (b.Boxes.Count > 0)
