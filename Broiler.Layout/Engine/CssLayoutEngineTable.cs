@@ -822,7 +822,11 @@ internal sealed class CssLayoutEngineTable
         // span the table's used width and push the first row (and every later
         // row) down by their combined height. Bottom-side captions are laid out
         // after the rows (see below).
-        double captionWidth = GetWidthSum() + GetHorizontalSpacing() * (_columnCount + 1);
+        //
+        // CSS 2.1 §17.4: a caption is as wide as the table's border box, which GetWidthSum is, the
+        // spacing and the borders counted. The spacing was added again, so a caption ran past the
+        // table's right edge by it: with `border-spacing: 4px` and one column, 8px.
+        double captionWidth = GetWidthSum();
         double topCaptionHeight = LayoutTopCaptions(g, captionWidth);
 
         // CSS2.1 §17.6.1: border spacing lies between the cells, and between them and the
@@ -1054,6 +1058,13 @@ internal sealed class CssLayoutEngineTable
     }
 
     /// <summary>
+    /// Where a caption begins: CSS 2.1 §17.4 lays it out across the table's border box, so at the
+    /// table's left border edge. It began inside the left border, and so ran past the right one:
+    /// with a 5px border, 5px to the right of where browsers put it.
+    /// </summary>
+    private double CaptionLeft => _tableBox.Location.X;
+
+    /// <summary>
     /// CSS2.1 §17.4.1: lay out all top-side captions stacked from the table's
     /// content-box top, returning their combined height so the cell grid can be
     /// offset below them.
@@ -1061,7 +1072,7 @@ internal sealed class CssLayoutEngineTable
     private double LayoutTopCaptions(ILayoutEnvironment g, double width)
     {
         double total = 0;
-        double x = _tableBox.ClientLeft;
+        double x = CaptionLeft;
         double top = _tableBox.ClientTop;
 
         foreach (var caption in _captions)
@@ -1082,7 +1093,7 @@ internal sealed class CssLayoutEngineTable
     /// </summary>
     private double LayoutBottomCaptions(ILayoutEnvironment g, double width, double tableBottom)
     {
-        double x = _tableBox.ClientLeft;
+        double x = CaptionLeft;
         double y = tableBottom;
 
         foreach (var caption in _captions)
