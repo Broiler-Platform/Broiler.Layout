@@ -86,9 +86,9 @@ public sealed class InlineBoxParentFontAlignmentTests
     /// <item><c>middle</c>: it reaches 0.8px below the strut's, and the line is 20.8px tall, "a"
     /// 2px down it. It was 20px.</item>
     /// <item><c>text-top</c> with 40px lines: it starts at the top of "a" and ends 22px below the
-    /// strut's end, and the line is 42px tall, "a" 2px down it. It was 40px.</item>
+    /// strut's end, and the line is 42px tall, "a" 2px down it. It was 40px, "a" 12px down.</item>
     /// <item><c>text-bottom</c> with 40px lines: it ends at the bottom of "a" and starts 22px above
-    /// the strut, and the line is 42px tall, "a" 24px down it. It was 40px, "a" 14px down.</item>
+    /// the strut, and the line is 42px tall, "a" 24px down it. It was 40px, "a" 12px down.</item>
     /// </list>
     /// </summary>
     [Theory]
@@ -123,7 +123,7 @@ public sealed class InlineBoxParentFontAlignmentTests
     /// <summary>
     /// A 32px "x" in a box aligned <c>middle</c> does not push the line's baseline down as text on
     /// the baseline does: its 20px line height, 5.6px below the parent's baseline, ends 0.8px below
-    /// the strut, and "a" stays 2px down a 20.8px line. "a" was 6.8px down a 25.6px line.
+    /// the strut, and "a" stays 2px down a 20.8px line. "a" was 6.8px down a 22.8px line.
     /// </summary>
     [Fact]
     public void A_Larger_Font_In_The_Box_Does_Not_Move_The_Baseline()
@@ -175,9 +175,9 @@ public sealed class InlineBoxParentFontAlignmentTests
     /// <item>With "x" in a box aligned <c>middle</c> after "a", 20.8px. The clamp measured the
     /// line to the bottom of the glyphs of "x", and the block was 20px.</item>
     /// <item>With "x" alone in a box aligned <c>text-bottom</c> in a 10px font, 22px, with or
-    /// without an ellipsis. The clamp measured the line a line height below the top of the box,
-    /// and the block was 20px; the ellipsis, at the top of "x" in the block's font, made it 21px,
-    /// and 23px once the leading below it counted.</item>
+    /// without an ellipsis. The clamp measured the line a line height below the leading above
+    /// "x", and the block was 21.8px; to the ellipsis, at the top of "x" in the block's font,
+    /// 22.8px. Laid out unclamped, it was 20px.</item>
     /// </list>
     /// </summary>
     [Theory]
@@ -201,7 +201,7 @@ public sealed class InlineBoxParentFontAlignmentTests
     /// <summary>
     /// The ellipsis a clamp puts at the end of the line stands on the line's baseline, in the
     /// block's font: after "x" in a box aligned <c>text-bottom</c> in a 10px font, level with "a".
-    /// It stood at the top of "x", 1px lower.
+    /// It stood at the top of "x", 4.8px lower.
     /// </summary>
     [Fact]
     public void The_Ellipsis_Stands_On_The_Baseline()

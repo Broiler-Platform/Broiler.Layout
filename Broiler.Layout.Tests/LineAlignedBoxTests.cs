@@ -32,8 +32,7 @@ public sealed class LineAlignedBoxTests
     /// <summary>
     /// In 20px lines, a 30px box aligned <c>bottom</c> ends at the bottom of the strut, 2px of
     /// leading and a 3.2px descent below the baseline, and starts the 30px line; "a" is 12px down it.
-    /// The box ended where the glyphs do, "a" was 14px down, and with the strut ending below the box
-    /// the line was 32px tall.
+    /// The box ended where the glyphs do, 2px higher, and "a" was 14px down.
     /// </summary>
     [Fact]
     public void A_Box_Aligned_Bottom_Ends_At_The_Struts_Bottom()
@@ -64,7 +63,7 @@ public sealed class LineAlignedBoxTests
 
     /// <summary>
     /// A 10px box aligned <c>bottom</c> in 20px lines ends at the bottom of the 20px line, 10px down
-    /// it. It ended where the glyphs do, 1.8px higher.
+    /// it. It ended where the glyphs do, 2px higher.
     /// </summary>
     [Fact]
     public void A_Shorter_Box_Aligned_Bottom_Ends_At_The_Lines_Bottom()
