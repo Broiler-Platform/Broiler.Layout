@@ -1778,12 +1778,37 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('T');
 
-            if (double.IsNaN(_actualPaddingTop))
-                _actualPaddingTop = ParseLengthWithLineHeight(PaddingTop, Size.Width);
-
-            return _actualPaddingTop;
+            return ResolveBlockAxisPadding(PaddingTop, ref _actualPaddingTop);
         }
     }
+
+    /// <summary>
+    /// The used value of <c>padding-top</c> or <c>padding-bottom</c>, cached in
+    /// <paramref name="cache"/> unless it is a percentage.
+    /// </summary>
+    /// <remarks>
+    /// A percentage resolves against a width (CSS2.1 §8.4), and a box is laid out again at a new
+    /// width whenever its container settles it later: a column flex container stretches its items
+    /// to its own width after laying them out at their shrink-to-fit widths. A percentage cached
+    /// on the first read kept the width that read saw, so a <c>padding-top: 50%</c> box, the
+    /// intrinsic-ratio pattern of responsive embeds, in an item a 320px column stretches stayed at
+    /// the 0px its first, zero-width layout gave it where browsers make it 160. It is resolved on
+    /// every read instead, as a percentage margin already is. Only the block axis: an inline-axis
+    /// padding takes part in the width it would be resolved against, and is left as it was.
+    /// </remarks>
+    private double ResolveBlockAxisPadding(string padding, ref double cache)
+    {
+        if (IsPercentageDependent(padding))
+            return ParseLengthWithLineHeight(padding, Size.Width);
+
+        if (double.IsNaN(cache))
+            cache = ParseLengthWithLineHeight(padding, Size.Width);
+
+        return cache;
+    }
+
+    private static bool IsPercentageDependent(string? length) =>
+        length != null && length.Contains('%');
 
     public double ActualPaddingLeft
     {
@@ -1806,10 +1831,7 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('B');
 
-            if (double.IsNaN(_actualPaddingBottom))
-                _actualPaddingBottom = ParseLengthWithLineHeight(PaddingBottom, Size.Width);
-
-            return _actualPaddingBottom;
+            return ResolveBlockAxisPadding(PaddingBottom, ref _actualPaddingBottom);
         }
     }
 
