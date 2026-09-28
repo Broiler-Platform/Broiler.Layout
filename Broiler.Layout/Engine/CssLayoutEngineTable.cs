@@ -101,6 +101,13 @@ internal sealed class CssLayoutEngineTable
         // before sizing, so the used (winning) border widths drive cell layout.
         ResolveCollapsedBorders();
 
+        // CSS 2.1 §17.6.2: in the collapsing border model a table has no padding. In the separated
+        // model it has, between its border and the spacing around its cells, and its `width` counts
+        // it as it counts the border. The padding was dropped in both: `padding: 10px` around an x
+        // left the table 8px wide and the x at its corner, where browsers make it 28px wide.
+        if (_tableBox.BorderCollapse == CssConstants.Collapse)
+            _tableBox.PaddingLeft = _tableBox.PaddingTop = _tableBox.PaddingRight = _tableBox.PaddingBottom = "0";
+
         // Determine Row and Column Count, and ColumnWidths
         var availCellSpace = CalculateCountAndWidth();
 
@@ -111,9 +118,6 @@ internal sealed class CssLayoutEngineTable
 
         // While table width is larger than it should, and width is reducible
         EnforceMaximumSize();
-
-        // Ensure there's no padding
-        _tableBox.PaddingLeft = _tableBox.PaddingTop = _tableBox.PaddingRight = _tableBox.PaddingBottom = "0";
 
         //Actually layout cells!
         LayoutCells(g);
@@ -978,9 +982,9 @@ internal sealed class CssLayoutEngineTable
         // the right border and the spacing past it: `width: 320px` with a 10px border made a table
         // 330px wide, and 332px with 2px of border spacing, where browsers make it 320px.
         _tableBox.ActualRight = Math.Max(
-            maxRight + horizontalSpacing + _tableBox.ActualBorderRightWidth,
+            maxRight + horizontalSpacing + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
             _tableBox.Location.X + _tableBox.ActualWidth);
-        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualBorderBottomWidth;
+        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualPaddingBottom + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
         // extend the table's bottom to enclose them.
@@ -1065,15 +1069,17 @@ internal sealed class CssLayoutEngineTable
     private double CaptionLeft => _tableBox.Location.X;
 
     /// <summary>
-    /// CSS2.1 §17.4.1: lay out all top-side captions stacked from the table's
-    /// content-box top, returning their combined height so the cell grid can be
-    /// offset below them.
+    /// CSS2.1 §17.4.1: lay out all top-side captions stacked from just inside
+    /// the table's top border, returning their combined height so the cell grid
+    /// can be offset below them.
     /// </summary>
     private double LayoutTopCaptions(ILayoutEnvironment g, double width)
     {
         double total = 0;
         double x = CaptionLeft;
-        double top = _tableBox.ClientTop;
+
+        // Above the table's padding: the caption lies outside the box the padding surrounds.
+        double top = _tableBox.Location.Y + _tableBox.ActualBorderTopWidth;
 
         foreach (var caption in _captions)
         {
@@ -1707,7 +1713,8 @@ internal sealed class CssLayoutEngineTable
         }
     }
 
-    private double GetAvailableCellWidth() => GetAvailableTableWidth() - GetHorizontalSpacing() * (_columnCount + 1) - _tableBox.ActualBorderLeftWidth - _tableBox.ActualBorderRightWidth;
+    private double GetAvailableCellWidth() => GetAvailableTableWidth() - GetHorizontalSpacing() * (_columnCount + 1) - _tableBox.ActualBorderLeftWidth - _tableBox.ActualBorderRightWidth
+        - _tableBox.ActualPaddingLeft - _tableBox.ActualPaddingRight;
 
     private double GetWidthSum()
     {
@@ -1724,8 +1731,8 @@ internal sealed class CssLayoutEngineTable
         //Take cell-spacing
         f += GetHorizontalSpacing() * (_columnWidths.Length + 1);
 
-        //Take table borders
-        f += _tableBox.ActualBorderLeftWidth + _tableBox.ActualBorderRightWidth;
+        //Take table borders and padding
+        f += _tableBox.ActualBorderLeftWidth + _tableBox.ActualBorderRightWidth + _tableBox.ActualPaddingLeft + _tableBox.ActualPaddingRight;
 
         return f;
     }
