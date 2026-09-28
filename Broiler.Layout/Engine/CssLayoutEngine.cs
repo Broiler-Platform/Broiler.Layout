@@ -968,6 +968,15 @@ internal static class CssLayoutEngine
             if (isAbsposChild)
                 b.InlineStaticPosition = new PointF((float)curx, (float)cury);
 
+            // The parser gives a <br> an empty line's height wherever it takes it to follow a block,
+            // a line holding an inline element among them, and a block drops or corrects it when it
+            // lays the <br> out (CssBox.ResolveBrLineHeight). A <br> on lines laid out in one pass,
+            // an inline-block's or a flex or grid item's, is not laid out but flowed here, so it
+            // kept the height: <span>Hello</span><br>World in an inline-block was three lines, the
+            // middle one empty, where browsers make it two.
+            if (b.IsBrElement)
+                b.ResolveBrLineHeight();
+
             double childSaveCurx = curx;
             double childSaveCury = cury;
             double childSaveMaxRight = maxRight;
@@ -2673,6 +2682,19 @@ internal static class CssLayoutEngine
     /// </remarks>
     internal static bool HoldsInlineContent(CssBox box) =>
         box is { HtmlTag: null, IsInline: false } && box.Display != CssConstants.None && InlineRunHoldsContent(box);
+
+    /// <summary>
+    /// Whether a <c>&lt;br&gt;</c> after <paramref name="previous"/> ends the line
+    /// <paramref name="previous"/> is on instead of making an empty line of its own: it follows an
+    /// inline-block (see <see cref="EndsWithAtomicInlineBlock"/>), or inline content holding text
+    /// or an image, in the anonymous block the parser put the content in (see
+    /// <see cref="HoldsInlineContent"/>) or, on lines a box lays out in one pass, which the parser
+    /// does not reach, in the inline box itself.
+    /// </summary>
+    internal static bool BrEndsLineOf(CssBox previous) =>
+        EndsWithAtomicInlineBlock(previous)
+        || HoldsInlineContent(previous)
+        || (previous is { Display: CssConstants.Inline } && previous.Float == CssConstants.None && InlineRunHoldsContent(previous));
 
     private static bool InlineRunHoldsContent(CssBox box)
     {

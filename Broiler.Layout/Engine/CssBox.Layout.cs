@@ -123,6 +123,55 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     private const string ParserEmptyLineHeight = ".95em";
 
+    /// <summary>
+    /// Gives a <c>&lt;br&gt;</c> the height of the empty line it makes, or none where it ends a
+    /// line of content instead of making one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CI fallback for the Broiler.HTML submodule <c>&lt;br&gt;</c> patch
+    /// (patches/0002-broiler-html-br-after-inline-block.patch): DomParser gives a <c>&lt;br&gt;</c>
+    /// a ".95em" empty-line height when it "follows a block". An atomic inline-block carries no
+    /// text words, so it is misclassified as block-level and a <c>&lt;br&gt;</c> after it
+    /// spuriously inserts a full empty line, pushing every following block sibling ~1em down.
+    /// Such a <c>&lt;br&gt;</c> merely ends the inline-block's line, so its empty-line height is
+    /// dropped. The previous in-flow sibling (an anonymous block wrapping the inline-block, or the
+    /// inline-block itself) is already laid out by the time this runs. Harmless once the submodule
+    /// patch lands (the <c>&lt;br&gt;</c> then carries no .95em height to drop).
+    /// </para>
+    /// <para>
+    /// An inline element holding the line's text is misclassified the same way: the text is in
+    /// the element's children, not in the element, so <c>&lt;a&gt;one&lt;/a&gt;&lt;br&gt;two</c>
+    /// was three lines, the middle one empty and 15.2px tall, where browsers make it two. The
+    /// <c>&lt;br&gt;</c> ends the line of any inline content that holds text or an image (see
+    /// <see cref="CssLayoutEngine.BrEndsLineOf"/>), so its height is dropped there too.
+    /// </para>
+    /// <para>
+    /// The empty line a <c>&lt;br&gt;</c> does make, after a block, at the start of one or after
+    /// another <c>&lt;br&gt;</c>, is a line box holding nothing but the <c>&lt;br&gt;</c>, as tall
+    /// as the line height (CSS2.1 §10.8). The parser's .95em is shorter than that: 15.2px against
+    /// a 20px line height, where browsers make the line 20px, and against the 19px of a 16px
+    /// font's own.
+    /// </para>
+    /// <para>
+    /// A block lays a <c>&lt;br&gt;</c> out through <see cref="PerformLayoutImp"/>, which calls
+    /// this; the lines a box lays out in one pass, an inline-block's or a flex or grid item's, flow
+    /// it in <c>CssLayoutEngine.FlowBox</c>, which calls this too.
+    /// </para>
+    /// </remarks>
+    internal void ResolveBrLineHeight()
+    {
+        if (!IsBrElement)
+            return;
+
+        var previous = LayoutBoxUtils.GetPreviousSibling(this);
+
+        if (!string.IsNullOrEmpty(Height) && Height != CssConstants.Auto && CssLayoutEngine.BrEndsLineOf(previous))
+            Height = CssConstants.Auto;
+        else if (Height == ParserEmptyLineHeight && ActualLineHeight > 0)
+            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
+    }
+
     protected virtual void PerformLayoutImp(ILayoutEnvironment g)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.BoxesLaidOut);
@@ -137,38 +186,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             MeasureWordsSize(g);
         }
 
-        // CI fallback for the Broiler.HTML submodule <br> patch
-        // (patches/0002-broiler-html-br-after-inline-block.patch): DomParser
-        // gives a <br> a ".95em" empty-line height when it "follows a block".
-        // An atomic inline-block carries no text words, so it is misclassified
-        // as block-level and a <br> after it spuriously inserts a full empty
-        // line, pushing every following block sibling ~1em down.  Such a <br>
-        // merely ends the inline-block's line, so drop its empty-line height.
-        // The previous in-flow sibling (an anonymous block wrapping the
-        // inline-block, or the inline-block itself) is already laid out by the
-        // time this block runs.  Harmless once the submodule patch lands (the
-        // <br> then carries no .95em height to drop).
-        //
-        // An inline element holding the line's text is misclassified the same way: the text is in
-        // the element's children, not in the element, so <a>one</a><br>two was three lines, the
-        // middle one empty and 15.2px tall, where browsers make it two. The <br> ends the line of
-        // any inline content that holds text or an image, so its height is dropped there too.
-        var previous = LayoutBoxUtils.GetPreviousSibling(this);
-
-        if (IsBrElement && !string.IsNullOrEmpty(Height) && Height != CssConstants.Auto
-            && (CssLayoutEngine.EndsWithAtomicInlineBlock(previous) || CssLayoutEngine.HoldsInlineContent(previous)))
-        {
-            Height = CssConstants.Auto;
-        }
-
-        // The empty line a <br> does make, after a block, at the start of one or after another
-        // <br>, is a line box holding nothing but the <br>, as tall as the line height (CSS2.1
-        // §10.8). The parser's .95em is shorter than that: 15.2px against a 20px line height,
-        // where browsers make the line 20px, and against the 19px of a 16px font's own.
-        else if (IsBrElement && Height == ParserEmptyLineHeight && ActualLineHeight > 0)
-        {
-            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
-        }
+        ResolveBrLineHeight();
 
         // CSS Box Model 4 §6.2: margin-trim zeroes the block-axis margins of
         // this container's first/last in-flow block-level children before they
