@@ -34,8 +34,9 @@ internal sealed class CssLineBox
     internal double? FlowTop { get; set; }
 
     /// <summary>
-    /// Where <c>ApplyVerticalAlignment</c> put the line's baseline, or null before it has, or for
-    /// a line with nothing on it.
+    /// Where <c>ApplyVerticalAlignment</c> put the line's baseline, and where moving the line or
+    /// the box it belongs to has taken it since; null before the alignment has put it, or for a
+    /// line with nothing on it.
     /// </summary>
     internal double? Baseline { get; set; }
 

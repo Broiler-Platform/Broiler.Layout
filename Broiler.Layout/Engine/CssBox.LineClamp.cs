@@ -421,7 +421,14 @@ internal partial class CssBox
         }
 
         double left = LineContentRight(line);
-        double top = line.Words.Count > 0 ? line.Words[^1].Top : line.LineBottom - ActualFont.Height;
+
+        // The ellipsis is an inline box of the container's, and stands on the line's baseline in
+        // the container's font. It stood at the top of the line's last word, which is the same
+        // place only for a word in that font on the baseline: after one aligned `text-bottom` in
+        // a 10px font it stood 1px low, and made the line it ends 1px taller.
+        double top = line.Baseline is double baseline
+            ? baseline - ActualFont.Height * CssLayoutEngine.TypicalAscentRatio
+            : line.Words.Count > 0 ? line.Words[^1].Top : line.LineBottom - ActualFont.Height;
 
         var word = new CssRectWord(this, ellipsis, hasSpaceBefore: false, hasSpaceAfter: false)
         {
@@ -466,10 +473,11 @@ internal partial class CssBox
             top = Math.Min(top, rect.Top);
         }
 
-        // A word of text starts where its inline box does, half the box's leading above its glyphs.
+        // A word of text starts and ends where its inline box does, half the box's leading above
+        // its glyphs and the rest below.
         foreach (var word in line.Words)
         {
-            bottom = Math.Max(bottom, word.Bottom);
+            bottom = Math.Max(bottom, CssLayoutEngine.WordLayoutBottom(word));
             top = Math.Min(top, CssLayoutEngine.WordLayoutTop(word));
         }
 
@@ -481,6 +489,10 @@ internal partial class CssBox
 
         if (owner.ActualLineHeight > 0 && top < double.MaxValue)
             bottom = Math.Max(bottom, top + owner.ActualLineHeight);
+
+        // The strut ends its descent below the line's baseline, as CreateLineBoxes measures it.
+        if (owner.ActualLineHeight > 0 && top < double.MaxValue && line.Baseline is double baseline)
+            bottom = Math.Max(bottom, baseline + CssLayoutEngine.StrutDescent(owner));
 
         // A line holding an inline box with a taller line height is as tall as its inline boxes
         // together, as CreateLineBoxes measures it.
