@@ -255,6 +255,13 @@ internal abstract partial class CssBoxProperties
     public string BorderSpacing { get; set; } = "0";
     public string BorderCollapse { get; set; } = "separate";
 
+    /// <summary>
+    /// CSS 2.1 §17.5.2: <c>fixed</c> lays a table with a width of its own out by the fixed table
+    /// layout algorithm, which sizes its columns from their own widths and its first row's, and
+    /// not from their content; <c>auto</c>, the initial value, by the automatic one. Not inherited.
+    /// </summary>
+    public string TableLayout { get; set; } = CssConstants.Auto;
+
     // CSS UI §2: outline is painted just outside the border edge and does not
     // affect layout. Stored uniformly (outline cannot be set per-side).
     // Backing fields invalidate the lazily-resolved used values on set, matching
@@ -3097,6 +3104,7 @@ internal abstract partial class CssBoxProperties
         _cornerRadius = p._cornerRadius;
         Display = p.Display;
         Float = p.Float;
+        TableLayout = p.TableLayout;
         BlockSize = p.BlockSize;
         MinBlockSize = p.MinBlockSize;
         MaxBlockSize = p.MaxBlockSize;

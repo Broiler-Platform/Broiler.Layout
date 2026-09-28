@@ -12,7 +12,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private bool UsesBorderBoxSizing =>
         BoxSizing != null && BoxSizing.Equals("border-box", StringComparison.OrdinalIgnoreCase);
 
-    private double ResolveSpecifiedWidthToBorderBox(double cssWidth)
+    internal double ResolveSpecifiedWidthToBorderBox(double cssWidth)
     {
         if (!UsesBorderBoxSizing)
             cssWidth += ActualPaddingLeft + ActualPaddingRight + ActualBorderLeftWidth + ActualBorderRightWidth;
