@@ -121,6 +121,127 @@ public sealed class FlexLineMinCrossSizeTests
     }
 
     /// <summary>
+    /// In a container 10px tall by its <c>height</c>, the line is 10px too, and the 20px item
+    /// centred on it is 5px above the container's top, or 10px above it aligned to the end. It was at
+    /// the top: the line only grew to a definite height, and stayed as tall as the item.
+    /// </summary>
+    [Theory]
+    [InlineData("center", -5)]
+    [InlineData("flex-end", -10)]
+    public void A_Definite_Height_Smaller_Than_The_Item_Is_The_Lines(string alignItems, double top)
+    {
+        var (root, container, item) = Build("flex", c => c.Height = "10px", alignItems);
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(10, container.Size.Height, 1);
+        Assert.Equal(top, item.Location.Y - container.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// A stretched item holding an x, in a container 10px tall, is 10px tall. It was 16px.
+    /// </summary>
+    [Fact]
+    public void A_Stretched_Item_Shrinks_To_A_Smaller_Definite_Height()
+    {
+        var (root, _, item) = Build("flex", c => c.Height = "10px", null, itemHeight: null);
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(10, item.Size.Height, 1);
+    }
+
+    /// <summary>
+    /// A wrapping container's lines are not clamped to its <c>max-height</c>: its one 20px line
+    /// overflows the 10px container, and the item centred on it is at the top.
+    /// </summary>
+    [Fact]
+    public void A_Wrapping_Containers_Line_Is_Not_Clamped_To_Its_Max_Height()
+    {
+        var (root, container, item) = Build("flex", c =>
+        {
+            c.MaxHeight = "10px";
+            c.FlexWrap = "wrap";
+        }, "center");
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(10, container.Size.Height, 1);
+        Assert.Equal(0, item.Location.Y - container.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// A wrapping container's line is stretched to its <c>min-height</c> or its <c>height</c> only by
+    /// <c>align-content</c>: with <c>flex-start</c> it keeps its 20px, and the item centred on it
+    /// is at the top; with <c>center</c> the line is centred, and the item 6px down. A lone line
+    /// grew to a definite height whatever <c>align-content</c> said.
+    /// </summary>
+    [Theory]
+    [InlineData("min-height", "flex-start", 0)]
+    [InlineData("height", "flex-start", 0)]
+    [InlineData("min-height", "center", 6)]
+    [InlineData("height", "flex-end", 12)]
+    public void A_Wrapping_Containers_Line_Is_Placed_By_Align_Content(string property, string alignContent, double top)
+    {
+        var (root, container, item) = Build("flex", c =>
+        {
+            if (property == "height")
+                c.Height = "32px";
+            else
+                c.MinHeight = "32px";
+
+            c.FlexWrap = "wrap";
+            c.AlignContent = alignContent;
+        }, "center");
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(32, container.Size.Height, 1);
+        Assert.Equal(top, item.Location.Y - container.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// Two 20px lines in a wrapping container 100px tall share its 60px of room: stretched, each
+    /// is 50px tall and the second item, at its line's start, is 50px down; packed to the start,
+    /// it is 20px down; centred, the lines start 30px down and the second item is 50px down.
+    /// </summary>
+    [Theory]
+    [InlineData("normal", 0, 50)]
+    [InlineData("flex-start", 0, 20)]
+    [InlineData("center", 30, 50)]
+    [InlineData("space-between", 0, 80)]
+    public void Two_Lines_Share_The_Room_By_Align_Content(string alignContent, double firstTop, double secondTop)
+    {
+        var (root, container, first) = Build("flex", c =>
+        {
+            c.Width = "30px";
+            c.Height = "100px";
+            c.FlexWrap = "wrap";
+            c.AlignContent = alignContent;
+        }, "flex-start");
+        var second = new CssBox(container, new HtmlTag("span", false, null), BaseUrl) { Display = "block", Width = "20px", Height = "20px" };
+        FlexGridItemBlockification.Generate(root);
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(firstTop, first.Location.Y - container.Location.Y, 1);
+        Assert.Equal(secondTop, second.Location.Y - container.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// A single-line container 32px tall has no room beside its line for <c>align-content</c> to
+    /// share: an item at its line's start stays at the top with <c>align-content: center</c>. The
+    /// container's content was moved down by the room below it, 6px, as a block's is.
+    /// </summary>
+    [Fact]
+    public void A_Single_Line_Container_Is_Not_Moved_By_Align_Content()
+    {
+        var (root, container, item) = Build("flex", c =>
+        {
+            c.Height = "32px";
+            c.AlignContent = "center";
+        }, "flex-start");
+        root.PerformLayout(root.LayoutEnvironment);
+
+        Assert.Equal(0, item.Location.Y - container.Location.Y, 1);
+    }
+
+    /// <summary>
     /// Laid out a second time, the item is centred still.
     /// </summary>
     [Fact]

@@ -2522,6 +2522,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // The definite-track grid pass distributes align-content across its
             // row tracks itself; this block-level shift would double it.
             && !_gridTrackLayoutApplied
+            // So does a flex container across its lines (CSS Flexbox §8.4), and a single-line one
+            // has nothing for it to move: its line is as tall as the container.
+            && Display != "flex"
             && (IsBlock || Display == CssConstants.ListItem || Display == CssConstants.InlineBlock
                 || Display == CssConstants.TableCell)
             && Boxes.Count > 0
