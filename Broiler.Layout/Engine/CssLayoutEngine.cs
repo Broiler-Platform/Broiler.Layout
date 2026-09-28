@@ -337,7 +337,7 @@ internal static class CssLayoutEngine
         double maxBottom = starty;
 
         //First line box
-        CssLineBox line = new(blockBox);
+        CssLineBox line = new(blockBox) { FlowTop = cury };
 
         //Flow words and boxes
         FlowBox(g, blockBox, blockBox, limitRight, 0, startx, ref line, ref curx, ref cury, ref maxRight, ref maxBottom);
@@ -529,6 +529,13 @@ internal static class CssLayoutEngine
 
             if (lineTop == double.MaxValue)
                 lineTop = inlineBoxTop;
+
+            // The line starts where the flow put it, whatever alignment moved down from there: an
+            // inline-block alone on a line stands on the strut's baseline, below the line's top,
+            // and a line measured from the box was as much taller than its line height: at
+            // 16px/20px, a 10px inline-block made a 24.85px line, where browsers make it 20px.
+            if (hasLineContent && linebox.FlowTop is double flowTop)
+                lineTop = Math.Min(lineTop, flowTop);
 
             if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
@@ -1104,7 +1111,7 @@ internal static class CssLayoutEngine
                         if (b == box.Boxes[0] && !word.IsLineBreak && (word == b.Words[0] || (box.ParentBox != null && box.ParentBox.IsBlock)))
                             curx += box.ActualMarginLeft + box.ActualBorderLeftWidth + box.ActualPaddingLeft;
 
-                        line = new CssLineBox(blockbox);
+                        line = new CssLineBox(blockbox) { FlowTop = cury };
 
                         if (word.IsImage || word.Equals(b.FirstWord))
                             curx += leftspacing;
@@ -1127,6 +1134,7 @@ internal static class CssLayoutEngine
                         {
                             curx += BandLeftAt(blockbox, dropped, boxLineHeight, startx) - bandLeft;
                             cury = dropped;
+                            line.FlowTop = cury;
                         }
                     }
 
@@ -1218,7 +1226,7 @@ internal static class CssLayoutEngine
                     {
                         cury = maxbottom;
                         curx = startx;
-                        line = new CssLineBox(blockbox);
+                        line = new CssLineBox(blockbox) { FlowTop = cury };
 
                         // The item's right margin, border and padding end the line the item was
                         // on. The next line starts at the content edge, so they are not carried
@@ -1250,7 +1258,7 @@ internal static class CssLayoutEngine
                         {
                             cury = maxbottom;
                             curx = startx;
-                            line = new CssLineBox(blockbox);
+                            line = new CssLineBox(blockbox) { FlowTop = cury };
                         }
                     }
 
@@ -1260,7 +1268,7 @@ internal static class CssLayoutEngine
                     {
                         cury = maxbottom;
                         curx = startx;
-                        line = new CssLineBox(blockbox);
+                        line = new CssLineBox(blockbox) { FlowTop = cury };
                     }
                 }
             }
@@ -1565,7 +1573,7 @@ internal static class CssLayoutEngine
                 cury = DropLineBelowNarrowBands(
                     blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
                 curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
-                line = new CssLineBox(blockbox);
+                line = new CssLineBox(blockbox) { FlowTop = cury };
             }
             else
             {
@@ -1576,6 +1584,7 @@ internal static class CssLayoutEngine
                 {
                     curx += BandLeftAt(blockbox, dropped, lineHeight, startx) - bandLeft;
                     cury = dropped;
+                    line.FlowTop = cury;
                 }
             }
 
@@ -2976,6 +2985,13 @@ internal static class CssLayoutEngine
             if (!topBottomBoxes.Contains(kvp.Key))
                 lineTop = Math.Min(lineTop, kvp.Value.Top);
         }
+
+        // The strut stands at the top of the line, where the flow put the line. An image stands
+        // on the strut's baseline from the flow, below the line's top, and alone on its line it
+        // put the baseline as far below again: at 16px/20px, a 10px image was 9.7px down its line
+        // and the line 29.7px tall, where browsers put it 5px down a 20px line.
+        if (lineTop < double.MaxValue && lineBox.FlowTop is double flowTop)
+            lineTop = Math.Min(lineTop, flowTop);
 
         // Start with the strut baseline (parent's font ascent from line top).
         double parentFontHeight = lineBox.OwnerBox?.ActualFont.Height ?? 0;
