@@ -1486,7 +1486,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             }
 
             //If there's just inline boxes, create LineBoxes
-            else if (LayoutBoxUtils.ContainsInlinesOnly(this))
+            //
+            // Inline content broken only by <br>s goes on lines too, as the inline-block path lays
+            // it out (CssLayoutEngine.InlineContentWithBrsOnly). The parser computes a <br> to a
+            // block-level box and puts the runs of text around it in anonymous blocks, but only in
+            // the blocks it reaches, which are not a flex or grid container's items, nor anything
+            // inside one or inside an inline-level box. There the block path below took each run of
+            // text for a block and gave it no line box: `Hello<br>World` in a flex item was not
+            // painted at all.
+            else if (LayoutBoxUtils.ContainsInlinesOnly(this) || HoldsInlineContentBrokenByBrs())
             {
                 ActualBottom = Location.Y;
                 CssLayoutEngine.CreateLineBoxes(g, this); //This will automatically set the bottom of this block
@@ -1653,6 +1661,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Whether this box holds inline-level content, and nothing block-level but the &lt;br&gt;s
+    /// that break it into lines.
+    /// </summary>
+    /// <remarks>
+    /// A box holding <c>&lt;br&gt;</c>s and nothing else has no text to lay out on lines, so it
+    /// keeps the block path, where each <c>&lt;br&gt;</c> stands as the block the parser made it.
+    /// </remarks>
+    private bool HoldsInlineContentBrokenByBrs() =>
+        CssLayoutEngine.InlineContentWithBrsOnly(this) && Boxes.Exists(child => child.IsInline);
 
     /// <summary>
     /// CSS Multi-column §3: post-layout redistribution of in-flow children into
