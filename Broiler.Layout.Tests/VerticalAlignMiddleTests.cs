@@ -131,19 +131,32 @@ public sealed class VerticalAlignMiddleTests
     }
 
     /// <summary>
-    /// Controls, which pass before and after: an empty 10px inline-block aligned top, or on the
-    /// baseline, stays at the top of the line with the words.
+    /// Control, which passes before and after: an empty 10px inline-block aligned top stays at the
+    /// top of the line with the words.
     /// </summary>
-    [Theory]
-    [InlineData(CssConstants.Top)]
-    [InlineData(CssConstants.Baseline)]
-    public void Control_Boxes_Aligned_Otherwise_Stay_Where_They_Were(string verticalAlign)
+    [Fact]
+    public void Control_A_Box_Aligned_Top_Stays_At_The_Top()
     {
         var tree = Build();
-        var box = EmptyBox(tree, 10, verticalAlign);
+        var box = EmptyBox(tree, 10, CssConstants.Top);
         Layout(tree);
 
         Assert.Equal(0, tree.Top(box), 1);
+        Assert.Equal(0, tree.Top(tree.Before), 1);
+    }
+
+    /// <summary>
+    /// An empty 10px inline-block on the baseline stands on it with its bottom, 2.8px down, the
+    /// words at the top.
+    /// </summary>
+    [Fact]
+    public void A_Box_On_The_Baseline_Stands_On_It()
+    {
+        var tree = Build();
+        var box = EmptyBox(tree, 10, CssConstants.Baseline);
+        Layout(tree);
+
+        Assert.Equal(Baseline - 10, tree.Top(box), 1);
         Assert.Equal(0, tree.Top(tree.Before), 1);
     }
 

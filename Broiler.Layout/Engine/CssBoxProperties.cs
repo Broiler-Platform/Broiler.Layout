@@ -642,6 +642,15 @@ internal abstract partial class CssBoxProperties
     internal RectangleF? GridAreaContainingBlock { get; set; }
 
     /// <summary>
+    /// When this box is an in-flow grid item, the width of the grid area the grid container's
+    /// track-sizing pass gave it, recorded once the grid's columns are sized. CSS Grid §6.2 makes
+    /// that area the item's containing block, so the item's percentage margins and padding refer to
+    /// it (see <see cref="CssBox.TryGetPercentageBasisWidth"/>). Null before then, and for every
+    /// other box.
+    /// </summary>
+    internal double? GridAreaWidth { get; set; }
+
+    /// <summary>
     /// CSS Grid Level 2 §7.3 (subgrid): when this box is a grid item whose
     /// <c>grid-template-columns</c> is <c>subgrid</c>, the parent grid's
     /// track-sizing pass records here the sizes (px) of the parent tracks this
@@ -1778,11 +1787,65 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('T');
 
-            if (double.IsNaN(_actualPaddingTop))
-                _actualPaddingTop = ParseLengthWithLineHeight(PaddingTop, Size.Width);
-
-            return _actualPaddingTop;
+            return ResolvePadding(PaddingTop, ref _actualPaddingTop);
         }
+    }
+
+    /// <summary>
+    /// The used value of a padding, cached in <paramref name="cache"/> unless it is a percentage.
+    /// </summary>
+    /// <remarks>
+    /// A percentage resolves against a width (CSS2.1 §8.4), and a box is laid out again at a new
+    /// width whenever its container settles it later: a column flex container stretches its items
+    /// to its own width after laying them out at their shrink-to-fit widths. A percentage cached
+    /// on the first read kept the width that read saw, so a <c>padding-top: 50%</c> box, the
+    /// intrinsic-ratio pattern of responsive embeds, in an item a 320px column stretches stayed at
+    /// the 0px its first, zero-width layout gave it where browsers make it 160. It is resolved on
+    /// every read instead, as a percentage margin already is.
+    /// </remarks>
+    private double ResolvePadding(string padding, ref double cache)
+    {
+        if (IsPercentageDependent(padding))
+            return ResolveMarginOrPadding(padding);
+
+        if (double.IsNaN(cache))
+            cache = ParseLengthWithLineHeight(padding, Size.Width);
+
+        return cache;
+    }
+
+    private static bool IsPercentageDependent(string? length) =>
+        length != null && length.Contains('%');
+
+    /// <summary>
+    /// The used value of a margin or padding. A percentage refers to the width of the box's
+    /// containing block (CSS2.1 §8.3, §8.4), read from <see cref="TryGetPercentageBasisWidth"/>,
+    /// and to the box's own width where that gives none.
+    /// </summary>
+    /// <remarks>
+    /// Every percentage margin and padding resolved against the box's own width, which is the
+    /// containing block's only for a box that fills it. A 100px wide box with
+    /// <c>padding-top: 50%</c> in a 320px block, the intrinsic-ratio pattern of responsive embeds
+    /// given a width, was 50px tall where browsers make it 160, and one with <c>margin-left: 50%</c>
+    /// started 50px in where they start it 160px in.
+    /// </remarks>
+    private double ResolveMarginOrPadding(string length)
+    {
+        if (IsPercentageDependent(length) && TryGetPercentageBasisWidth(out double basis))
+            return ParseLengthWithLineHeight(length, basis, percentAgainstContainingBlock: true);
+
+        return ParseLengthWithLineHeight(length, Size.Width);
+    }
+
+    /// <summary>
+    /// The width of the containing block a percentage margin or padding of this box refers to, or
+    /// false where it refers to the box's own width. Overridden in <see cref="CssBox"/>, which has
+    /// the box tree; the property base has no containing block.
+    /// </summary>
+    protected virtual bool TryGetPercentageBasisWidth(out double width)
+    {
+        width = 0;
+        return false;
     }
 
     public double ActualPaddingLeft
@@ -1792,10 +1855,7 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('L');
 
-            if (double.IsNaN(_actualPaddingLeft))
-                _actualPaddingLeft = ParseLengthWithLineHeight(PaddingLeft, Size.Width);
-
-            return _actualPaddingLeft;
+            return ResolvePadding(PaddingLeft, ref _actualPaddingLeft);
         }
     }
 
@@ -1806,10 +1866,7 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('B');
 
-            if (double.IsNaN(_actualPaddingBottom))
-                _actualPaddingBottom = ParseLengthWithLineHeight(PaddingBottom, Size.Width);
-
-            return _actualPaddingBottom;
+            return ResolvePadding(PaddingBottom, ref _actualPaddingBottom);
         }
     }
 
@@ -1820,10 +1877,7 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FramePadding('R');
 
-            if (double.IsNaN(_actualPaddingRight))
-                _actualPaddingRight = ParseLengthWithLineHeight(PaddingRight, Size.Width);
-
-            return _actualPaddingRight;
+            return ResolvePadding(PaddingRight, ref _actualPaddingRight);
         }
     }
 
@@ -1839,9 +1893,9 @@ internal abstract partial class CssBoxProperties
                     MarginTop = "0";
                 }
 
-                var actualMarginTop = ParseLengthWithLineHeight(MarginTop, Size.Width);
+                var actualMarginTop = ResolveMarginOrPadding(MarginTop);
 
-                if (MarginTop.EndsWith('%'))
+                if (IsPercentageDependent(MarginTop))
                     return actualMarginTop;
 
                 _actualMarginTop = actualMarginTop;
@@ -1869,9 +1923,9 @@ internal abstract partial class CssBoxProperties
                     MarginLeft = "0";
                 }
 
-                var actualMarginLeft = ParseLengthWithLineHeight(MarginLeft, Size.Width);
+                var actualMarginLeft = ResolveMarginOrPadding(MarginLeft);
 
-                if (MarginLeft.EndsWith('%'))
+                if (IsPercentageDependent(MarginLeft))
                     return actualMarginLeft;
 
                 _actualMarginLeft = actualMarginLeft;
@@ -1892,9 +1946,9 @@ internal abstract partial class CssBoxProperties
                     MarginBottom = "0";
                 }
 
-                var actualMarginBottom = ParseLengthWithLineHeight(MarginBottom, Size.Width);
+                var actualMarginBottom = ResolveMarginOrPadding(MarginBottom);
 
-                if (MarginBottom.EndsWith('%'))
+                if (IsPercentageDependent(MarginBottom))
                     return actualMarginBottom;
 
                 _actualMarginBottom = actualMarginBottom;
@@ -1916,9 +1970,9 @@ internal abstract partial class CssBoxProperties
                     MarginRight = "0";
                 }
 
-                var actualMarginRight = ParseLengthWithLineHeight(MarginRight, Size.Width);
+                var actualMarginRight = ResolveMarginOrPadding(MarginRight);
 
-                if (MarginRight.EndsWith('%'))
+                if (IsPercentageDependent(MarginRight))
                     return actualMarginRight;
 
                 _actualMarginRight = actualMarginRight;
