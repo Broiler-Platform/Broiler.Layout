@@ -136,10 +136,11 @@ internal sealed class CssLineBox
             // That is only harmless while the box's baseline really is at its top, so the boxes
             // this skipped came out top-aligned; two inline-blocks of different heights on one
             // line, and an inline <svg> beside a taller one, sat with their tops flush instead of
-            // their bottoms. Only a box whose baseline *is* its bottom margin edge is moved here
-            // (CssBox.UsesBottomMarginEdgeBaseline) — an inline-block that draws its own text
-            // keeps the position it has always had, because its baseline is not modelled.
-            if (usesDefaultBaseline && !b.UsesBottomMarginEdgeBaseline)
+            // their bottoms. A box whose baseline is its bottom margin edge
+            // (CssBox.UsesBottomMarginEdgeBaseline) is moved here, and so is one with a line of
+            // text in it, whose baseline is that line's (CssLayoutEngine.LastLineBaseline). Any
+            // other keeps the position it has always had.
+            if (usesDefaultBaseline && !b.UsesBottomMarginEdgeBaseline && CssLayoutEngine.LastLineBaseline(b) == null)
                 return;
 
             double inlineBlockShift = baseline - r.Top;

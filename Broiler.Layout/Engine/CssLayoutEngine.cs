@@ -439,8 +439,14 @@ internal static class CssLayoutEngine
                 // already does in-scope, so a <br>-separated row lands where a
                 // wrapped one does.  Restricted to anonymous blocks to avoid
                 // changing the rendered height of author boxes.
+                //
+                // An inline-block with a line of text in it is left out: it stands on that line's
+                // baseline (see LastLineBaseline), not on its bottom, and its own lines reach below
+                // the baseline as the strut's do. Every block here is of the anonymous kind, the
+                // ones the page's elements make too, so a line holding an inline-block of text was
+                // a strut's descent taller than browsers make it.
                 if (blockBox.Kind == BoxKind.Anonymous
-                    && (rect.Key.Display == CssConstants.InlineBlock
+                    && ((rect.Key.Display == CssConstants.InlineBlock && LastLineBaseline(rect.Key) == null)
                         || rect.Key.Display is "inline-flex" or "inline-grid"))
                 {
                     double lineStrut = blockBox.ActualLineHeight > 0
@@ -2430,10 +2436,118 @@ internal static class CssLayoutEngine
     /// two halves disagreed with each other, not merely with the spec.
     /// </para>
     /// </remarks>
-    private static double BaselineAscentOf(CssBox box, CssLineBox lineBox) =>
-        IsAtomicInline(box) && lineBox.Rectangles.TryGetValue(box, out RectangleF rect)
-            ? rect.Height
-            : box.ActualFont.Height * PtToCssPx * TypicalAscentRatio;
+    private static double BaselineAscentOf(CssBox box, CssLineBox lineBox)
+    {
+        if (!IsAtomicInline(box) || !lineBox.Rectangles.TryGetValue(box, out RectangleF rect))
+            return box.ActualFont.Height * PtToCssPx * TypicalAscentRatio;
+
+        // An inline-block with a line of text in it and nothing clipped has that line's baseline.
+        return box.Display == CssConstants.InlineBlock && LastLineBaseline(box) is double baseline
+            ? baseline - rect.Top
+            : rect.Height;
+    }
+
+    /// <summary>
+    /// Where the baseline of an inline-block's last in-flow line box lies, or null when the
+    /// inline-block's baseline is its bottom margin edge instead.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.8.1: the baseline of an <c>inline-block</c> is the baseline of its last line box
+    /// in the normal flow, unless it has none or its <c>overflow</c> is not <c>visible</c> (see
+    /// <see cref="CssBox.UsesBottomMarginEdgeBaseline"/>). The line is the lowest of the in-flow
+    /// line boxes in it and in its in-flow blocks, not in the atomic inlines it holds, whose lines
+    /// are their own; its baseline is where its words aligned to the baseline stand on it, a word
+    /// of text its font's ascent below its top and an image at its bottom. A last line with an
+    /// atomic inline on it has that box's baseline among its own, which is not tracked, so it gives
+    /// null too, and the inline-block stands as it did before its baseline was tracked at all.
+    /// </remarks>
+    internal static double? LastLineBaseline(CssBox box)
+    {
+        if (box.Display != CssConstants.InlineBlock || box.UsesBottomMarginEdgeBaseline)
+            return null;
+
+        CssLineBox? last = null;
+        double lastBottom = double.MinValue;
+        FindLastLine(box, box, ref last, ref lastBottom);
+
+        if (last == null)
+            return null;
+
+        foreach (var key in last.Rectangles.Keys)
+        {
+            if (IsNestedAtomicInline(key, box))
+                return null;
+        }
+
+        double aligned = double.MinValue;
+        double any = double.MinValue;
+
+        foreach (var word in last.Words)
+        {
+            if (word.OwnerBox == null || IsInAbsposSubtree(word.OwnerBox, box))
+                continue;
+
+            double wordBaseline = word.Top + (word.IsImage
+                ? word.Height
+                : word.OwnerBox.ActualFont.Height * PtToCssPx * TypicalAscentRatio);
+
+            any = Math.Max(any, wordBaseline);
+
+            if (string.IsNullOrEmpty(word.OwnerBox.VerticalAlign) || word.OwnerBox.VerticalAlign == CssConstants.Baseline)
+                aligned = Math.Max(aligned, wordBaseline);
+        }
+
+        double found = aligned > double.MinValue ? aligned : any;
+        return found > double.MinValue ? found : null;
+    }
+
+    private static void FindLastLine(CssBox box, CssBox root, ref CssLineBox? last, ref double lastBottom)
+    {
+        foreach (var line in box.LineBoxes)
+        {
+            double bottom = double.MinValue;
+
+            foreach (var word in line.Words)
+            {
+                if (word.OwnerBox != null && !IsInAbsposSubtree(word.OwnerBox, root))
+                    bottom = Math.Max(bottom, word.Bottom);
+            }
+
+            foreach (var rect in line.Rectangles)
+            {
+                if (IsNestedAtomicInline(rect.Key, root))
+                    bottom = Math.Max(bottom, rect.Value.Bottom);
+            }
+
+            if (bottom > double.MinValue && bottom >= lastBottom)
+            {
+                last = line;
+                lastBottom = bottom;
+            }
+        }
+
+        foreach (var child in box.Boxes)
+        {
+            if (child.Display == CssConstants.None
+                || child.Position is CssConstants.Absolute or CssConstants.Fixed
+                || child.Float != CssConstants.None
+                || child.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table")
+            {
+                continue;
+            }
+
+            FindLastLine(child, root, ref last, ref lastBottom);
+        }
+    }
+
+    /// <summary>
+    /// Whether the box is an atomic inline-level box in the normal flow inside
+    /// <paramref name="root"/>, other than an image, whose line it is a word of.
+    /// </summary>
+    private static bool IsNestedAtomicInline(CssBox box, CssBox root) =>
+        box != root
+        && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table"
+        && !IsInAbsposSubtree(box, root);
 
     /// <summary>
     /// Whether the box is an atomic inline-level box whose baseline is its bottom margin edge: an
@@ -2505,9 +2619,18 @@ internal static class CssLayoutEngine
         // thumbnail: the skin sets `line-height: 0` on the figure and `vertical-align: middle` on
         // the image, so the strut contributed nothing and the image's own bottom became the
         // baseline.
+        //
+        // An inline-block with a line of text in it, aligned to the baseline, counts as the text
+        // does: its last line's baseline is its baseline. Where it stands in the flow, at the line's
+        // top, its baseline can only be at or below the strut's, so it can only move the line's
+        // baseline down, and the text beside it with it, never raise the box above the line. One
+        // raised or lowered from the baseline is left out, as every inline-block was, and placed
+        // from the baseline the rest of the line sets.
         foreach (var box in lineBox.Rectangles.Keys)
         {
-            if (box.Display != CssConstants.InlineBlock
+            if ((box.Display != CssConstants.InlineBlock
+                    || ((string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline)
+                        && LastLineBaseline(box) != null))
                 && !topBottomBoxes.Contains(box)
                 && !IsAlignedToParentFontMetrics(box.VerticalAlign))
             {
