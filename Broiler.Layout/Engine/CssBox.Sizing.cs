@@ -1197,6 +1197,27 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// CSS2.1 §10.6.7: extends this box, the root of a formatting context laid out through line
+    /// layout, to the bottom margin edge of the lowest float inside it, where its lines end above
+    /// that.
+    /// </summary>
+    /// <remarks>
+    /// A block-level root laid out that way gets this from <see cref="MarginBottomCollapse"/>.
+    /// An atomic inline-level box, or a flex or grid item laid out as one, is laid out through
+    /// <c>CssLayoutEngine.FlowInlineBlock</c> instead, which took its height from its lines alone.
+    /// </remarks>
+    internal void ContainDescendantFloats()
+    {
+        double contentBottom = ActualBottom - ActualPaddingBottom - ActualBorderBottomWidth;
+        double floatBottom = contentBottom;
+
+        FindMaxDescendantFloatBottom(this, ref floatBottom);
+
+        if (floatBottom > contentBottom)
+            ActualBottom = floatBottom + ActualPaddingBottom + ActualBorderBottomWidth;
+    }
+
+    /// <summary>
     /// Recursively finds the maximum bottom edge of any float in the
     /// subtree, stopping at nested BFC boundaries.  Used by the BFC
     /// root height calculation so that grandchild (and deeper) floats

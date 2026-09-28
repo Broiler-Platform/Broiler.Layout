@@ -1444,6 +1444,46 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// CSS2.1 §9.5: lays out the floated children of this box, whose content
+    /// <c>CssLayoutEngine.CreateLineBoxes</c> has just flowed, skipping them as out of flow, so
+    /// they are positioned and painted; and flows the lines again beside them.
+    /// </summary>
+    internal void LayOutFloatedChildren(ILayoutEnvironment g)
+    {
+        bool laidOutOwnFloat = false;
+
+        foreach (var childBox in Boxes)
+        {
+            if (childBox.Float != CssConstants.None)
+            {
+                childBox.PerformLayout(g);
+                laidOutOwnFloat |= childBox.Display != CssConstants.None
+                    && childBox.Size is { Width: > 0, Height: > 0 };
+
+                // CSS2.1 §13.3.1: When page-break-inside:avoid is
+                // set on a float's containing block, move the float
+                // to the next page if it would otherwise cross a
+                // page boundary.
+                if (PageBreakInside == CssConstants.Avoid)
+                    childBox.BreakPage();
+            }
+        }
+
+        // A float's own vertical position is decided by the content before it, so it can
+        // only be placed after that content has flowed — which leaves the lines that
+        // should have been shortened beside it already flowed at full width. Re-flow them
+        // now that the geometry exists; the float's position does not depend on the
+        // narrower lines (its top is where the flow had already reached), so one extra
+        // pass settles it rather than oscillating. Blocks with no float of their own —
+        // nearly all of them — never pay for this.
+        if (laidOutOwnFloat)
+        {
+            ActualBottom = Location.Y;
+            CssLayoutEngine.CreateLineBoxes(g, this);
+        }
+    }
+
+    /// <summary>
     /// Lay out this block's contents: table, row-flex,
     /// inline-formatting-context,or block children (with multi-column
     /// pre-constraint),then run the flex/grid alignment passes.
@@ -1509,41 +1549,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             {
                 ActualBottom = Location.Y;
                 CssLayoutEngine.CreateLineBoxes(g, this); //This will automatically set the bottom of this block
-
-                // CSS2.1 §9.5: Floated children were skipped by
-                // CreateLineBoxes (they are out-of-flow).  Lay them out
-                // now so they are positioned and painted.
-                bool laidOutOwnFloat = false;
-
-                foreach (var childBox in Boxes)
-                {
-                    if (childBox.Float != CssConstants.None)
-                    {
-                        childBox.PerformLayout(g);
-                        laidOutOwnFloat |= childBox.Display != CssConstants.None
-                            && childBox.Size is { Width: > 0, Height: > 0 };
-
-                        // CSS2.1 §13.3.1: When page-break-inside:avoid is
-                        // set on a float's containing block, move the float
-                        // to the next page if it would otherwise cross a
-                        // page boundary.
-                        if (PageBreakInside == CssConstants.Avoid)
-                            childBox.BreakPage();
-                    }
-                }
-
-                // A float's own vertical position is decided by the content before it, so it can
-                // only be placed after that content has flowed — which leaves the lines that
-                // should have been shortened beside it already flowed at full width. Re-flow them
-                // now that the geometry exists; the float's position does not depend on the
-                // narrower lines (its top is where the flow had already reached), so one extra
-                // pass settles it rather than oscillating. Blocks with no float of their own —
-                // nearly all of them — never pay for this.
-                if (laidOutOwnFloat)
-                {
-                    ActualBottom = Location.Y;
-                    CssLayoutEngine.CreateLineBoxes(g, this);
-                }
+                LayOutFloatedChildren(g);
 
                 // CSS2.1 §9.4.3: a relatively positioned inline-level box is offset
                 // visually once its line boxes exist. PerformLayout does that for every box
