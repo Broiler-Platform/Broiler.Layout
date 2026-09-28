@@ -24,6 +24,10 @@ internal sealed class CssLayoutEngineTable
     // never rendered; collect them here to lay out in LayoutCells.
     private readonly List<CssBox> _captions = [];
 
+    // The widest of the captions' min-content contributions, which the table is at least as wide
+    // as (see WidenToCaptions).
+    private double _captionMinWidth;
+
     private int _columnCount;
 
     private bool _widthSpecified;
@@ -123,6 +127,9 @@ internal sealed class CssLayoutEngineTable
 
         // While table width is larger than it should, and width is reducible
         EnforceMaximumSize();
+
+        // However wide that makes it, the table is as wide as its captions need.
+        WidenToCaptions();
 
         //Actually layout cells!
         LayoutCells(g);
@@ -909,6 +916,52 @@ internal sealed class CssLayoutEngineTable
         return Math.Max(0, needed - spare);
     }
 
+    /// <summary>
+    /// CSS Tables 3: a table is at least as wide as the widest of its captions' min-content
+    /// contributions, whatever its <c>width</c> and <c>max-width</c>. The columns share that width
+    /// out as they share any width the table is given (see <see cref="ShareOut"/>): from their
+    /// minimums up to their maximums, then past them in proportion to them.
+    /// </summary>
+    /// <remarks>
+    /// The columns were sized from the cells alone, and the captions laid out across them, so
+    /// "Caption" over a cell holding an x made the table 8px wide and the word ran out of it, where
+    /// browsers make the table 55.16px wide, as wide as the word. A table holding only a caption was
+    /// 0px wide.
+    /// </remarks>
+    private void WidenToCaptions()
+    {
+        foreach (var caption in _captions)
+            _captionMinWidth = Math.Max(_captionMinWidth, GetCaptionMinContribution(caption));
+
+        // A table with no columns is widened in LayoutCells.
+        if (_columnWidths.Length == 0)
+            return;
+
+        double columns = 0;
+        foreach (double width in _columnWidths)
+            columns += width;
+
+        double needed = _captionMinWidth - (GetWidthSum() - columns);
+        if (needed <= columns + 0.01)
+            return;
+
+        // From the columns' minimums: their widths may lie past their maximums already, shared
+        // out evenly over a table's own width, and the share-out would add to that.
+        var widths = (double[])GetColumnMinWidths().Clone();
+        ShareOut(needed, 0, widths.Length - 1, widths, _columnMaxWidths);
+        _columnWidths = widths;
+    }
+
+    /// <summary>
+    /// A caption's min-content contribution: its min-content width, or its own width where it has
+    /// one, with its padding and border (see <see cref="CssBox.GetMinMaxWidth"/>), and its margins.
+    /// </summary>
+    private static double GetCaptionMinContribution(CssBox caption)
+    {
+        caption.GetMinMaxWidth(out double min, out _);
+        return (double.IsNaN(min) ? 0 : min) + caption.ActualMarginLeft + caption.ActualMarginRight;
+    }
+
     private void LayoutCells(ILayoutEnvironment g)
     {
         // CSS2.1 §17.4.1: lay out top-side captions above the cell grid. They
@@ -919,7 +972,14 @@ internal sealed class CssLayoutEngineTable
         // CSS 2.1 §17.4: a caption is as wide as the table's border box, which GetWidthSum is, the
         // spacing and the borders counted. The spacing was added again, so a caption ran past the
         // table's right edge by it: with `border-spacing: 4px` and one column, 8px.
-        double captionWidth = GetWidthSum();
+        //
+        // A table with no columns has no spacing either, and is as wide as its border and padding,
+        // its own width, or its captions need, whichever is the widest.
+        double captionWidth = _columnCount > 0
+            ? GetWidthSum()
+            : Math.Max(Math.Max(
+                _tableBox.ActualBorderLeftWidth + _tableBox.ActualPaddingLeft + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
+                _tableBox.ActualWidth), _captionMinWidth);
         double topCaptionHeight = LayoutTopCaptions(g, captionWidth);
 
         // CSS2.1 §17.6.1: border spacing lies between the cells, and between them and the
@@ -1073,6 +1133,10 @@ internal sealed class CssLayoutEngineTable
         _tableBox.ActualRight = Math.Max(
             maxRight + horizontalSpacing + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
             _tableBox.Location.X + _tableBox.ActualWidth);
+
+        if (_columnCount == 0)
+            _tableBox.ActualRight = Math.Max(_tableBox.ActualRight, _tableBox.Location.X + captionWidth);
+
         _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualPaddingBottom + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
