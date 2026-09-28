@@ -367,11 +367,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// An <c>inline-block</c> that does have line boxes and clips nothing is not covered: its
     /// baseline is its last line's, which <see cref="CssLayoutEngine.LastLineBaseline"/> finds.
     /// </para>
+    /// <para>
+    /// An inline flex or grid container takes its baseline from its first item (<see
+    /// cref="CssLayoutEngine.FlexOrGridBaseline"/>), whatever its <c>overflow</c>, and has none
+    /// when it has no item; its bottom margin edge stands in for it then, as for an inline-block.
+    /// </para>
     /// </remarks>
     internal bool UsesBottomMarginEdgeBaseline =>
-        Display == CssConstants.InlineBlock
-        && ((!string.IsNullOrEmpty(Overflow) && Overflow != CssConstants.Visible)
-            || !HasInFlowLineContent(this));
+        (Display == CssConstants.InlineBlock
+            && ((!string.IsNullOrEmpty(Overflow) && Overflow != CssConstants.Visible)
+                || !HasInFlowLineContent(this)))
+        || (Display is "inline-flex" or "inline-grid" && CssLayoutEngine.FirstFlexOrGridItem(this) == null);
 
     /// <summary>
     /// Whether <paramref name="box"/> lays any text out in a line box of its own or of an in-flow

@@ -449,6 +449,11 @@ internal static class CssLayoutEngine
                 // lies below the baseline, and a box aligned `middle`, `top`, by a length or any
                 // other way does not stand on it. An empty 30px inline-block aligned middle made a
                 // 34px line of 20px text, where browsers make it 30px.
+                //
+                // An inline flex or grid container with an item stands on the item's baseline
+                // (FlexOrGridBaseline), and the strut's descent lies below that, not below its
+                // bottom: a 32px inline-flex button whose icon ends 6px above its bottom made a line
+                // of 14px text 35.4px tall, where browsers make it 32px.
                 if (blockBox.Kind == BoxKind.Anonymous
                     && IsBaselineAligned(rect.Key)
                     && ((rect.Key.Display == CssConstants.InlineBlock && LastLineBaseline(rect.Key) == null)
@@ -457,10 +462,10 @@ internal static class CssLayoutEngine
                     double lineStrut = blockBox.ActualLineHeight > 0
                         ? blockBox.ActualLineHeight
                         : blockBox.ActualFont.Height;
-                    double marginBoxBottom = rect.Value.Bottom + rect.Key.ActualMarginBottom
-                        + lineStrut * (1.0 - TypicalAscentRatio);
+                    double boxBaseline = FlexOrGridBaseline(rect.Key)
+                        ?? rect.Value.Bottom + rect.Key.ActualMarginBottom;
 
-                    maxBottom = Math.Max(maxBottom, marginBoxBottom);
+                    maxBottom = Math.Max(maxBottom, boxBaseline + lineStrut * (1.0 - TypicalAscentRatio));
                 }
 
                 minTop = Math.Min(minTop, rect.Value.Top);
@@ -1815,6 +1820,8 @@ internal static class CssLayoutEngine
         // strut's descent below it, as a baseline-aligned image does (see FlowBox), and the next
         // line starts below that. It started at the box's bottom, and the text beside the box,
         // which stands on that bottom (ApplyVerticalAlignment), reached into it.
+        // An inline flex or grid container with an item has the descent below the item's baseline
+        // (FlexOrGridBaseline).
         if (IsBaselineAligned(b)
             && ((b.Display == CssConstants.InlineBlock && LastLineBaseline(b) == null)
                 || b.Display is "inline-flex" or "inline-grid"))
@@ -1822,8 +1829,8 @@ internal static class CssLayoutEngine
             double lineStrut = blockbox.ActualLineHeight > 0
                 ? blockbox.ActualLineHeight
                 : blockbox.ActualFont.Height;
-            maxbottom = Math.Max(maxbottom,
-                b.ActualBottom + b.ActualMarginBottom + lineStrut * (1.0 - TypicalAscentRatio));
+            double boxBaseline = FlexOrGridBaseline(b) ?? b.ActualBottom + b.ActualMarginBottom;
+            maxbottom = Math.Max(maxbottom, boxBaseline + lineStrut * (1.0 - TypicalAscentRatio));
         }
 
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
@@ -2719,9 +2726,118 @@ internal static class CssLayoutEngine
             return box.ActualFont.Height * TypicalAscentRatio;
 
         // An inline-block with a line of text in it and nothing clipped has that line's baseline.
-        return box.Display == CssConstants.InlineBlock && LastLineBaseline(box) is double baseline
-            ? baseline - rect.Top
-            : rect.Height;
+        if (box.Display == CssConstants.InlineBlock && LastLineBaseline(box) is double baseline)
+            return baseline - rect.Top;
+
+        // An inline flex or grid container has its first item's.
+        if (FlexOrGridBaseline(box) is double itemBaseline)
+            return itemBaseline - rect.Top;
+
+        return rect.Height;
+    }
+
+    /// <summary>
+    /// The first in-flow item of a flex or grid container, in the order its items are laid out in,
+    /// or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// An inline box holding no words and no boxes is not an item: the white space between a
+    /// container's elements generates none (CSS Flexbox §4).
+    /// </remarks>
+    internal static CssBox? FirstFlexOrGridItem(CssBox container)
+    {
+        foreach (var child in container.Boxes)
+        {
+            if (child.Display == CssConstants.None
+                || child.Position is CssConstants.Absolute or CssConstants.Fixed)
+            {
+                continue;
+            }
+
+            if (child.Display == CssConstants.Inline && child.Words.Count == 0 && child.Boxes.Count == 0)
+                continue;
+
+            return child;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Where the baseline of an inline flex or grid container lies: its first item's first
+    /// baseline, or, where the item has no line of text in it, the item's bottom border edge. Null
+    /// for any other box, and for a container with no item, whose baseline is its bottom margin
+    /// edge (<see cref="CssBox.UsesBottomMarginEdgeBaseline"/>).
+    /// </summary>
+    /// <remarks>
+    /// CSS Flexbox §8.5: a flex container's first baseline is that of its first item, or, where
+    /// the item has none, one synthesized from its border box, which for the alphabetic baseline is
+    /// its bottom edge (CSS Box Alignment). CSS Grid gives a grid container its first item's in the
+    /// same way. An inline flex or grid container stood on the baseline with its
+    /// bottom edge instead, a strut's descent below it, and the text in it stood as far below the
+    /// text beside it as the item was below the container's top: a 32px inline-flex button, its
+    /// 20px icon centred in it, made a 35.4px line of 14px text, where browsers make it 32px, the
+    /// icon's bottom on the baseline and the rest of the button in the descent.
+    /// </remarks>
+    internal static double? FlexOrGridBaseline(CssBox box)
+    {
+        if (box.Display is not ("inline-flex" or "inline-grid"))
+            return null;
+
+        if (FirstFlexOrGridItem(box) is not { } item)
+            return null;
+
+        return FirstLineBaseline(item) ?? item.ActualBottom;
+    }
+
+    /// <summary>
+    /// Where the baseline of the first in-flow line box in <paramref name="box"/> lies, where its
+    /// words aligned to the baseline stand, or null when it has no line with a word on it.
+    /// </summary>
+    private static double? FirstLineBaseline(CssBox box)
+    {
+        // Words of its own are laid out on its container's lines, as an anonymous item's text is.
+        if (box.Words.Count > 0 && !box.IsImage)
+            return WordsBaseline(box.Words, box);
+
+        CssLineBox? first = null;
+        double firstTop = double.MaxValue;
+        FindFirstLine(box, box, ref first, ref firstTop);
+
+        return first == null ? null : WordsBaseline(first.Words, box);
+    }
+
+    private static void FindFirstLine(CssBox box, CssBox root, ref CssLineBox? first, ref double firstTop)
+    {
+        foreach (var line in box.LineBoxes)
+        {
+            double top = double.MaxValue;
+
+            foreach (var word in line.Words)
+            {
+                if (word.OwnerBox != null && !IsInAbsposSubtree(word.OwnerBox, root))
+                    top = Math.Min(top, word.Top);
+            }
+
+            if (top < firstTop)
+            {
+                first = line;
+                firstTop = top;
+            }
+        }
+
+        foreach (var child in box.Boxes)
+        {
+            if (child.Display == CssConstants.None
+                || child.Position is CssConstants.Absolute or CssConstants.Fixed
+                || child.Float != CssConstants.None
+                || child.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table")
+            {
+                continue;
+            }
+
+            FindFirstLine(child, root, ref first, ref firstTop);
+        }
     }
 
     /// <summary>
@@ -2847,7 +2963,7 @@ internal static class CssLayoutEngine
     /// reaches a line box as a word of its own).
     /// </summary>
     private static bool IsAtomicInline(CssBox box) =>
-        box.Display == CssConstants.InlineBlock || box.IsImage;
+        box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" || box.IsImage;
 
     /// <summary>
     /// Whether a <c>vertical-align</c> value positions the box against the <em>parent's font
@@ -2957,6 +3073,11 @@ internal static class CssLayoutEngine
             {
                 continue;
             }
+
+            // An inline flex or grid container counts as an inline-block does, with its first
+            // item's baseline (FlexOrGridBaseline) or its bottom margin edge.
+            if (box.Display is "inline-flex" or "inline-grid" && !IsBaselineAligned(box))
+                continue;
 
             double boxBaseline = lineBox.Rectangles[box].Top + BaselineAscentOf(box, lineBox)
                 + (bottomEdge ? box.ActualMarginBottom : 0);

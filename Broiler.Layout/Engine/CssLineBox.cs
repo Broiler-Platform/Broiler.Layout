@@ -143,7 +143,10 @@ internal sealed class CssLineBox
         // CSS 2.1 §10.8.1: For inline-block boxes, vertical-align adjusts
         // the position of the entire atomic box.  Move the box's rectangle
         // and its Location/ActualBottom directly.
-        if (b.Display == CssConstants.InlineBlock)
+        //
+        // An inline flex or grid container is an atomic box too, moved here as a whole. It was
+        // left where the flow put it, at the top of the line, whatever its alignment.
+        if (b.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
         {
             bool usesDefaultBaseline = string.IsNullOrEmpty(b.VerticalAlign)
                 || b.VerticalAlign == CssConstants.Baseline;
@@ -158,8 +161,11 @@ internal sealed class CssLineBox
             // (CssBox.UsesBottomMarginEdgeBaseline) is moved here, and so is one with a line of
             // text in it, whose baseline is that line's (CssLayoutEngine.LastLineBaseline). Any
             // other keeps the position it has always had.
-            if (usesDefaultBaseline && !b.UsesBottomMarginEdgeBaseline && CssLayoutEngine.LastLineBaseline(b) == null)
+            if (b.Display == CssConstants.InlineBlock
+                && usesDefaultBaseline && !b.UsesBottomMarginEdgeBaseline && CssLayoutEngine.LastLineBaseline(b) == null)
+            {
                 return;
+            }
 
             double inlineBlockShift = baseline - r.Top;
             if (Math.Abs(inlineBlockShift) > 0.01)
