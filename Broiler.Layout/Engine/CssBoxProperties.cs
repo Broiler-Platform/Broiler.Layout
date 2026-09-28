@@ -190,25 +190,25 @@ internal abstract partial class CssBoxProperties
     /// actual width whenever the style changes.</summary>
     public string BorderBottomStyle
     {
-        get => _borderBottomStyle;
+        get => _collapsedBorders?.Bottom.Style ?? _borderBottomStyle;
         set { _borderBottomStyle = value; _actualBorderBottomWidth = double.NaN; }
     }
 
     public string BorderLeftStyle
     {
-        get => _borderLeftStyle;
+        get => _collapsedBorders?.Left.Style ?? _borderLeftStyle;
         set { _borderLeftStyle = value; _actualBorderLeftWidth = double.NaN; }
     }
 
     public string BorderRightStyle
     {
-        get => _borderRightStyle;
+        get => _collapsedBorders?.Right.Style ?? _borderRightStyle;
         set { _borderRightStyle = value; _actualBorderRightWidth = double.NaN; }
     }
 
     public string BorderTopStyle
     {
-        get => _borderTopStyle;
+        get => _collapsedBorders?.Top.Style ?? _borderTopStyle;
         set { _borderTopStyle = value; _actualBorderTopWidth = double.NaN; }
     }
 
@@ -254,6 +254,32 @@ internal abstract partial class CssBoxProperties
 
     public string BorderSpacing { get; set; } = "0";
     public string BorderCollapse { get; set; } = "separate";
+
+    private CollapsedBorderSides? _collapsedBorders;
+
+    /// <summary>
+    /// The borders the collapsing border model gives this table or table cell in place of its own
+    /// (CSS 2.1 §17.6.2): half of each collapsed border on its edges, in the style and colour that
+    /// won there. The used border widths, styles and colours are these while it is set. Null
+    /// outside that model; the table's layout sets it.
+    /// </summary>
+    internal CollapsedBorderSides? CollapsedBorders
+    {
+        get => _collapsedBorders;
+        set => _collapsedBorders = value;
+    }
+
+    /// <summary>The style of this box's own top border, whatever a collapsing table makes of it.</summary>
+    internal string AuthoredBorderTopStyle => _borderTopStyle;
+
+    /// <summary>The style of this box's own right border, whatever a collapsing table makes of it.</summary>
+    internal string AuthoredBorderRightStyle => _borderRightStyle;
+
+    /// <summary>The style of this box's own bottom border, whatever a collapsing table makes of it.</summary>
+    internal string AuthoredBorderBottomStyle => _borderBottomStyle;
+
+    /// <summary>The style of this box's own left border, whatever a collapsing table makes of it.</summary>
+    internal string AuthoredBorderLeftStyle => _borderLeftStyle;
 
     // CSS UI §2: outline is painted just outside the border edge and does not
     // affect layout. Stored uniformly (outline cannot be set per-side).
@@ -1989,11 +2015,23 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FrameBorderWidth('T');
 
+            if (_collapsedBorders is { } collapsed)
+                return collapsed.Top.Width;
+
+            return AuthoredBorderTopWidth;
+        }
+    }
+
+    /// <summary>The width of this box's own top border, whatever a collapsing table makes of it.</summary>
+    internal double AuthoredBorderTopWidth
+    {
+        get
+        {
             if (double.IsNaN(_actualBorderTopWidth))
             {
                 _actualBorderTopWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderTopWidth, CssLengthParser.GetActualBorderWidth(BorderTopWidth, GetEmHeight())));
 
-                if (string.IsNullOrEmpty(BorderTopStyle) || BorderTopStyle == CssConstants.None)
+                if (string.IsNullOrEmpty(_borderTopStyle) || _borderTopStyle == CssConstants.None)
                     _actualBorderTopWidth = 0f;
             }
 
@@ -2008,11 +2046,23 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FrameBorderWidth('L');
 
+            if (_collapsedBorders is { } collapsed)
+                return collapsed.Left.Width;
+
+            return AuthoredBorderLeftWidth;
+        }
+    }
+
+    /// <summary>The width of this box's own left border, whatever a collapsing table makes of it.</summary>
+    internal double AuthoredBorderLeftWidth
+    {
+        get
+        {
             if (double.IsNaN(_actualBorderLeftWidth))
             {
                 _actualBorderLeftWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderLeftWidth, CssLengthParser.GetActualBorderWidth(BorderLeftWidth, GetEmHeight())));
 
-                if (string.IsNullOrEmpty(BorderLeftStyle) || BorderLeftStyle == CssConstants.None)
+                if (string.IsNullOrEmpty(_borderLeftStyle) || _borderLeftStyle == CssConstants.None)
                     _actualBorderLeftWidth = 0f;
             }
 
@@ -2027,11 +2077,23 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FrameBorderWidth('B');
 
+            if (_collapsedBorders is { } collapsed)
+                return collapsed.Bottom.Width;
+
+            return AuthoredBorderBottomWidth;
+        }
+    }
+
+    /// <summary>The width of this box's own bottom border, whatever a collapsing table makes of it.</summary>
+    internal double AuthoredBorderBottomWidth
+    {
+        get
+        {
             if (double.IsNaN(_actualBorderBottomWidth))
             {
                 _actualBorderBottomWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderBottomWidth, CssLengthParser.GetActualBorderWidth(BorderBottomWidth, GetEmHeight())));
 
-                if (string.IsNullOrEmpty(BorderBottomStyle) || BorderBottomStyle == CssConstants.None)
+                if (string.IsNullOrEmpty(_borderBottomStyle) || _borderBottomStyle == CssConstants.None)
                     _actualBorderBottomWidth = 0f;
             }
 
@@ -2046,11 +2108,23 @@ internal abstract partial class CssBoxProperties
             if (UsesLogicalFrameInsets())
                 return FrameBorderWidth('R');
 
+            if (_collapsedBorders is { } collapsed)
+                return collapsed.Right.Width;
+
+            return AuthoredBorderRightWidth;
+        }
+    }
+
+    /// <summary>The width of this box's own right border, whatever a collapsing table makes of it.</summary>
+    internal double AuthoredBorderRightWidth
+    {
+        get
+        {
             if (double.IsNaN(_actualBorderRightWidth))
             {
                 _actualBorderRightWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderRightWidth, CssLengthParser.GetActualBorderWidth(BorderRightWidth, GetEmHeight())));
 
-                if (string.IsNullOrEmpty(BorderRightStyle) || BorderRightStyle == CssConstants.None)
+                if (string.IsNullOrEmpty(_borderRightStyle) || _borderRightStyle == CssConstants.None)
                     _actualBorderRightWidth = 0f;
             }
 
@@ -2062,6 +2136,9 @@ internal abstract partial class CssBoxProperties
     {
         get
         {
+            if (_collapsedBorders is { } collapsed && !string.IsNullOrEmpty(collapsed.Top.Color))
+                return GetActualColor(collapsed.Top.Color);
+
             if (_actualBorderTopColor.IsEmpty)
                 _actualBorderTopColor = GetActualColor(BorderTopColor);
 
@@ -2109,6 +2186,9 @@ internal abstract partial class CssBoxProperties
     {
         get
         {
+            if (_collapsedBorders is { } collapsed && !string.IsNullOrEmpty(collapsed.Left.Color))
+                return GetActualColor(collapsed.Left.Color);
+
             if (_actualBorderLeftColor.IsEmpty)
                 _actualBorderLeftColor = GetActualColor(BorderLeftColor);
 
@@ -2120,6 +2200,9 @@ internal abstract partial class CssBoxProperties
     {
         get
         {
+            if (_collapsedBorders is { } collapsed && !string.IsNullOrEmpty(collapsed.Bottom.Color))
+                return GetActualColor(collapsed.Bottom.Color);
+
             if (_actualBorderBottomColor.IsEmpty)
                 _actualBorderBottomColor = GetActualColor(BorderBottomColor);
 
@@ -2131,6 +2214,9 @@ internal abstract partial class CssBoxProperties
     {
         get
         {
+            if (_collapsedBorders is { } collapsed && !string.IsNullOrEmpty(collapsed.Right.Color))
+                return GetActualColor(collapsed.Right.Color);
+
             if (_actualBorderRightColor.IsEmpty)
                 _actualBorderRightColor = GetActualColor(BorderRightColor);
 

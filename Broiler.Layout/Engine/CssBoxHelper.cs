@@ -343,6 +343,12 @@ internal static class CssBoxHelper
         // This box's own border and padding, and a table's spacing between its cells, are on the
         // path of everything inside it: its line and each word in it are that much wider. They come
         // off again below, once the box is done, so its siblings do not carry them.
+        //
+        // A table in the collapsing border model and its cells take halves of the borders they
+        // share, resolved when the table is laid out; one measured before that is resolved here.
+        if (box.Display is CssConstants.Table or CssConstants.InlineTable)
+            CssLayoutEngineTable.EnsureCollapsedBorders(box);
+
         double edges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth + box.ActualPaddingRight + box.ActualPaddingLeft;
         if (box.Display == CssConstants.Table)
             edges += CssLayoutEngineTable.GetTableSpacing(box);
