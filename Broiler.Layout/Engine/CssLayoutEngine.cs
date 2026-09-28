@@ -526,6 +526,8 @@ internal static class CssLayoutEngine
             if (lineTop == double.MaxValue)
                 lineTop = inlineBoxTop;
 
+            double contentTop = lineTop;
+
             // The line starts where the flow put it, whatever alignment moved down from there: an
             // inline-block alone on a line stands on the strut's baseline, below the line's top,
             // and a line measured from the box was as much taller than its line height: at
@@ -550,8 +552,14 @@ internal static class CssLayoutEngine
                 maxBottom = Math.Max(maxBottom, lineBaseline + StrutDescent(blockBox));
             }
 
+            // The inline boxes together reach down from the top of the highest of them, and on a line
+            // after the first that is above the line's top when content on the line is raised above
+            // it. Such a line moves down below, and the block grows by as much. Measured from the
+            // line's top, the line was as much taller besides: a span with `line-height: 40px`
+            // raised 10px on the second line of 16px/20px text made a 70px block, where browsers make
+            // it 60px.
             if (hasLineContent && !linesHoldFlexItems)
-                maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, lineTop));
+                maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, Math.Min(lineTop, contentTop)));
         }
 
         // CSS2.1 §10.8.1: a line box reaches from the top of the highest box on it to the bottom of
