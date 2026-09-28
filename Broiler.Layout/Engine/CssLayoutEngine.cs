@@ -1643,13 +1643,17 @@ internal static class CssLayoutEngine
 
             // An inline-block, and a flex or grid item, establishes a block formatting context
             // (CSS2.1 §9.4.1, CSS Flexbox §3), so its content box ends at the bottom margin edge of
-            // its lowest in-flow child: that margin cannot collapse through it (§8.3.1), including a
+            // its last in-flow child: that margin cannot collapse through it (§8.3.1), including a
             // margin that has collapsed through the child from the child's own last child. Its own
             // padding and border follow (§10.6.7). This branch ended at the child's border box: a
             // `display: inline-block; padding: 40px` box holding a 20px block was 60px tall where
             // browsers make it 100, and DuckDuckGo's hero section (`padding: 40px 24px`, an h1 and
-            // a p) was 56px short in any column that did not stretch it.
+            // a p) was 56px short in any column that did not stretch it. It is the last child, as a
+            // block's height ends at its last (CssBox.MarginBottomCollapse), not the lowest: after a
+            // 30px block, one with margin-top: -25px and height: 10px ended an inline-block 30px
+            // down, where browsers end it 15px down.
             double childMaxBottom = b.Location.Y + b.ActualBorderTopWidth + b.ActualPaddingTop;
+            CssBox? lastInFlowChild = null;
 
             foreach (var child in b.Boxes)
             {
@@ -1667,19 +1671,22 @@ internal static class CssLayoutEngine
                 if (child.Display == CssConstants.None)
                     continue;
 
-                // CSS2.1 §9.4.3: a relative offset moves the child visually, not in the flow.
-                double childBottom = child.ActualBottom;
-                if (child.Position == CssConstants.Relative)
-                    childBottom -= CssBoxHelper.GetRelativeOffsetY(child);
+                // A float's margins never collapse, and the box contains the float (§10.6.7).
+                if (child.Float != CssConstants.None)
+                {
+                    childMaxBottom = Math.Max(childMaxBottom, child.ActualBottom + child.ActualMarginBottom);
+                    continue;
+                }
 
-                // A float's margins never collapse; an in-flow child's bottom margin is the one
-                // that has collapsed through it from its own last child, if any has.
-                double childMarginBottom = child.Float != CssConstants.None
-                    ? child.ActualMarginBottom
-                    : CssBoxHelper.GetPropagatedMarginBottom(child);
+                // An inline box has no bottom of its own; see CssBox.MarginBottomCollapse.
+                if (child.Display == CssConstants.Inline)
+                    continue;
 
-                childMaxBottom = Math.Max(childMaxBottom, childBottom + childMarginBottom);
+                lastInFlowChild = child;
             }
+
+            if (lastInFlowChild != null)
+                childMaxBottom = Math.Max(childMaxBottom, CssBox.LastInFlowChildEdge(lastInFlowChild, collapsesThrough: false));
 
             b.ActualBottom = childMaxBottom + b.ActualPaddingBottom + b.ActualBorderBottomWidth;
         }
