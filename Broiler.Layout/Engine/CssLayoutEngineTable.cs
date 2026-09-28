@@ -671,14 +671,27 @@ internal sealed class CssLayoutEngineTable
                 occupedSpace += _columnWidths[i];
             }
 
-            // spread extra width between all columns
+            // CSS 2.1 §17.5.2.2: the table is as wide as its columns' content, or as the room there is
+            // if that is less. CSS Tables 3 shares the room left over the columns in proportion to how
+            // much wider their content would have them, each up to its maximum. The room was spread one
+            // column at a time instead, each taking what was left divided by the columns still to come,
+            // so what a column could not take went unused: in a 1024px page, a table with an auto width
+            // holding text and a 600px image was 853.36px wide, where browsers make it 1024px and give
+            // the text 424px.
+            double room = availCellSpace - occupedSpace;
+            double growth = 0;
+
             for (int i = 0; i < _columnWidths.Length; i++)
+                growth += Math.Max(0, maxFullWidths[i] - _columnWidths[i]);
+
+            if (room > 0 && growth > 0)
             {
-                if (maxFullWidths[i] > _columnWidths[i])
+                double share = Math.Min(1, room / growth);
+
+                for (int i = 0; i < _columnWidths.Length; i++)
                 {
-                    var temp = _columnWidths[i];
-                    _columnWidths[i] = Math.Min(_columnWidths[i] + (availCellSpace - occupedSpace) / Convert.ToSingle(_columnWidths.Length - i), maxFullWidths[i]);
-                    occupedSpace = occupedSpace + _columnWidths[i] - temp;
+                    if (maxFullWidths[i] > _columnWidths[i])
+                        _columnWidths[i] += (maxFullWidths[i] - _columnWidths[i]) * share;
                 }
             }
         }
