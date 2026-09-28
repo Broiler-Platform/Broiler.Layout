@@ -1469,13 +1469,11 @@ internal static class CssLayoutEngine
         double totalExtent = b.ActualMarginLeft + ibBoxWidth + b.ActualMarginRight;
         if (edgeBeforeBox + totalExtent > limitRight && edgeBeforeBox > startx)
         {
-            double lineStrut = blockbox.ActualLineHeight > 0
-                ? blockbox.ActualLineHeight
-                : blockbox.ActualFont.Height;
-            double baselineDescent = lineStrut * (1.0 - TypicalAscentRatio);
-
+            // The strut's descent below a box on the line it leaves is already in maxbottom (see
+            // below). It was added here too, below any line an inline-block wrapped from, which put
+            // a row of inline-blocks holding text a descent lower than browsers put it.
             curx = startx + leftspacing;
-            cury = maxbottom + linespacing + baselineDescent;
+            cury = maxbottom + linespacing;
             line = new CssLineBox(blockbox);
             ibBorderLeft = curx - b.ActualBorderLeftWidth - b.ActualPaddingLeft;
         }
@@ -1733,6 +1731,21 @@ internal static class CssLayoutEngine
         // right margin edge of the box.
         curx = ibBorderLeft + physicalBoxWidth
             - b.ActualBorderRightWidth - b.ActualPaddingRight;
+
+        // CSS2.1 §10.8: a box that stands on the baseline with its bottom margin edge has the
+        // strut's descent below it, as a baseline-aligned image does (see FlowBox), and the next
+        // line starts below that. It started at the box's bottom, and the text beside the box,
+        // which stands on that bottom (ApplyVerticalAlignment), reached into it.
+        if (IsBaselineAligned(b)
+            && ((b.Display == CssConstants.InlineBlock && LastLineBaseline(b) == null)
+                || b.Display is "inline-flex" or "inline-grid"))
+        {
+            double lineStrut = blockbox.ActualLineHeight > 0
+                ? blockbox.ActualLineHeight
+                : blockbox.ActualFont.Height;
+            maxbottom = Math.Max(maxbottom,
+                b.ActualBottom + b.ActualMarginBottom + lineStrut * (1.0 - TypicalAscentRatio));
+        }
 
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
         maxbottom = Math.Max(maxbottom, b.ActualBottom + b.ActualMarginBottom);

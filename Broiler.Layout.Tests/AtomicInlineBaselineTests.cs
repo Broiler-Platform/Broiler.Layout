@@ -123,6 +123,65 @@ public sealed class AtomicInlineBaselineTests
     }
 
     /// <summary>
+    /// The line below one with an empty 30px inline-block starts below the strut's descent under
+    /// the box, 33.2px down, where "a" on the box's bottom ends. It started at the box's bottom,
+    /// 30px down, 3.2px into "a".
+    /// </summary>
+    [Fact]
+    public void The_Next_Line_Starts_Below_The_Descent_Under_The_Box()
+    {
+        var tree = Build();
+        EmptyBox(tree, 30);
+        var next = Word(tree.Block, new string('c', 40));
+        Layout(tree);
+
+        Assert.Equal(30 - Ascent, tree.Top(tree.Before), 1);
+        Assert.Equal(33.2, tree.Top(next), 1);
+    }
+
+    /// <summary>
+    /// A row of empty 100×30px inline-blocks that wraps has the strut's descent between its lines
+    /// once: the fourth box is 33.2px down. With the descent counted where the boxes stand and again
+    /// where the row wraps, it would be 36.4px down.
+    /// </summary>
+    [Fact]
+    public void A_Wrapping_Row_Of_Boxes_Has_The_Descent_Between_Its_Lines_Once()
+    {
+        var bare = Build(words: false);
+        CssBox? last = null;
+        for (int i = 0; i < 4; i++)
+        {
+            last = EmptyBox(bare, 30);
+            last.Width = "100px";
+        }
+
+        Layout(bare);
+
+        Assert.Equal(33.2, bare.Top(last!), 1);
+    }
+
+    /// <summary>
+    /// A row of 100px inline-blocks holding a word wraps at their bottom: the fourth is 16px down.
+    /// Their baseline is their word's, and the strut's descent lies within them. It was 19.2px
+    /// down, a descent lower.
+    /// </summary>
+    [Fact]
+    public void A_Wrapping_Row_Of_Inline_Blocks_Holding_Text_Wraps_At_Their_Bottom()
+    {
+        var bare = Build(words: false);
+        CssBox? last = null;
+        for (int i = 0; i < 4; i++)
+        {
+            last = new CssBox(bare.Block, new HtmlTag("span", false, null), BaseUrl) { Display = "inline-block", Width = "100px" };
+            Word(last, "x");
+        }
+
+        Layout(bare);
+
+        Assert.Equal(16, bare.Top(last!), 1);
+    }
+
+    /// <summary>
     /// Laid out a second time, the words beside the 30px inline-block are 17.2px down still.
     /// </summary>
     [Fact]
