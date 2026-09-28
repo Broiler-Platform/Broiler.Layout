@@ -892,6 +892,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 flowPrev = LayoutBoxUtils.GetPreviousInFlowSibling(flowPrev);
             }
 
+            // CSS2.1 §8.3.1: MarginTopCollapse may propagate margins
+            // and update the parent's Location, so compute it before
+            // reading ParentBox.ClientTop — or the preceding sibling's
+            // bottom, which moves with the parent when this box's margin
+            // collapses through an empty sibling into the parent's top.
+            // Read before, a parent moved up left this box as far below
+            // its content top as the parent had moved.
+            double marginCollapse = MarginTopCollapse(flowPrev);
+
             // CSS2.1 §9.4.3: Relative positioning is visual-only.
             // Use the flow-position bottom (before relative offset)
             // when computing the next sibling's position.
@@ -899,11 +908,6 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (flowPrev is CssBox flowPrevBox && flowPrevBox.Position == CssConstants.Relative)
                 flowPrevBottom -= CssBoxHelper.GetRelativeOffsetY(flowPrevBox);
-
-            // CSS2.1 §8.3.1: MarginTopCollapse may propagate margins
-            // and update the parent's Location, so compute it before
-            // reading ParentBox.ClientTop.
-            double marginCollapse = MarginTopCollapse(flowPrev);
 
             // The static top is the parent's content top plus the in-flow advance
             // past any preceding sibling. A block preceding sibling records an
