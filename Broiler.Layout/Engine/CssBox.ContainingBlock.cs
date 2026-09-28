@@ -63,6 +63,50 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// The width of the containing block a percentage margin or padding of this box refers to
+    /// (CSS2.1 §8.3, §8.4): the viewport's for a fixed box, the padding box's of its positioned
+    /// ancestor for an absolutely positioned one, and otherwise the content box's of
+    /// <see cref="ContainingBlock"/>, the same widths <see cref="ResolveBlockUsedWidth"/> resolves
+    /// the box's own width against (§10.1). Zero while the content of a box around this one is
+    /// measured for its intrinsic width (see <see cref="IsInsideContentMeasurement"/>).
+    /// </summary>
+    /// <remarks>
+    /// The root, whose containing block is the initial one it takes its own width from, keeps its
+    /// own width. So do the parts of a table, which the table sizes in passes of its own, and grid
+    /// items, whose containing block is the grid area their track sizing gives them, not the grid
+    /// container's content box.
+    /// </remarks>
+    protected override bool TryGetPercentageBasisWidth(out double width)
+    {
+        width = 0;
+        if (ParentBox == null
+            || Display.StartsWith("table-", StringComparison.Ordinal)
+            || ParentBox.Display is "grid" or "inline-grid")
+            return false;
+
+        if (IsInsideContentMeasurement())
+            return true;
+
+        if (Position == CssConstants.Fixed && LayoutEnvironment != null)
+        {
+            width = FixedPositioningViewport().Width;
+            return true;
+        }
+
+        if (Position == CssConstants.Absolute)
+        {
+            GetAbsoluteContainingBlockPaddingBox(FindPositionedContainingBlock(), out _, out _, out width, out _);
+            return true;
+        }
+
+        var cb = ContainingBlock;
+        width = Math.Max(0, cb.Size.Width
+            - cb.ActualBorderLeftWidth - cb.ActualBorderRightWidth
+            - cb.ActualPaddingLeft - cb.ActualPaddingRight);
+        return true;
+    }
+
+    /// <summary>
     /// CSS2.1 §10.1: For absolutely positioned elements, the containing
     /// block is the padding-box of the nearest ancestor with a computed
     /// position of <c>absolute</c>, <c>relative</c>, or <c>fixed</c>.

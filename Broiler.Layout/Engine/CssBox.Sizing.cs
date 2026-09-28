@@ -385,10 +385,66 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return true;
     }
 
+    // The intrinsic-width measurements of this box's content in progress, and of any box's content
+    // on this thread: see IsInsideContentMeasurement.
+    private int _contentMeasurementDepth;
+
+    [ThreadStatic] private static int _contentMeasurements;
+
+    /// <summary>
+    /// Marks this box's content as being measured for its intrinsic width until disposed.
+    /// </summary>
+    private ContentMeasurement MeasureContent() => new(this);
+
+    private readonly struct ContentMeasurement : IDisposable
+    {
+        private readonly CssBox _box;
+
+        public ContentMeasurement(CssBox box)
+        {
+            _box = box;
+            box._contentMeasurementDepth++;
+            _contentMeasurements++;
+        }
+
+        public void Dispose()
+        {
+            _box._contentMeasurementDepth--;
+            _contentMeasurements--;
+        }
+    }
+
+    /// <summary>
+    /// Whether the content of a box around this one is being measured for its intrinsic width.
+    /// </summary>
+    /// <remarks>
+    /// A percentage margin or padding of this box then refers to a width that depends on the
+    /// measurement, and CSS Sizing 3 §5.2.1 resolves such a cyclic percentage against zero for
+    /// intrinsic size contributions: a float holding a block with <c>padding-left: 10%</c> and a
+    /// word is as wide as the word, and the padding a tenth of that. The same section takes a
+    /// cyclic percentage width for auto, as <see cref="ComputeShrinkToFitWidth"/> does. A float,
+    /// or an absolutely positioned box, takes the width it has room for before it measures its
+    /// content, and a percentage resolved against that made it as much wider.
+    /// </remarks>
+    private bool IsInsideContentMeasurement()
+    {
+        if (_contentMeasurements == 0)
+            return false;
+
+        for (var box = ParentBox; box != null; box = box.ParentBox)
+        {
+            if (box._contentMeasurementDepth > 0)
+                return true;
+        }
+
+        return false;
+    }
+
     internal double GetMinimumWidth()
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         double maxWidth = 0;
         CssRect maxWidthWord = null;
@@ -418,6 +474,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // CSS Containment 2 §3.2: a size-contained box measures as though it were empty, so there
         // are no contents here to measure.
@@ -443,6 +500,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // CSS Containment 2 §3.2: a size-contained box measures as though it were empty. Ahead of
         // the grid branch below for the same reason it is ahead of the word walk: a contained
@@ -508,6 +566,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicCalls);
         using var trace = LayoutWorkTrace.Measure(LayoutWorkTrace.Ops.Intrinsic);
+        using var measuring = MeasureContent();
 
         // A grid with a fixed track template shrink-to-fits to its physical-width
         // track sum (+ gaps), not the max-content of its inline content — an empty
@@ -1026,6 +1085,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     private double ComputeIntrinsicInlineSize(bool useMin)
     {
+        using var measuring = MeasureContent();
+
         // CSS Flexbox §9.9.1: a row flex container's items sit side by side, so they add up,
         // where the loop below takes each blockified item for a line of its own.
         if (TryGetFlexRowIntrinsicContentWidths(out double flexMinContent, out double flexMaxContent))
