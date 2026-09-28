@@ -481,6 +481,11 @@ internal partial class CssBox
         if (owner.ActualLineHeight > 0 && top < double.MaxValue)
             bottom = Math.Max(bottom, top + owner.ActualLineHeight);
 
+        // A line holding an inline box with a taller line height is as tall as its inline boxes
+        // together, as CreateLineBoxes measures it.
+        if (top < double.MaxValue)
+            bottom = Math.Max(bottom, CssLayoutEngine.TallInlineBoxLineBottom(owner, line, top));
+
         return bottom;
     }
 
