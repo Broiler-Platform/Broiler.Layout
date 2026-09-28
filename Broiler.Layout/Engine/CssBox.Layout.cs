@@ -2862,34 +2862,45 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private void ApplyRelativePositionOffset()
     {
         // Apply position:relative offset after layout (visual only, does not affect flow)
+        var (dx, dy) = RelativePositionOffset();
+
+        if (dx != 0)
+            OffsetLeft(dx);
+
+        if (dy != 0)
+            OffsetTop(dy);
+    }
+
+    /// <summary>
+    /// How far <c>position: relative</c> shifts this box from where layout places it, across and
+    /// down; nothing for a box not positioned relatively.
+    /// </summary>
+    internal (double X, double Y) RelativePositionOffset()
+    {
         // CSS2.1 §9.4.3: For relative positioning, 'left'/'right' and
         // 'top'/'bottom' form constraint pairs.  When 'top' is auto and
         // 'bottom' is not, dy = -bottom.  When both are non-auto, 'bottom'
         // is ignored (in LTR).  Same logic applies to left/right.
-        if (Position == CssConstants.Relative)
-        {
-            double dx = 0, dy = 0;
+        if (Position != CssConstants.Relative)
+            return (0, 0);
 
-            bool hasLeft = Left != null && Left != CssConstants.Auto;
-            bool hasRight = Right != null && Right != CssConstants.Auto;
-            bool hasTop = Top != null && Top != CssConstants.Auto;
-            bool hasBottom = Bottom != null && Bottom != CssConstants.Auto;
+        double dx = 0, dy = 0;
 
-            if (hasLeft)
-                dx = ParseUsedLength(Left, Size.Width, percentAgainstContainingBlock: false);
-            else if (hasRight)
-                dx = -ParseUsedLength(Right, Size.Width, percentAgainstContainingBlock: false);
+        bool hasLeft = Left != null && Left != CssConstants.Auto;
+        bool hasRight = Right != null && Right != CssConstants.Auto;
+        bool hasTop = Top != null && Top != CssConstants.Auto;
+        bool hasBottom = Bottom != null && Bottom != CssConstants.Auto;
 
-            if (hasTop)
-                dy = ParseUsedLength(Top, Size.Height, percentAgainstContainingBlock: false);
-            else if (hasBottom)
-                dy = -ParseUsedLength(Bottom, Size.Height, percentAgainstContainingBlock: false);
+        if (hasLeft)
+            dx = ParseUsedLength(Left, Size.Width, percentAgainstContainingBlock: false);
+        else if (hasRight)
+            dx = -ParseUsedLength(Right, Size.Width, percentAgainstContainingBlock: false);
 
-            if (dx != 0)
-                OffsetLeft(dx);
+        if (hasTop)
+            dy = ParseUsedLength(Top, Size.Height, percentAgainstContainingBlock: false);
+        else if (hasBottom)
+            dy = -ParseUsedLength(Bottom, Size.Height, percentAgainstContainingBlock: false);
 
-            if (dy != 0)
-                OffsetTop(dy);
-        }
+        return (dx, dy);
     }
 }
