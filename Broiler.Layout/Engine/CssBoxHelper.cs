@@ -663,6 +663,28 @@ internal static class CssBoxHelper
         box.HtmlTag is { } tag && tag.Name.Equals("html", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Whether <paramref name="box"/> has top padding or a top border, which separates its top
+    /// margin from its first in-flow child's (CSS2.1 §8.3.1).
+    /// </summary>
+    /// <remarks>
+    /// Margins are adjoining only where "no line boxes, no clearance, no padding and no border
+    /// separate them", and any padding or border does, however thin. Padding and borders under
+    /// 0.1px were taken for none: www.mediawiki.org's <c>.mw-page-container</c> has
+    /// <c>padding-top: 0.05px</c> to keep its site notice's 24px top margin inside it, and began
+    /// 24px below the header, where browsers begin it right below.
+    /// </remarks>
+    internal static bool HasTopPaddingOrBorder(CssBox box) =>
+        box.ActualPaddingTop > 0 || box.ActualBorderTopWidth > 0;
+
+    /// <summary>
+    /// Whether <paramref name="box"/> has bottom padding or a bottom border, which separates its
+    /// bottom margin from its last in-flow child's (CSS2.1 §8.3.1), however thin, as <see
+    /// cref="HasTopPaddingOrBorder"/> has it at the top.
+    /// </summary>
+    internal static bool HasBottomPaddingOrBorder(CssBox box) =>
+        box.ActualPaddingBottom > 0 || box.ActualBorderBottomWidth > 0;
+
+    /// <summary>
     /// Returns the effective bottom margin for a box, accounting for
     /// parent-child bottom-margin collapse (CSS 2.1 §8.3.1).
     /// When a box has no bottom border, no bottom padding, and auto height,
@@ -673,7 +695,7 @@ internal static class CssBoxHelper
     {
         double mb = box.ActualMarginBottom;
 
-        if (box.ActualBorderBottomWidth > 0.1 || box.ActualPaddingBottom > 0.1)
+        if (HasBottomPaddingOrBorder(box))
             return mb;
 
         // CSS2.1 §8.3.1: "Margins of the root element's box do not collapse." The root
@@ -900,10 +922,7 @@ internal static class CssBoxHelper
         if (EstablishesBfc(box))
             return false;
 
-        if (box.ActualBorderTopWidth > 0.1 || box.ActualBorderBottomWidth > 0.1)
-            return false;
-
-        if (box.ActualPaddingTop > 0.1 || box.ActualPaddingBottom > 0.1)
+        if (HasTopPaddingOrBorder(box) || HasBottomPaddingOrBorder(box))
             return false;
 
         // Check if height resolves to zero/auto
