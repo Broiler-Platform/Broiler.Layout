@@ -726,9 +726,15 @@ internal sealed class CssLayoutEngineTable
                 curCol = 0;
         }
 
-        // if table max width is limited by we need to lower the columns width even if it will result in clipping
+        // CSS Tables 3: `max-width` narrows a table, but never below its columns' minimums, and the
+        // columns share out the width it leaves them as they share out any width the table is given
+        // (see ShareOut), from their minimums. They were narrowed to their minimums, past those where
+        // that was not enough, and given what that left evenly. `max-width: 20px` made a table
+        // around "xxxxxx" 20px wide, the word running out of it, where browsers make it 48px wide;
+        // with `width: 100%` and `max-width: 300px`, "xxxxxx" and "y" had 170px and 130px, where
+        // browsers give them 257.14px and 42.86px.
         var maxWidth = GetMaxTableWidth();
-        if (maxWidth >= 90999)
+        if (double.IsPositiveInfinity(maxWidth))
             return;
 
         widthSum = GetWidthSum();
@@ -736,83 +742,16 @@ internal sealed class CssLayoutEngineTable
         if (maxWidth >= widthSum)
             return;
 
-        //Get the minimum and maximum full length of NaN boxes
-        GetColumnsMinMaxWidthByContent(false, out double[] minFullWidths, out double[] maxFullWidths);
+        double columns = 0;
+        foreach (double width in _columnWidths)
+            columns += width;
 
-        // lower all the columns to the minimum
-        for (int i = 0; i < _columnWidths.Length; i++)
-            _columnWidths[i] = minFullWidths[i];
+        var widths = (double[])GetColumnMinWidths().Clone();
 
-        // either min for all column is not enought and we need to lower it more resulting in clipping
-        // or we now have extra space so we can give it to columns than need it
-        widthSum = GetWidthSum();
+        if (widths.Length > 0)
+            ShareOut(maxWidth - (widthSum - columns), 0, widths.Length - 1, widths, _columnMaxWidths);
 
-        if (maxWidth < widthSum)
-        {
-            // lower the width of columns starting from the largest one until the max width is satisfied
-            for (int a = 0; a < 15 && maxWidth < widthSum - 0.1; a++) // limit iteration so bug won't create infinite loop
-            {
-                int nonMaxedColumns = 0;
-                double largeWidth = 0f, secLargeWidth = 0f;
-
-                for (int i = 0; i < _columnWidths.Length; i++)
-                {
-                    if (_columnWidths[i] > largeWidth + 0.1)
-                    {
-                        secLargeWidth = largeWidth;
-                        largeWidth = _columnWidths[i];
-                        nonMaxedColumns = 1;
-                    }
-                    else if (_columnWidths[i] > largeWidth - 0.1)
-                    {
-                        nonMaxedColumns++;
-                    }
-                }
-
-                double decrease = secLargeWidth > 0 ? largeWidth - secLargeWidth : (widthSum - maxWidth) / _columnWidths.Length;
-                if (decrease * nonMaxedColumns > widthSum - maxWidth)
-                    decrease = (widthSum - maxWidth) / nonMaxedColumns;
-
-                for (int i = 0; i < _columnWidths.Length; i++)
-                    if (_columnWidths[i] > largeWidth - 0.1)
-                        _columnWidths[i] -= decrease;
-
-                widthSum = GetWidthSum();
-            }
-        }
-        else
-        {
-            // spread extra width to columns that didn't reached max width where trying to spread it between all columns
-            for (int a = 0; a < 15 && maxWidth > widthSum + 0.1; a++) // limit iteration so bug won't create infinite loop
-            {
-                int nonMaxedColumns = 0;
-        
-                for (int i = 0; i < _columnWidths.Length; i++)
-                    if (_columnWidths[i] + 1 < maxFullWidths[i])
-                        nonMaxedColumns++;
-                
-                if (nonMaxedColumns == 0)
-                    nonMaxedColumns = _columnWidths.Length;
-
-                bool hit = false;
-                double minIncrement = (maxWidth - widthSum) / nonMaxedColumns;
-                
-                for (int i = 0; i < _columnWidths.Length; i++)
-                {
-                    if (_columnWidths[i] + 0.1 < maxFullWidths[i])
-                    {
-                        minIncrement = Math.Min(minIncrement, maxFullWidths[i] - _columnWidths[i]);
-                        hit = true;
-                    }
-                }
-
-                for (int i = 0; i < _columnWidths.Length; i++)
-                    if (!hit || _columnWidths[i] + 1 < maxFullWidths[i])
-                        _columnWidths[i] += minIncrement;
-
-                widthSum = GetWidthSum();
-            }
-        }
+        _columnWidths = widths;
     }
 
     /// <summary>
@@ -1070,9 +1009,12 @@ internal sealed class CssLayoutEngineTable
         // greater of that and the columns' own extent. Taking the width for the columns' extent put
         // the right border and the spacing past it: `width: 320px` with a 10px border made a table
         // 330px wide, and 332px with 2px of border spacing, where browsers make it 320px.
+        //
+        // Its `max-width` wins over its `width`: with `width: 300px` and `max-width: 150px`, the
+        // table was 300px wide around 150px of columns, where browsers make it 150px wide.
         _tableBox.ActualRight = Math.Max(
             maxRight + horizontalSpacing + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
-            _tableBox.Location.X + _tableBox.ActualWidth);
+            _tableBox.Location.X + Math.Min(_tableBox.ActualWidth, GetMaxTableWidth()));
         _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualPaddingBottom + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
@@ -1750,7 +1692,7 @@ internal sealed class CssLayoutEngineTable
         }
         else
         {
-            return 9999f;
+            return double.PositiveInfinity;
         }
     }
 
