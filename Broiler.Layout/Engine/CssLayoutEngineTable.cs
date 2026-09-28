@@ -961,8 +961,14 @@ internal sealed class CssLayoutEngineTable
         // the rows naturally occupy, distribute the surplus over the rows.
         maxBottom = DistributeExtraTableHeight(g, rowBounds, maxBottom, starty);
 
-        maxRight = Math.Max(maxRight, _tableBox.Location.X + _tableBox.ActualWidth);
-        _tableBox.ActualRight = maxRight + GetHorizontalSpacing() + _tableBox.ActualBorderRightWidth;
+        // A table's `width` is the width of its border box, as the columns were sized above:
+        // GetAvailableCellWidth takes the borders and the spacing off it. The table ends at the
+        // greater of that and the columns' own extent. Taking the width for the columns' extent put
+        // the right border and the spacing past it: `width: 320px` with a 10px border made a table
+        // 330px wide, and 332px with 2px of border spacing, where browsers make it 320px.
+        _tableBox.ActualRight = Math.Max(
+            maxRight + GetHorizontalSpacing() + _tableBox.ActualBorderRightWidth,
+            _tableBox.Location.X + _tableBox.ActualWidth);
         _tableBox.ActualBottom = Math.Max(maxBottom, starty) + GetVerticalSpacing() + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
