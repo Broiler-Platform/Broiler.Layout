@@ -2526,12 +2526,17 @@ internal static class CssLayoutEngine
                     // with the baseline plus half the x-height of the parent.
                     // x-height ≈ 0.5 × font height for Latin fonts; half of
                     // that is 0.25 × font height.
+                    //
+                    // "Plus" raises, as it does for a length: the midpoint is half an x-height above
+                    // the baseline, where y is smaller. The half x-height was added to y, which put
+                    // the midpoint as far below the baseline instead, so an icon aligned middle beside
+                    // text hung below the text rather than centring on its lowercase letters.
                     if (lineBox.Rectangles.TryGetValue(box, out RectangleF value1) && baseline > float.MinValue)
                     {
                         double boxHeight = value1.Height;
                         double parentFont = (box.ParentBox?.ActualFont.Height ?? 0) * PtToCssPx;
                         double halfXHeight = parentFont * 0.25;
-                        lineBox.SetBaseLine(box, baseline + halfXHeight - boxHeight / 2);
+                        lineBox.SetBaseLine(box, baseline - halfXHeight - boxHeight / 2);
                     }
                     break;
 
