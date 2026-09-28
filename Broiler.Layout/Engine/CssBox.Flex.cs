@@ -37,6 +37,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         public double FlexBaseOuterWidth { get; init; }
 
         /// <summary>
+        /// The item's inner flex base size: its flex base size as a content-box width, by which
+        /// §9.7 scales its <c>flex-shrink</c>.
+        /// </summary>
+        public double FlexBaseInnerWidth { get; init; }
+
+        /// <summary>
         /// The item's hypothetical main size as an outer width: its flex base size clamped by its
         /// min and max widths. Lines are broken by this, and whether a line grows or shrinks is
         /// decided by it (§9.3, §9.7 step 1).
@@ -249,6 +255,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 Shrink = ParseFlexFactor(child.FlexShrink, 1),
                 DefiniteCrossContentHeight = itemCrossContentHeight,
                 FlexBaseOuterWidth = flexBase + margins,
+                FlexBaseInnerWidth = flexBase
+                    - child.ActualBorderLeftWidth - child.ActualBorderRightWidth
+                    - child.ActualPaddingLeft - child.ActualPaddingRight,
                 HypotheticalOuterWidth = margins + ClampFlexItemBorderBoxWidth(
                     child, flexBase, contentWidth, itemCrossContentHeight),
             };
@@ -886,11 +895,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>
     /// An item's share of its line's free space, relative to the other items' (CSS Flexbox §9.7):
     /// its <c>flex-grow</c> when the line grows, and when it shrinks its <c>flex-shrink</c> scaled
-    /// by its flex base size, so a large item gives up more of an overflow than a small one with
-    /// the same factor.
+    /// by its inner flex base size, so a large item gives up more of an overflow than a small one
+    /// with the same factor.
     /// </summary>
+    /// <remarks>
+    /// The inner size, the content box, and not the outer one: an item's margins, borders and
+    /// padding do not make it give up more. Two 100px items overflowing a row by 100px give up 50px
+    /// each, and one with a 50px margin gave up 60px of it.
+    /// </remarks>
     private static double FlexWeight(FlexItemLayout item, bool growing) =>
-        growing ? item.Grow : item.Shrink * Math.Max(0, item.FlexBaseOuterWidth);
+        growing ? item.Grow : item.Shrink * Math.Max(0, item.FlexBaseInnerWidth);
 
     /// <summary>
     /// The column flex passes that follow line layout, which stacks a <c>column</c> container's
@@ -1147,11 +1161,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             for (int i = 0; i < count; i++)
             {
-                // §9.7: the shrink factor is scaled by the flex base size, so a large item gives up
-                // more of the overflow than a small one with the same `flex-shrink`.
+                // §9.7: the shrink factor is scaled by the inner flex base size, so a large item
+                // gives up more of the overflow than a small one with the same `flex-shrink`. The
+                // flex base size here is an outer height, and the item's margins, borders and
+                // padding do not make it give up more, as they do not in a row (FlexWeight).
                 weights[i] = growing
                     ? ParseFlexFactor(items[i].FlexGrow, 0)
-                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, flexBases[i]);
+                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, flexBases[i]
+                        - items[i].ActualMarginTop - items[i].ActualMarginBottom
+                        - items[i].ActualBorderTopWidth - items[i].ActualBorderBottomWidth
+                        - items[i].ActualPaddingTop - items[i].ActualPaddingBottom);
 
                 // §9.7 step 3: an item keeps its hypothetical main size when it has no share to
                 // take, or when its min or max height has already clamped it the way the line
