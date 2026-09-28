@@ -408,6 +408,14 @@ internal static class CssLayoutEngine
         maxBottom = starty;
         double minTop = starty;
 
+        // A flex container's lines are how this engine places its items, one per line in a column,
+        // not line boxes: every item is blockified (CSS Display 3 §2.7) and lies in no inline
+        // formatting context, so there is no strut whose line-height could make a line taller than
+        // the item on it (CSS Flexbox §4). Holding each line to that height left a column one
+        // line-height below a last item shorter than a line: three 10px items made a 39px column
+        // where browsers make it 30, and one made it 19.
+        bool linesHoldFlexItems = blockBox.Display is "flex" or "inline-flex";
+
         foreach (var linebox in blockBox.LineBoxes)
         {
             foreach (var rect in linebox.Rectangles)
@@ -478,7 +486,7 @@ internal static class CssLayoutEngine
                 minTop = Math.Min(minTop, word.Top - (word.IsImage ? ImageWordMarginTop(word) : 0));
             }
 
-            if (blockBox.ActualLineHeight > 0)
+            if (blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
             {
                 double lineTop = double.MaxValue;
                 bool hasLineContent = false;
@@ -594,7 +602,7 @@ internal static class CssLayoutEngine
             if (hasInlineContent) break;
         }
 
-        if (blockBox.ActualLineHeight > 0 && !hasExplicitHeight && hasInlineContent)
+        if (blockBox.ActualLineHeight > 0 && !hasExplicitHeight && hasInlineContent && !linesHoldFlexItems)
             maxBottom = Math.Max(maxBottom, starty + blockBox.ActualLineHeight);
 
         // The anonymous block a block-level image is wrapped in has no line box of its own to hold a
