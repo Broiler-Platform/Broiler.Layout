@@ -399,6 +399,14 @@ internal static class CssLayoutEngine
         maxBottom = starty;
         double minTop = starty;
 
+        // A flex container's lines are how this engine places its items, one per line in a column,
+        // not line boxes: every item is blockified (CSS Display 3 §2.7) and lies in no inline
+        // formatting context, so there is no strut whose line-height could make a line taller than
+        // the item on it (CSS Flexbox §4). Holding each line to that height left a column one
+        // line-height below a last item shorter than a line: three 10px items made a 39px column
+        // where browsers make it 30, and one made it 19.
+        bool linesHoldFlexItems = blockBox.Display is "flex" or "inline-flex";
+
         foreach (var linebox in blockBox.LineBoxes)
         {
             foreach (var rect in linebox.Rectangles)
@@ -516,10 +524,10 @@ internal static class CssLayoutEngine
             if (lineTop == double.MaxValue)
                 lineTop = inlineBoxTop;
 
-            if (hasLineContent && blockBox.ActualLineHeight > 0)
+            if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
 
-            if (hasLineContent)
+            if (hasLineContent && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, lineTop));
         }
 
@@ -560,11 +568,10 @@ internal static class CssLayoutEngine
                     // shift. An inline flex or grid container was not moved at all, only its
                     // rectangle on this line.
                     //
-                    // The others are moved as before, because their words are on these lines and
-                    // are moved below: an inline-block holding words of its own, as a ::before with
-                    // `display: inline-block` does, and the block these lines belong to, which is on
-                    // them itself when it is an inline-block its content's rectangles bubble into.
-                    if (box != blockBox && box.Words.Count == 0
+                    // An inline-block holding words of its own, as a ::before with
+                    // `display: inline-block` does, is moved as before: its words are on these
+                    // lines, and are moved below.
+                    if (box.Words.Count == 0
                         && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
                     {
                         box.OffsetTop(shift);
@@ -586,6 +593,11 @@ internal static class CssLayoutEngine
                     word.Top += shift;
             }
         }
+
+        // CSS2.1 §9.4.3: the lines are settled, so the boxes the flow placed on them whole take
+        // their relative offsets now.
+        foreach (var linebox in blockBox.LineBoxes)
+            ApplyRelativeOffsets(linebox);
 
         // CSS2.1 §10.8: The "strut" — each line box starts with an
         // imaginary zero-width inline box with the block container's font
@@ -626,7 +638,7 @@ internal static class CssLayoutEngine
             if (hasInlineContent) break;
         }
 
-        if (blockBox.ActualLineHeight > 0 && !hasExplicitHeight && hasInlineContent)
+        if (blockBox.ActualLineHeight > 0 && !hasExplicitHeight && hasInlineContent && !linesHoldFlexItems)
             maxBottom = Math.Max(maxBottom, starty + blockBox.ActualLineHeight);
 
         // The anonymous block a block-level image is wrapped in has no line box of its own to hold a
@@ -645,6 +657,12 @@ internal static class CssLayoutEngine
             && blockBox.Overflow is CssConstants.Hidden or CssConstants.Auto or CssConstants.Scroll
             && blockBox.ActualBottom - blockBox.Location.Y > blockBox.ActualHeight)
             blockBox.ActualBottom = blockBox.Location.Y + blockBox.ActualHeight;
+
+        // The inline boxes an inline-block sits in wrap it only now that the lines are settled,
+        // and before the out-of-flow descendants below are laid out: one of them can be their
+        // containing block.
+        foreach (var linebox in blockBox.LineBoxes)
+            BubbleAtomicInlineRectangles(linebox);
 
         // CSS2.1 §9.6.1 / §10.3.7: An out-of-flow (absolutely/fixed positioned)
         // descendant of this inline formatting context was flowed by FlowBox only
@@ -1142,9 +1160,7 @@ internal static class CssLayoutEngine
                 //    CSS Flexbox §4 / CSS Grid §6; since Broiler lacks a
                 //    true flex/grid engine, use FlowInlineBlock as a
                 //    reasonable approximation)
-                bool useInlineBlockFlow = b.Display == CssConstants.InlineBlock
-                    || b.Display is "inline-flex" or "inline-grid"
-                    || box.Display is "flex" or "inline-flex" or "grid" or "inline-grid";
+                bool useInlineBlockFlow = FlowsAsInlineBlock(b, box);
 
                 if (useInlineBlockFlow)
                 {
@@ -1348,6 +1364,30 @@ internal static class CssLayoutEngine
             if (child.IsImage && child.IsInline)
                 return true;
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/>, or a flex item it is in, is an item its column flex
+    /// container will lay out again at its stretched width, so that this layout of the box is a
+    /// first one the stretch redoes.
+    /// </summary>
+    /// <remarks>
+    /// Inside such an item as well as for the item itself, the column passes wait for the layout
+    /// that counts. They stretch the items of the container they run for, and each stretch lays an
+    /// item out again; run in a first layout too, they doubled the work at every stretched level of
+    /// a nest, 65 layouts for twelve levels aligned in turn <c>flex-start</c> and <c>stretch</c>,
+    /// and eight times as many for every six more. The stretch sets the item's width while it lays
+    /// it out again, so in that layout the item no longer reads as one to stretch.
+    /// </remarks>
+    private static bool IsLaidOutAgainByAStretch(CssBox box)
+    {
+        for (var item = box; item.ParentBox is { } container; item = container)
+        {
+            if (container.WillStretchColumnItem(item))
+                return true;
+        }
+
         return false;
     }
 
@@ -1566,17 +1606,28 @@ internal static class CssLayoutEngine
             // css-grid check-layout reference tests use throughout.
             CreateLineBoxes(g, b);
 
+            // CSS2.1 §9.5: the floats among its children are laid out as a block container lays
+            // out its own, and the lines flowed again beside them; and, as it establishes a
+            // formatting context of its own, the box contains them (§10.6.7). Neither happened
+            // here: a float in an inline-block, or in a flex item laid out as one, stayed 0×0 at
+            // the page's origin, painted nowhere, and the box ended at its lines.
+            b.LayOutFloatedChildren(g);
+            b.ContainDescendantFloats();
+
             // An inline-flex column container lands here too, and line layout only stacks its
             // items. A block-level column container gets the column passes after that; this
             // route stopped short of them, so the items kept their content width: not
             // stretched, not aligned, not reversed under column-reverse and not flexed.
             //
-            // Not for a flex item that is itself a column container, which comes this way as
-            // well. Its own container lays it out again, through block layout and so with the
-            // passes, whenever it stretches it. Running them here too would lay out each level
-            // of nested column containers twice, and a twelve-level nest 6,145 times instead
-            // of 26.
-            if (b.Display == "inline-flex" && b.IsColumnFlexContainer())
+            // A flex item that is itself a column container comes this way as well. When its
+            // container stretches it, it lays it out again, through block layout and so with the
+            // passes, and running them here too would lay out each level of nested column
+            // containers twice, a twelve-level nest 6,145 times instead of 26. Every other one
+            // runs them here, as nothing else will: one its container aligns `flex-start` or
+            // `center`, one with a width or an `auto` margin of its own, and one in a grid, which
+            // stretches an item without laying it out again. Those had no row gaps, no flexing,
+            // no alignment of their items and no `column-reverse`.
+            if (b.IsColumnFlexContainer() && (b.Display == "inline-flex" || !IsLaidOutAgainByAStretch(b)))
                 b.FinishFlexColumnLayout(g);
         }
         else if (b.Boxes.Count > 0)
@@ -1584,7 +1635,15 @@ internal static class CssLayoutEngine
             foreach (var child in b.Boxes)
                 child.PerformLayout(g);
 
-            double childMaxBottom = b.Location.Y;
+            // An inline-block, and a flex or grid item, establishes a block formatting context
+            // (CSS2.1 §9.4.1, CSS Flexbox §3), so its content box ends at the bottom margin edge of
+            // its lowest in-flow child: that margin cannot collapse through it (§8.3.1), including a
+            // margin that has collapsed through the child from the child's own last child. Its own
+            // padding and border follow (§10.6.7). This branch ended at the child's border box: a
+            // `display: inline-block; padding: 40px` box holding a 20px block was 60px tall where
+            // browsers make it 100, and DuckDuckGo's hero section (`padding: 40px 24px`, an h1 and
+            // a p) was 56px short in any column that did not stretch it.
+            double childMaxBottom = b.Location.Y + b.ActualBorderTopWidth + b.ActualPaddingTop;
 
             foreach (var child in b.Boxes)
             {
@@ -1599,10 +1658,24 @@ internal static class CssLayoutEngine
                 if (child.Position is CssConstants.Absolute or CssConstants.Fixed)
                     continue;
 
-                childMaxBottom = Math.Max(childMaxBottom, child.ActualBottom);
+                if (child.Display == CssConstants.None)
+                    continue;
+
+                // CSS2.1 §9.4.3: a relative offset moves the child visually, not in the flow.
+                double childBottom = child.ActualBottom;
+                if (child.Position == CssConstants.Relative)
+                    childBottom -= CssBoxHelper.GetRelativeOffsetY(child);
+
+                // A float's margins never collapse; an in-flow child's bottom margin is the one
+                // that has collapsed through it from its own last child, if any has.
+                double childMarginBottom = child.Float != CssConstants.None
+                    ? child.ActualMarginBottom
+                    : CssBoxHelper.GetPropagatedMarginBottom(child);
+
+                childMaxBottom = Math.Max(childMaxBottom, childBottom + childMarginBottom);
             }
 
-            b.ActualBottom = childMaxBottom;
+            b.ActualBottom = childMaxBottom + b.ActualPaddingBottom + b.ActualBorderBottomWidth;
         }
 
         // --- Compute height ---
@@ -1750,26 +1823,81 @@ internal static class CssLayoutEngine
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
         maxbottom = Math.Max(maxbottom, b.ActualBottom + b.ActualMarginBottom);
 
-        // CSS2.1 §9.4.3: position:relative shifts the box (and its subtree) visually
-        // without affecting flow. FlowInlineBlock positions the inline-block from the
-        // in-flow line position above (overwriting any offset the box's own layout
-        // applied), so re-apply the relative offset here — after flow advancement and
-        // the line rectangle were computed from the in-flow position. Applied to the
-        // box subtree (OffsetLeft/Top) and to the line's own rectangle copy so paint
-        // and getBoundingClientRect agree. Block-level boxes get this from
-        // CssBox.ApplyRelativePositionOffset; inline-blocks never run that path.
-        if (b.Position == CssConstants.Relative)
+        // A relative offset waits for the line to be settled: see ApplyRelativeOffsets.
+    }
+
+    /// <summary>
+    /// Whether <see cref="FlowBox"/> places <paramref name="box"/>, a child of
+    /// <paramref name="parent"/> with no words of its own, on a line whole, through
+    /// <see cref="FlowInlineBlock"/>: an inline-block, an inline flex or grid container, or an item
+    /// of a flex or grid container, which this engine lays out as one.
+    /// </summary>
+    private static bool FlowsAsInlineBlock(CssBox box, CssBox parent) =>
+        box.Display == CssConstants.InlineBlock
+        || box.Display is "inline-flex" or "inline-grid"
+        || parent.Display is "flex" or "inline-flex" or "grid" or "inline-grid";
+
+    /// <summary>
+    /// Moves each box <see cref="FlowInlineBlock"/> placed on <paramref name="line"/> by its
+    /// relative offset, with its rectangle on the line.
+    /// </summary>
+    /// <remarks>
+    /// CSS2.1 §9.4.3: a relative offset moves a box and its content, and nothing around it; the line
+    /// is laid out as if the box were where the flow put it. The flow places such a box from its
+    /// position on the line, overwriting any offset the box's own layout applied, so the offset is
+    /// applied again. It was applied as the flow placed the box, and the line then measured and
+    /// aligned the box where the offset had put it: <c>top: 5px</c> made the line 5px taller and
+    /// stood an inline-block beside it 5px lower, and <c>top: -5px</c> moved the block's lines 5px
+    /// down. Vertical alignment, which places an inline-block afresh, and a right-to-left line,
+    /// which places everything on it again, dropped the offset. Applied once the lines are settled,
+    /// it moves only the box. Block-level boxes get their offset from
+    /// <c>CssBox.ApplyRelativePositionOffset</c>, which these boxes never run.
+    /// <para>
+    /// The flow places only boxes inside the line's block. The lines an inline-block lays its own
+    /// content out on can carry a rectangle for the inline-block too, bubbled out of its words, and
+    /// it takes its offset on the line it sits on, not on those.
+    /// </para>
+    /// </remarks>
+    private static void ApplyRelativeOffsets(CssLineBox line)
+    {
+        foreach (var box in new List<CssBox>(line.Rectangles.Keys))
         {
-            double rdx = CssBoxHelper.GetRelativeOffsetX(b);
-            double rdy = CssBoxHelper.GetRelativeOffsetY(b);
-            if (rdx != 0)
-                b.OffsetLeft(rdx);
-            if (rdy != 0)
-                b.OffsetTop(rdy);
-            if ((rdx != 0 || rdy != 0) && line.Rectangles.TryGetValue(b, out var ibRect))
-                line.Rectangles[b] = new RectangleF(
-                    (float)(ibRect.X + rdx), (float)(ibRect.Y + rdy), ibRect.Width, ibRect.Height);
+            if (box.Position != CssConstants.Relative
+                || box.Words.Count > 0
+                || box.ParentBox is not { } parent
+                || !FlowsAsInlineBlock(box, parent)
+                || !IsInside(box, line.OwnerBox))
+            {
+                continue;
+            }
+
+            double dx = CssBoxHelper.GetRelativeOffsetX(box);
+            double dy = CssBoxHelper.GetRelativeOffsetY(box);
+            if (dx == 0 && dy == 0)
+                continue;
+
+            if (dx != 0)
+                box.OffsetLeft(dx);
+            if (dy != 0)
+                box.OffsetTop(dy);
+
+            var rect = line.Rectangles[box];
+            line.Rectangles[box] = new RectangleF((float)(rect.X + dx), (float)(rect.Y + dy), rect.Width, rect.Height);
+            if (box.Rectangles.ContainsKey(line))
+                box.Rectangles[line] = line.Rectangles[box];
         }
+    }
+
+    /// <summary>Whether <paramref name="box"/> is a descendant of <paramref name="ancestor"/>.</summary>
+    private static bool IsInside(CssBox box, CssBox ancestor)
+    {
+        for (var parent = box.ParentBox; parent != null; parent = parent.ParentBox)
+        {
+            if (parent == ancestor)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1823,7 +1951,7 @@ internal static class CssLayoutEngine
     /// so leaves the box zero-height. Requires at least one <c>&lt;br&gt;</c> so a
     /// genuinely block-only box is unaffected (it is not inline content).
     /// </summary>
-    private static bool InlineContentWithBrsOnly(CssBox box)
+    internal static bool InlineContentWithBrsOnly(CssBox box)
     {
         bool sawBr = false;
         foreach (var child in box.Boxes)
@@ -1946,6 +2074,51 @@ internal static class CssLayoutEngine
             foreach (CssBox b in box.Boxes)
                 BubbleRectangles(b, line);
         }
+    }
+
+    /// <summary>
+    /// Gives the inline boxes an atomic inline-level box sits in a rectangle around it on
+    /// <paramref name="line"/>, as <see cref="BubbleRectangles"/> gives them one around their words.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The flow puts an inline-block, or an inline flex or grid container, on the line as a single
+    /// border box, and lays its content out on lines of its own, so bubbling the line's words finds
+    /// nothing of it. An inline box around one, an <c>&lt;a&gt;</c> wrapping an inline-block button,
+    /// used to get its rectangle from the atomic box's own lines instead, by
+    /// <see cref="CssLineBox.UpdateRectangle"/> bubbling out of them. That no longer happens, because
+    /// it made the atomic box part of its own line; the rectangle it gave was also where the box's
+    /// content was before this line was aligned, x=16 on a centred line that had moved the box to 154.
+    /// </para>
+    /// <para>
+    /// This runs once the lines are settled, so the inline box's own padding and border around the
+    /// atomic box do not move them: CSS 2.1 §10.6.1 leaves them out of the line box's height.
+    /// </para>
+    /// </remarks>
+    private static void BubbleAtomicInlineRectangles(CssLineBox line)
+    {
+        bool bubbled = false;
+
+        foreach (var box in new List<CssBox>(line.Rectangles.Keys))
+        {
+            if (!CssBoxHelper.IsAtomicInlineLevel(box.Display)
+                || box.ParentBox is not { IsInline: true } parent
+                || parent == line.OwnerBox
+                || IsInAbsposSubtree(box, line.OwnerBox))
+                continue;
+
+            // CSS 2.1 §9.4.3: a relative offset moves the box and nothing around it, so the inline
+            // box wraps where the flow put it.
+            RectangleF rect = line.Rectangles[box];
+            if (box.Position == CssConstants.Relative)
+                rect.Offset(-(float)CssBoxHelper.GetRelativeOffsetX(box), -(float)CssBoxHelper.GetRelativeOffsetY(box));
+
+            line.UpdateRectangle(parent, rect.Left, rect.Top, rect.Right, rect.Bottom);
+            bubbled = true;
+        }
+
+        if (bubbled)
+            line.AssignRectanglesToBoxes();
     }
 
     private static void ApplyHorizontalAlignment(CssLineBox lineBox, bool lineRtl)
@@ -2378,8 +2551,14 @@ internal static class CssLayoutEngine
             if (!blockBox.IsFixed)
                 word.BreakPage();
 
+            // Across the wrapper too, the image is placed as a block-level box and not as the content
+            // of a line: its line put it where `text-align` put the line's content, and gave an
+            // `auto` margin nothing, as an inline box's is.
+            double shiftX = BlockLevelImageLeft(blockBox, image, rect.Width) - rect.X;
+            word.Left += shiftX;
+
             double shift = word.Top - flowedTop;
-            var placed = new RectangleF(rect.X, (float)(rect.Y + shift), rect.Width, rect.Height);
+            var placed = new RectangleF((float)(rect.X + shiftX), (float)(rect.Y + shift), rect.Width, rect.Height);
             line.Rectangles[image] = placed;
             image.Rectangles[line] = placed;
 
@@ -2398,6 +2577,46 @@ internal static class CssLayoutEngine
         }
 
         return bottom;
+    }
+
+    /// <summary>
+    /// Where the border box of a block-level image <paramref name="width"/> wide starts across the
+    /// anonymous block that wraps it.
+    /// </summary>
+    /// <remarks>
+    /// CSS2.1 §10.3.4 places a block-level replaced element by the margin rules of §10.3.3. Both
+    /// margins <c>auto</c> centre it, which is how <c>img { display: block; margin: 0 auto }</c>
+    /// centres an image; one <c>auto</c> margin takes all the room there is. When the image does not
+    /// fit, an <c>auto</c> margin counts as zero, and when no margin is <c>auto</c> the one on the
+    /// end side of the containing block's direction gives way: the image starts at the left in a
+    /// left-to-right block and ends at the right in a right-to-left one. <c>text-align</c> does not
+    /// come into it, since the image is not inline content.
+    /// </remarks>
+    private static double BlockLevelImageLeft(CssBox blockBox, CssBoxImage image, double width)
+    {
+        double left = blockBox.ClientLeft;
+        double right = blockBox.ClientRight;
+        bool autoLeft = image.IsSpecifiedMarginLeftAuto;
+        bool autoRight = image.IsSpecifiedMarginRightAuto;
+        double marginLeft = autoLeft || double.IsNaN(image.ActualMarginLeft) ? 0 : image.ActualMarginLeft;
+        double marginRight = autoRight || double.IsNaN(image.ActualMarginRight) ? 0 : image.ActualMarginRight;
+        double free = right - left - marginLeft - width - marginRight;
+
+        if (free < 0)
+            autoLeft = autoRight = false;
+
+        if (autoLeft && autoRight)
+            return left + marginLeft + free / 2;
+
+        if (autoLeft)
+            return left + marginLeft + free;
+
+        if (autoRight)
+            return left + marginLeft;
+
+        return blockBox.Direction == CssConstants.Rtl
+            ? right - marginRight - width
+            : left + marginLeft;
     }
 
     /// <summary>
@@ -2429,6 +2648,41 @@ internal static class CssLayoutEngine
                 continue;
 
             return EndsWithAtomicInlineBlock(c);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="box"/> is the anonymous block wrapper that the
+    /// block-inside-inline correction generates around inline content, and that content holds
+    /// text or an image, looking through the inline boxes it is in. A following
+    /// <c>&lt;br&gt;</c> ends the content's last line, as it ends the line of an inline-block (see
+    /// <see cref="EndsWithAtomicInlineBlock"/>), rather than making an empty one.
+    /// </summary>
+    /// <remarks>
+    /// The wrapper is the box without an element: <see cref="CssBoxProperties.Kind"/> is
+    /// <c>Anonymous</c> for every box the host does not classify, a <c>&lt;div&gt;</c> included, and
+    /// a <c>&lt;br&gt;</c> after a <c>&lt;div&gt;</c> does start an empty line.
+    /// </remarks>
+    internal static bool HoldsInlineContent(CssBox box) =>
+        box is { HtmlTag: null, IsInline: false } && box.Display != CssConstants.None && InlineRunHoldsContent(box);
+
+    private static bool InlineRunHoldsContent(CssBox box)
+    {
+        foreach (var word in box.Words)
+        {
+            if (word.IsImage || !word.IsSpaces)
+                return true;
+        }
+
+        foreach (var child in box.Boxes)
+        {
+            if (child.Display == CssConstants.Inline
+                && child.Position is not (CssConstants.Absolute or CssConstants.Fixed)
+                && child.Float == CssConstants.None
+                && InlineRunHoldsContent(child))
+                return true;
         }
 
         return false;

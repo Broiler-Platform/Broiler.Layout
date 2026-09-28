@@ -463,6 +463,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // sit outside it or even before it. Root only, and a no-op in standards mode or
                 // with no table in the document. See TablesInheritColorFromBodyQuirk.
                 TablesInheritColorFromBodyQuirk.Apply(this);
+
+                // The anonymous blocks the parser leaves out, around text beside a block in an
+                // inline-block or anywhere inside an inline-level box. Before anything is measured,
+                // so every intrinsic width sees the same tree; a no-op once they are there.
+                AnonymousBlockBoxes.Generate(this);
             }
 
             // PROTOTYPE (BROILER_VERTICAL_FLOW): a vertical-writing-mode rotation

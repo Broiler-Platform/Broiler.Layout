@@ -117,6 +117,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         Overflow = CssConstants.Visible;
     }
 
+    /// <summary>
+    /// The height the host's DOM parser gives a <c>&lt;br&gt;</c> it takes to make an empty line
+    /// (see <see cref="PerformLayoutImp"/>).
+    /// </summary>
+    private const string ParserEmptyLineHeight = ".95em";
+
     protected virtual void PerformLayoutImp(ILayoutEnvironment g)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.BoxesLaidOut);
@@ -142,10 +148,26 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // inline-block, or the inline-block itself) is already laid out by the
         // time this block runs.  Harmless once the submodule patch lands (the
         // <br> then carries no .95em height to drop).
+        //
+        // An inline element holding the line's text is misclassified the same way: the text is in
+        // the element's children, not in the element, so <a>one</a><br>two was three lines, the
+        // middle one empty and 15.2px tall, where browsers make it two. The <br> ends the line of
+        // any inline content that holds text or an image, so its height is dropped there too.
+        var previous = LayoutBoxUtils.GetPreviousSibling(this);
+
         if (IsBrElement && !string.IsNullOrEmpty(Height) && Height != CssConstants.Auto
-            && CssLayoutEngine.EndsWithAtomicInlineBlock(LayoutBoxUtils.GetPreviousSibling(this)))
+            && (CssLayoutEngine.EndsWithAtomicInlineBlock(previous) || CssLayoutEngine.HoldsInlineContent(previous)))
         {
             Height = CssConstants.Auto;
+        }
+
+        // The empty line a <br> does make, after a block, at the start of one or after another
+        // <br>, is a line box holding nothing but the <br>, as tall as the line height (CSS2.1
+        // §10.8). The parser's .95em is shorter than that: 15.2px against a 20px line height,
+        // where browsers make the line 20px, and against the 19px of a 16px font's own.
+        else if (IsBrElement && Height == ParserEmptyLineHeight && ActualLineHeight > 0)
+        {
+            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
         }
 
         // CSS Box Model 4 §6.2: margin-trim zeroes the block-axis margins of
@@ -892,6 +914,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 flowPrev = LayoutBoxUtils.GetPreviousInFlowSibling(flowPrev);
             }
 
+            // CSS2.1 §8.3.1: MarginTopCollapse may propagate margins
+            // and update the parent's Location, so compute it before
+            // reading ParentBox.ClientTop — or the preceding sibling's
+            // bottom, which moves with the parent when this box's margin
+            // collapses through an empty sibling into the parent's top.
+            // Read before, a parent moved up left this box as far below
+            // its content top as the parent had moved.
+            double marginCollapse = MarginTopCollapse(flowPrev);
+
             // CSS2.1 §9.4.3: Relative positioning is visual-only.
             // Use the flow-position bottom (before relative offset)
             // when computing the next sibling's position.
@@ -900,24 +931,26 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (flowPrev is CssBox flowPrevBox && flowPrevBox.Position == CssConstants.Relative)
                 flowPrevBottom -= CssBoxHelper.GetRelativeOffsetY(flowPrevBox);
 
-            // CSS2.1 §8.3.1: MarginTopCollapse may propagate margins
-            // and update the parent's Location, so compute it before
-            // reading ParentBox.ClientTop.
-            double marginCollapse = MarginTopCollapse(flowPrev);
-
             // The static top is the parent's content top plus the in-flow advance
             // past any preceding sibling. A block preceding sibling records an
             // absolute ActualBottom, so its advance is (flowPrevBottom - baseTop);
             // an inline/text preceding sibling records no block bottom
             // (flowPrevBottom == 0), which must NOT drag the box above the parent's
-            // content top — clamp the advance to ≥ 0. This keeps a block-after-block
-            // static position byte-identical while fixing an abspos box that follows
-            // inline content in a nested block (e.g. `<div>text<div
+            // content top — so its advance is clamped to ≥ 0. That fixed an abspos box
+            // that follows inline content in a nested block (e.g. `<div>text<div
             // style="position:absolute"></div></div>`), which previously resolved to
             // the containing block's top (y = 0) instead of its parent's content top.
+            // A block's advance is not clamped: a negative margin can pull a block
+            // above the content top, and the box after it goes right below it. The
+            // clamp put the block after a 5px block with margin-top: -20px at the
+            // content top, where browsers put it right below that block, 15px higher.
             double baseTop = ParentBox == null ? Location.Y : ParentBox.ClientTop;
-            double top = baseTop + marginCollapse
-                + (flowPrev != null ? Math.Max(0, flowPrevBottom - baseTop) : 0);
+            double advance = flowPrev != null ? flowPrevBottom - baseTop : 0;
+
+            if (flowPrev is { IsInline: true })
+                advance = Math.Max(0, advance);
+
+            double top = baseTop + marginCollapse + advance;
 
             // CSS2.1 §10.3.7 / §10.6.4: an out-of-flow box that was flowed
             // through an inline formatting context takes its *static* position
@@ -1124,72 +1157,18 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // block right past left floats and narrow it to avoid
             // right floats.  If it cannot fit beside the floats,
             // clear below them.
-            if (Float == CssConstants.None && Position != CssConstants.Absolute && Position != CssConstants.Fixed)
+            WidthBesideFloats = null;
+
+            if (Float == CssConstants.None && Position != CssConstants.Absolute && Position != CssConstants.Fixed
+                && CssBoxHelper.EstablishesBfc(this))
             {
-                bool isBfcRoot = CssBoxHelper.EstablishesBfc(this);
+                // An in-flow table is sized by the table algorithm only after it is placed, so it
+                // has no width here yet. It goes where the floats leave any room, and
+                // LayoutBlockChildren moves it on down if the algorithm makes it wider than that.
+                double boxWidth = Display == CssConstants.Table ? 0 : Size.Width;
 
-                if (isBfcRoot)
-                {
-                    var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
-
-                    if (precedingFloats.Count > 0)
-                    {
-                        double containerLeft = ContainingBlock.Location.X + ContainingBlock.ActualPaddingLeft + ContainingBlock.ActualBorderLeftWidth;
-                        double containerRight = ContainingBlock.ClientLeft + ContainingBlock.AvailableWidth;
-                        double boxHeight = Math.Max(Size.Height, GetEmHeight());
-
-                        // Try to fit beside floats; if not possible, clear
-                        // below them.  100 iterations is a safe upper bound
-                        // since each iteration advances past at least one
-                        // float's bottom edge.
-                        for (int bfcIter = 0; bfcIter < 100; bfcIter++)
-                        {
-                            double leftEdge = containerLeft + ActualMarginLeft;
-                            double rightEdge = containerRight - ActualMarginRight;
-
-                            foreach (var fb in precedingFloats)
-                            {
-                                double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
-
-                                if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
-                                {
-                                    if (fb.Float == CssConstants.Left)
-                                        leftEdge = Math.Max(leftEdge, fb.Location.X + fb.Size.Width + fb.ActualMarginRight + ActualMarginLeft);
-                                    else if (fb.Float == CssConstants.Right)
-                                        rightEdge = Math.Min(rightEdge, fb.Location.X - fb.ActualMarginLeft - ActualMarginRight);
-                                }
-                            }
-
-                            double availableWidth = rightEdge - leftEdge;
-
-                            if (availableWidth >= Size.Width || availableWidth >= 0)
-                            {
-                                left = leftEdge;
-
-                                if (availableWidth < Size.Width && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width)))
-                                    Size = new SizeF((float)availableWidth, Size.Height);
-
-                                break;
-                            }
-
-                            // Cannot fit beside floats — clear below them.
-                            double maxFb = top;
-
-                            foreach (var fb in precedingFloats)
-                            {
-                                double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
-
-                                if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
-                                    maxFb = Math.Max(maxFb, fbBottom);
-                            }
-
-                            if (maxFb <= top)
-                                break;
-
-                            top = maxFb;
-                        }
-                    }
-                }
+                PlaceBesideFloats(boxWidth, Math.Max(Size.Height, GetEmHeight()),
+                    Width == CssConstants.Auto || string.IsNullOrEmpty(Width), ref left, ref top);
             }
 
             Location = new PointF((float)left, (float)top);
@@ -1348,6 +1327,111 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// The width the floats beside this box, which establishes a formatting context, left it
+    /// where <see cref="PlaceBesideFloats"/> placed it, or <c>null</c> when no float is beside it.
+    /// The table algorithm sizes a table with an auto width to it, as a block is narrowed to it.
+    /// </summary>
+    internal double? WidthBesideFloats { get; private set; }
+
+    /// <summary>
+    /// CSS2.1 §9.5: the border box of a box in normal flow that establishes a new block formatting
+    /// context must not overlap the margin box of any floats in the same one, and if necessary it
+    /// is placed below them. From <paramref name="top"/> down, places the border box,
+    /// <paramref name="boxWidth"/> wide or of an auto width, beside the floats before it where it
+    /// fits, narrowing it there if its width is auto, and at its container's left below them where
+    /// nothing is beside it.
+    /// </summary>
+    private void PlaceBesideFloats(double boxWidth, double boxHeight, bool autoWidth, ref double left, ref double top)
+    {
+        WidthBesideFloats = null;
+
+        var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
+
+        if (precedingFloats.Count == 0)
+            return;
+
+        double containerLeft = ContainingBlock.Location.X + ContainingBlock.ActualPaddingLeft + ContainingBlock.ActualBorderLeftWidth;
+        double containerRight = ContainingBlock.ClientLeft + ContainingBlock.AvailableWidth;
+
+        // Try to fit beside floats; if not possible, clear
+        // below them.  100 iterations is a safe upper bound
+        // since each iteration advances past at least one
+        // float's bottom edge.
+        for (int bfcIter = 0; bfcIter < 100; bfcIter++)
+        {
+            double leftEdge = containerLeft + ActualMarginLeft;
+            double rightEdge = containerRight - ActualMarginRight;
+            bool besideFloat = false;
+
+            foreach (var fb in precedingFloats)
+            {
+                double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
+
+                // Only the border box may not overlap the float's margin box; this
+                // box's own margin may lie under the float. Counting the margin on
+                // top of the float's edge put a main column with margin-left:
+                // 220px beside a 200px float 420px in, where browsers put it 220px
+                // in, the classic sidebar layout 200px narrower than it is.
+                if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
+                {
+                    besideFloat = true;
+
+                    if (fb.Float == CssConstants.Left)
+                        leftEdge = Math.Max(leftEdge, fb.Location.X + fb.Size.Width + fb.ActualMarginRight);
+                    else if (fb.Float == CssConstants.Right)
+                        rightEdge = Math.Min(rightEdge, fb.Location.X - fb.ActualMarginLeft);
+                }
+            }
+
+            double availableWidth = rightEdge - leftEdge;
+
+            // A box with a width of its own goes beside the floats only where it
+            // fits; one with an auto width is narrowed to the space. The first
+            // went beside them whenever any space was left, and overflowed it:
+            // after a 100px float, a block with width: 100% and overflow: hidden
+            // ran 100px past its container's right edge, where browsers place it
+            // below the float.
+            if (availableWidth + 0.01 >= boxWidth || (autoWidth && availableWidth >= 0))
+            {
+                left = leftEdge;
+
+                if (availableWidth < Size.Width && autoWidth)
+                    Size = new SizeF((float)availableWidth, Size.Height);
+
+                if (besideFloat)
+                    WidthBesideFloats = availableWidth;
+
+                break;
+            }
+
+            // Cannot fit beside floats — move down past the one that ends first
+            // and try again, as the space beside the rest may be wide enough.
+            // Going below all of them at once skipped that space: a 320px block
+            // after a 20px-tall left float and a 40px-tall right one, in 500px,
+            // went 40px down, where browsers put it 20px down, beside the second.
+            double nextTop = double.MaxValue;
+
+            foreach (var fb in precedingFloats)
+            {
+                double fbBottom = fb.ActualBottom + fb.ActualMarginBottom;
+
+                if (top < fbBottom && top + boxHeight > fb.Location.Y - fb.ActualMarginTop)
+                    nextTop = Math.Min(nextTop, fbBottom);
+            }
+
+            // Wider than its container: with no float beside it any more, it goes where it
+            // would with no floats at all, and overflows.
+            if (nextTop == double.MaxValue || nextTop <= top)
+            {
+                left = leftEdge;
+                break;
+            }
+
+            top = nextTop;
+        }
+    }
+
+    /// <summary>
     /// Pre-resolve a percentage or aspect-ratio block size from the used width
     /// BEFOREchild layout, so a percentage-height descendant can resolve against
     /// thiscontainer's definite height (CSS2.1 §10.5 / Sizing 4 §4).
@@ -1382,6 +1466,46 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// CSS2.1 §9.5: lays out the floated children of this box, whose content
+    /// <c>CssLayoutEngine.CreateLineBoxes</c> has just flowed, skipping them as out of flow, so
+    /// they are positioned and painted; and flows the lines again beside them.
+    /// </summary>
+    internal void LayOutFloatedChildren(ILayoutEnvironment g)
+    {
+        bool laidOutOwnFloat = false;
+
+        foreach (var childBox in Boxes)
+        {
+            if (childBox.Float != CssConstants.None)
+            {
+                childBox.PerformLayout(g);
+                laidOutOwnFloat |= childBox.Display != CssConstants.None
+                    && childBox.Size is { Width: > 0, Height: > 0 };
+
+                // CSS2.1 §13.3.1: When page-break-inside:avoid is
+                // set on a float's containing block, move the float
+                // to the next page if it would otherwise cross a
+                // page boundary.
+                if (PageBreakInside == CssConstants.Avoid)
+                    childBox.BreakPage();
+            }
+        }
+
+        // A float's own vertical position is decided by the content before it, so it can
+        // only be placed after that content has flowed — which leaves the lines that
+        // should have been shortened beside it already flowed at full width. Re-flow them
+        // now that the geometry exists; the float's position does not depend on the
+        // narrower lines (its top is where the flow had already reached), so one extra
+        // pass settles it rather than oscillating. Blocks with no float of their own —
+        // nearly all of them — never pay for this.
+        if (laidOutOwnFloat)
+        {
+            ActualBottom = Location.Y;
+            CssLayoutEngine.CreateLineBoxes(g, this);
+        }
+    }
+
+    /// <summary>
     /// Lay out this block's contents: table, row-flex,
     /// inline-formatting-context,or block children (with multi-column
     /// pre-constraint),then run the flex/grid alignment passes.
@@ -1392,6 +1516,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (Display == CssConstants.Table || Display == CssConstants.InlineTable)
         {
             CssLayoutEngineTable.PerformLayout(g, this, BaseUrl);
+
+            // CSS2.1 §9.5: a table was placed where the floats leave any room, before it had a
+            // width. Once the algorithm has given it one, a table wider than that room goes on
+            // down to where it fits, and is laid out again there: after a 700px float in 1024px,
+            // a table with width: 100% goes below the float, and so does one with width: 100px
+            // whose cell holds a 359px word, wider than the 324px beside the float.
+            if (Display == CssConstants.Table && WidthBesideFloats is double space && Size.Width > space + 0.01)
+            {
+                double left = Location.X, top = Location.Y;
+                PlaceBesideFloats(Size.Width, Size.Height, autoWidth: false, ref left, ref top);
+
+                Location = new PointF((float)left, (float)top);
+                ActualBottom = top;
+                CssLayoutEngineTable.PerformLayout(g, this, BaseUrl);
+            }
         }
         else
         {
@@ -1420,45 +1559,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             }
 
             //If there's just inline boxes, create LineBoxes
-            else if (LayoutBoxUtils.ContainsInlinesOnly(this))
+            //
+            // Inline content broken only by <br>s goes on lines too, as the inline-block path lays
+            // it out (CssLayoutEngine.InlineContentWithBrsOnly). The parser computes a <br> to a
+            // block-level box and puts the runs of text around it in anonymous blocks, but only in
+            // the blocks it reaches, which are not a flex or grid container's items, nor anything
+            // inside one or inside an inline-level box. There the block path below took each run of
+            // text for a block and gave it no line box: `Hello<br>World` in a flex item was not
+            // painted at all.
+            else if (LayoutBoxUtils.ContainsInlinesOnly(this) || HoldsInlineContentBrokenByBrs())
             {
                 ActualBottom = Location.Y;
                 CssLayoutEngine.CreateLineBoxes(g, this); //This will automatically set the bottom of this block
-
-                // CSS2.1 §9.5: Floated children were skipped by
-                // CreateLineBoxes (they are out-of-flow).  Lay them out
-                // now so they are positioned and painted.
-                bool laidOutOwnFloat = false;
-
-                foreach (var childBox in Boxes)
-                {
-                    if (childBox.Float != CssConstants.None)
-                    {
-                        childBox.PerformLayout(g);
-                        laidOutOwnFloat |= childBox.Display != CssConstants.None
-                            && childBox.Size is { Width: > 0, Height: > 0 };
-
-                        // CSS2.1 §13.3.1: When page-break-inside:avoid is
-                        // set on a float's containing block, move the float
-                        // to the next page if it would otherwise cross a
-                        // page boundary.
-                        if (PageBreakInside == CssConstants.Avoid)
-                            childBox.BreakPage();
-                    }
-                }
-
-                // A float's own vertical position is decided by the content before it, so it can
-                // only be placed after that content has flowed — which leaves the lines that
-                // should have been shortened beside it already flowed at full width. Re-flow them
-                // now that the geometry exists; the float's position does not depend on the
-                // narrower lines (its top is where the flow had already reached), so one extra
-                // pass settles it rather than oscillating. Blocks with no float of their own —
-                // nearly all of them — never pay for this.
-                if (laidOutOwnFloat)
-                {
-                    ActualBottom = Location.Y;
-                    CssLayoutEngine.CreateLineBoxes(g, this);
-                }
+                LayOutFloatedChildren(g);
 
                 // CSS2.1 §9.4.3: a relatively positioned inline-level box is offset
                 // visually once its line boxes exist. PerformLayout does that for every box
@@ -1587,6 +1700,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Whether this box holds inline-level content, and nothing block-level but the &lt;br&gt;s
+    /// that break it into lines.
+    /// </summary>
+    /// <remarks>
+    /// A box holding <c>&lt;br&gt;</c>s and nothing else has no text to lay out on lines, so it
+    /// keeps the block path, where each <c>&lt;br&gt;</c> stands as the block the parser made it.
+    /// </remarks>
+    private bool HoldsInlineContentBrokenByBrs() =>
+        CssLayoutEngine.InlineContentWithBrsOnly(this) && Boxes.Exists(child => child.IsInline);
 
     /// <summary>
     /// CSS Multi-column §3: post-layout redistribution of in-flow children into
@@ -2760,34 +2884,45 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private void ApplyRelativePositionOffset()
     {
         // Apply position:relative offset after layout (visual only, does not affect flow)
+        var (dx, dy) = RelativePositionOffset();
+
+        if (dx != 0)
+            OffsetLeft(dx);
+
+        if (dy != 0)
+            OffsetTop(dy);
+    }
+
+    /// <summary>
+    /// How far <c>position: relative</c> shifts this box from where layout places it, across and
+    /// down; nothing for a box not positioned relatively.
+    /// </summary>
+    internal (double X, double Y) RelativePositionOffset()
+    {
         // CSS2.1 §9.4.3: For relative positioning, 'left'/'right' and
         // 'top'/'bottom' form constraint pairs.  When 'top' is auto and
         // 'bottom' is not, dy = -bottom.  When both are non-auto, 'bottom'
         // is ignored (in LTR).  Same logic applies to left/right.
-        if (Position == CssConstants.Relative)
-        {
-            double dx = 0, dy = 0;
+        if (Position != CssConstants.Relative)
+            return (0, 0);
 
-            bool hasLeft = Left != null && Left != CssConstants.Auto;
-            bool hasRight = Right != null && Right != CssConstants.Auto;
-            bool hasTop = Top != null && Top != CssConstants.Auto;
-            bool hasBottom = Bottom != null && Bottom != CssConstants.Auto;
+        double dx = 0, dy = 0;
 
-            if (hasLeft)
-                dx = ParseUsedLength(Left, Size.Width, percentAgainstContainingBlock: false);
-            else if (hasRight)
-                dx = -ParseUsedLength(Right, Size.Width, percentAgainstContainingBlock: false);
+        bool hasLeft = Left != null && Left != CssConstants.Auto;
+        bool hasRight = Right != null && Right != CssConstants.Auto;
+        bool hasTop = Top != null && Top != CssConstants.Auto;
+        bool hasBottom = Bottom != null && Bottom != CssConstants.Auto;
 
-            if (hasTop)
-                dy = ParseUsedLength(Top, Size.Height, percentAgainstContainingBlock: false);
-            else if (hasBottom)
-                dy = -ParseUsedLength(Bottom, Size.Height, percentAgainstContainingBlock: false);
+        if (hasLeft)
+            dx = ParseUsedLength(Left, Size.Width, percentAgainstContainingBlock: false);
+        else if (hasRight)
+            dx = -ParseUsedLength(Right, Size.Width, percentAgainstContainingBlock: false);
 
-            if (dx != 0)
-                OffsetLeft(dx);
+        if (hasTop)
+            dy = ParseUsedLength(Top, Size.Height, percentAgainstContainingBlock: false);
+        else if (hasBottom)
+            dy = -ParseUsedLength(Bottom, Size.Height, percentAgainstContainingBlock: false);
 
-            if (dy != 0)
-                OffsetTop(dy);
-        }
+        return (dx, dy);
     }
 }

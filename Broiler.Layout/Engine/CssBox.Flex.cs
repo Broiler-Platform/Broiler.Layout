@@ -37,6 +37,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         public double FlexBaseOuterWidth { get; init; }
 
         /// <summary>
+        /// The item's inner flex base size: its flex base size as a content-box width, by which
+        /// §9.7 scales its <c>flex-shrink</c>.
+        /// </summary>
+        public double FlexBaseInnerWidth { get; init; }
+
+        /// <summary>
         /// The item's hypothetical main size as an outer width: its flex base size clamped by its
         /// min and max widths. Lines are broken by this, and whether a line grows or shrinks is
         /// decided by it (§9.3, §9.7 step 1).
@@ -249,6 +255,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 Shrink = ParseFlexFactor(child.FlexShrink, 1),
                 DefiniteCrossContentHeight = itemCrossContentHeight,
                 FlexBaseOuterWidth = flexBase + margins,
+                FlexBaseInnerWidth = flexBase
+                    - child.ActualBorderLeftWidth - child.ActualBorderRightWidth
+                    - child.ActualPaddingLeft - child.ActualPaddingRight,
                 HypotheticalOuterWidth = margins + ClampFlexItemBorderBoxWidth(
                     child, flexBase, contentWidth, itemCrossContentHeight),
             };
@@ -330,8 +339,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 double crossOffset = ResolveFlexCrossOffset(child, line.CrossSize);
                 double itemTop = cursorY + crossOffset + child.ActualMarginTop;
 
-                double dx = itemLeft - child.Location.X;
-                double dy = itemTop - child.Location.Y;
+                // CSS2.1 §9.4.3: a relatively positioned item takes up the room the flex layout
+                // gives it and is then shifted by its offset, as its own layout shifted it. Moved
+                // to its place from where that layout left it, it lost the offset.
+                var (relativeX, relativeY) = child.RelativePositionOffset();
+                double dx = itemLeft + relativeX - child.Location.X;
+                double dy = itemTop + relativeY - child.Location.Y;
 
                 if (Math.Abs(dx) > 0.1)
                     child.OffsetLeft(dx);
@@ -821,10 +834,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     : item.FlexBaseOuterWidth < item.HypotheticalOuterWidth - 0.01);
         }
 
+        double initialFreeSpace = 0;
+
         for (int pass = 0; pass < itemCount; pass++)
         {
             double remaining = available;
             double weightTotal = 0;
+            double factorTotal = 0;
 
             for (int i = 0; i < itemCount; i++)
             {
@@ -832,11 +848,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 remaining -= frozen[i] ? item.TargetOuterWidth : item.FlexBaseOuterWidth;
 
                 if (!frozen[i])
+                {
                     weightTotal += FlexWeight(item, growing);
+                    factorTotal += growing ? item.Grow : item.Shrink;
+                }
             }
 
             if (weightTotal <= 0)
                 return;
+
+            if (pass == 0)
+                initialFreeSpace = remaining;
+
+            remaining = LimitFreeSpaceByFlexFactors(remaining, initialFreeSpace, factorTotal);
 
             double totalViolation = 0;
 
@@ -875,11 +899,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>
     /// An item's share of its line's free space, relative to the other items' (CSS Flexbox §9.7):
     /// its <c>flex-grow</c> when the line grows, and when it shrinks its <c>flex-shrink</c> scaled
-    /// by its flex base size, so a large item gives up more of an overflow than a small one with
-    /// the same factor.
+    /// by its inner flex base size, so a large item gives up more of an overflow than a small one
+    /// with the same factor.
     /// </summary>
+    /// <remarks>
+    /// The inner size, the content box, and not the outer one: an item's margins, borders and
+    /// padding do not make it give up more. Two 100px items overflowing a row by 100px give up 50px
+    /// each, and one with a 50px margin gave up 60px of it.
+    /// </remarks>
     private static double FlexWeight(FlexItemLayout item, bool growing) =>
-        growing ? item.Grow : item.Shrink * Math.Max(0, item.FlexBaseOuterWidth);
+        growing ? item.Grow : item.Shrink * Math.Max(0, item.FlexBaseInnerWidth);
 
     /// <summary>
     /// The column flex passes that follow line layout, which stacks a <c>column</c> container's
@@ -904,8 +933,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         if (!PerformFlexColumnLineLayout(g))
         {
-            ApplyFlexColumnInlineAxisAlignment(g);
-            ApplyFlexColumnMainAxisSizing(g);
+            bool stretchChangedHeights = ApplyFlexColumnInlineAxisAlignment(g);
+            ApplyFlexColumnMainAxisSizing(g, stretchChangedHeights);
         }
     }
 
@@ -944,8 +973,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// leave it reading the pre-flex one. Single-line only: <c>column wrap</c> is
     /// <see cref="PerformFlexColumnLineLayout"/>'s.
     /// </para>
+    /// <para>
+    /// The stack is rebuilt, too, when <paramref name="itemHeightsChanged"/> says the cross-axis
+    /// stretch changed an item's height (see <see cref="ApplyFlexColumnInlineAxisAlignment"/>).
+    /// Line layout stacked the items at the heights they had before it, and nothing moved the
+    /// items after a taller one or grew the container around it, so they overlapped: an image a
+    /// 320px column stretches is 0px tall while the column stacks it and 160px once stretched, and
+    /// the two 10px items after it sat at its top in a 29px container, where browsers put them at
+    /// 160 and 170 in a 180px one. A column with a definite height or a row gap was already
+    /// rebuilt here, from the heights the stretch left, which is why only a column of
+    /// <c>height: auto</c> without a gap showed it.
+    /// </para>
     /// </remarks>
-    private void ApplyFlexColumnMainAxisSizing(ILayoutEnvironment g)
+    private void ApplyFlexColumnMainAxisSizing(ILayoutEnvironment g, bool itemHeightsChanged = false)
     {
         if (!IsFlexContainer() || IsRowFlexContainer())
             return;
@@ -980,7 +1020,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         bool flexes = mainSize is { } definiteMainSize
             && ResolveFlexColumnMainSizes(g, items, definiteMainSize, rowGap, out targets);
 
-        if (!flexes && (rowGap <= 0 || items.Count < 2))
+        if (!flexes && !itemHeightsChanged && (rowGap <= 0 || items.Count < 2))
             return;
 
         double cursorY = ClientTop;
@@ -1016,7 +1056,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             cursorY += GetFlexItemOuterHeight(child) + rowGap;
         }
 
-        if (!moved)
+        // An item the stretch made taller moves nothing when it is the last one, but the
+        // container still has to grow around it.
+        if (!moved && !itemHeightsChanged)
             return;
 
         cursorY -= rowGap;   // the trailing gap the loop added after the last item
@@ -1123,11 +1165,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             for (int i = 0; i < count; i++)
             {
-                // §9.7: the shrink factor is scaled by the flex base size, so a large item gives up
-                // more of the overflow than a small one with the same `flex-shrink`.
+                // §9.7: the shrink factor is scaled by the inner flex base size, so a large item
+                // gives up more of the overflow than a small one with the same `flex-shrink`. The
+                // flex base size here is an outer height, and the item's margins, borders and
+                // padding do not make it give up more, as they do not in a row (FlexWeight).
                 weights[i] = growing
                     ? ParseFlexFactor(items[i].FlexGrow, 0)
-                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, flexBases[i]);
+                    : ParseFlexFactor(items[i].FlexShrink, 1) * Math.Max(0, flexBases[i]
+                        - items[i].ActualMarginTop - items[i].ActualMarginBottom
+                        - items[i].ActualBorderTopWidth - items[i].ActualBorderBottomWidth
+                        - items[i].ActualPaddingTop - items[i].ActualPaddingBottom);
 
                 // §9.7 step 3: an item keeps its hypothetical main size when it has no share to
                 // take, or when its min or max height has already clamped it the way the line
@@ -1138,21 +1185,34 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         : flexBases[i] < hypothetical[i] - 0.01);
             }
 
+            double initialFreeSpace = 0;
+
             for (int pass = 0; pass < count; pass++)
             {
                 double remaining = available;
                 double weightTotal = 0;
+                double factorTotal = 0;
 
                 for (int i = 0; i < count; i++)
                 {
                     remaining -= frozen[i] ? targets[i] : flexBases[i];
 
                     if (!frozen[i])
+                    {
                         weightTotal += weights[i];
+                        factorTotal += growing
+                            ? ParseFlexFactor(items[i].FlexGrow, 0)
+                            : ParseFlexFactor(items[i].FlexShrink, 1);
+                    }
                 }
 
                 if (weightTotal <= 0)
                     break;
+
+                if (pass == 0)
+                    initialFreeSpace = remaining;
+
+                remaining = LimitFreeSpaceByFlexFactors(remaining, initialFreeSpace, factorTotal);
 
                 double totalViolation = 0;
 
@@ -1932,6 +1992,27 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     private static string FormatCssPx(double value) => value.ToString("0.####", CultureInfo.InvariantCulture) + "px";
 
+    /// <summary>
+    /// CSS Flexbox §9.7 step 4b: the free space a pass of the flex loop hands out. When the flex
+    /// factors of the items still flexing add up to less than 1, they take only that fraction of
+    /// the line's initial free space, if it is less than what remains, and leave the rest.
+    /// </summary>
+    /// <remarks>
+    /// The factors are the <c>flex-grow</c> or <c>flex-shrink</c> values themselves, not the
+    /// shrink factors scaled by the flex base sizes that divide the space between the items. A lone
+    /// <c>flex: 0.5 0 100px</c> item in a 400px row grows by half the 300px left over, to 250px, and
+    /// a <c>flex: 0 0.5 300px</c> one in a 200px row absorbs half its 100px overflow and is 250px.
+    /// Both used to take all of it, and filled the line.
+    /// </remarks>
+    private static double LimitFreeSpaceByFlexFactors(double remaining, double initialFreeSpace, double factorTotal)
+    {
+        if (factorTotal >= 1)
+            return remaining;
+
+        double fraction = initialFreeSpace * factorTotal;
+        return Math.Abs(fraction) < Math.Abs(remaining) ? fraction : remaining;
+    }
+
     private static double ParseFlexFactor(string value, double fallback)
     {
         if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) && parsed >= 0)
@@ -2059,6 +2140,37 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
+    /// Whether this column flex container will lay <paramref name="item"/> out again at its
+    /// stretched width in <see cref="ApplyFlexColumnInlineAxisAlignment"/>, and so through block
+    /// layout.
+    /// </summary>
+    /// <remarks>
+    /// These are the conditions that pass stretches an item on, asked as soon as the item has its
+    /// shrink-to-fit width: it resolves to <c>stretch</c>, its width is <c>auto</c>, neither side
+    /// margin is <c>auto</c>, and its margin box is narrower than this container's content box by
+    /// more than half a pixel. The two have to agree: an item this answers yes for has its own
+    /// column passes left to that layout.
+    /// </remarks>
+    internal bool WillStretchColumnItem(CssBox item)
+    {
+        if (!IsColumnFlexContainer() || !IsInFlowFlexItem(item) || ResolveFlexItemAlignment(item) != "stretch")
+            return false;
+
+        if (!string.IsNullOrEmpty(item.Width) && item.Width != CssConstants.Auto)
+            return false;
+
+        if (item.IsSpecifiedMarginLeftAuto || item.IsSpecifiedMarginRightAuto)
+            return false;
+
+        double contentWidth = Math.Max(0, Size.Width
+            - ActualBorderLeftWidth - ActualBorderRightWidth
+            - ActualPaddingLeft - ActualPaddingRight);
+
+        return contentWidth > 0
+            && contentWidth - (item.Size.Width + item.ActualMarginLeft + item.ActualMarginRight) > 0.5;
+    }
+
+    /// <summary>
     /// CSS Flexbox §9.4 step 11: a flex item whose cross size is auto is stretched to fill its
     /// line. This is the initial value of <c>align-items</c>, so it is what happens to most flex
     /// items on most pages, and until now Broiler did none of it — an item was left at the size its
@@ -2130,21 +2242,32 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         Math.Max(0, child.ActualBottom - child.Location.Y)
         + child.ActualMarginTop + child.ActualMarginBottom;
 
-    private void ApplyFlexColumnInlineAxisAlignment(ILayoutEnvironment g)
+    /// <summary>
+    /// CSS Flexbox §8.3 and §9.4 step 11 on a column container's cross (inline) axis: stretches
+    /// each item that asks for it to the container's width and aligns the others.
+    /// </summary>
+    /// <returns>
+    /// Whether stretching changed an item's height, which leaves the items after it where line
+    /// layout stacked them at the old height; <see cref="ApplyFlexColumnMainAxisSizing"/> then
+    /// rebuilds the stack.
+    /// </returns>
+    private bool ApplyFlexColumnInlineAxisAlignment(ILayoutEnvironment g)
     {
         if (!IsFlexContainer())
-            return;
+            return false;
 
         string direction = FlexDirection?.Trim().ToLowerInvariant() ?? "row";
         if (direction is not ("column" or "column-reverse"))
-            return;
+            return false;
 
         double contentWidth = Math.Max(0, Size.Width
             - ActualBorderLeftWidth - ActualBorderRightWidth
             - ActualPaddingLeft - ActualPaddingRight);
 
         if (contentWidth <= 0)
-            return;
+            return false;
+
+        bool heightsChanged = false;
 
         foreach (var child in Boxes)
         {
@@ -2176,6 +2299,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 double stretchedOuterWidth = contentWidth;
                 double left = child.Location.X;
                 double top = child.Location.Y;
+                double outerHeight = GetFlexItemOuterHeight(child);
 
                 LayoutFlexItemAtTargetWidth(g, child, stretchedOuterWidth);
 
@@ -2185,6 +2309,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     child.OffsetLeft(dxBack);
                 if (Math.Abs(dyBack) > 0.1)
                     child.OffsetTop(dyBack);
+
+                // Its height can change with its width: an image given `width: 100%` of the
+                // anonymous block wrapping it, or a box with an `aspect-ratio`, is as tall as its
+                // width allows, and it had none while line layout stacked it.
+                heightsChanged |= Math.Abs(GetFlexItemOuterHeight(child) - outerHeight) > 0.5;
 
                 continue;
             }
@@ -2205,6 +2334,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (Math.Abs(dx) > 0.5)
                 child.OffsetLeft(dx);
         }
+
+        return heightsChanged;
     }
 
     /// <summary>
