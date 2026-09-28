@@ -2570,6 +2570,13 @@ internal static class CssLayoutEngine
         || verticalAlign == CssConstants.TextTop
         || verticalAlign == CssConstants.TextBottom;
 
+    /// <summary>
+    /// Whether the box stands on the line's baseline: <c>vertical-align: baseline</c>, the initial
+    /// value (CSS2.1 §10.8.1).
+    /// </summary>
+    private static bool IsBaselineAligned(CssBox box) =>
+        string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline;
+
     private static void ApplyVerticalAlignment(CssLineBox lineBox)
     {
         // CSS 2.1 §10.8: The baseline is where text sits, approximated as
@@ -2656,10 +2663,16 @@ internal static class CssLayoutEngine
         //
         // It is the *margin* box that stands on the baseline, and the rectangle here is the border
         // box, so the bottom margin is added on both sides of the comparison.
+        //
+        // Only the boxes that stand on the baseline say where it is. One aligned `middle`,
+        // `text-top`, `super`, by a length or any other way stands somewhere else, and where the
+        // flow left its bottom says nothing about the baseline: a 60px inline-block aligned
+        // `middle` beside a 20px one aligned to the baseline pushed the 20px one 44px down the
+        // line, to its own bottom, where browsers put it about 14px down.
         double atomicInlineBottom = double.MinValue;
         foreach (var kvp in lineBox.Rectangles)
         {
-            if (kvp.Key.UsesBottomMarginEdgeBaseline && !topBottomBoxes.Contains(kvp.Key))
+            if (kvp.Key.UsesBottomMarginEdgeBaseline && IsBaselineAligned(kvp.Key))
                 atomicInlineBottom = Math.Max(atomicInlineBottom, kvp.Value.Bottom + kvp.Key.ActualMarginBottom);
         }
 
@@ -2670,10 +2683,7 @@ internal static class CssLayoutEngine
             if (topBottomBoxes.Contains(box))
                 continue;
 
-            bool usesDefaultVerticalAlign = string.IsNullOrEmpty(box.VerticalAlign)
-                || box.VerticalAlign == CssConstants.Baseline;
-
-            if (usesDefaultVerticalAlign
+            if (IsBaselineAligned(box)
                 && box.UsesBottomMarginEdgeBaseline
                 && atomicInlineBottom > double.MinValue)
             {
@@ -2731,12 +2741,17 @@ internal static class CssLayoutEngine
                     // with the baseline plus half the x-height of the parent.
                     // x-height ≈ 0.5 × font height for Latin fonts; half of
                     // that is 0.25 × font height.
+                    //
+                    // "Plus" raises, as it does for a length: the midpoint is half an x-height above
+                    // the baseline, where y is smaller. The half x-height was added to y, which put
+                    // the midpoint as far below the baseline instead, so an icon aligned middle beside
+                    // text hung below the text rather than centring on its lowercase letters.
                     if (lineBox.Rectangles.TryGetValue(box, out RectangleF value1) && baseline > float.MinValue)
                     {
                         double boxHeight = value1.Height;
                         double parentFont = (box.ParentBox?.ActualFont.Height ?? 0) * PtToCssPx;
                         double halfXHeight = parentFont * 0.25;
-                        lineBox.SetBaseLine(box, baseline + halfXHeight - boxHeight / 2);
+                        lineBox.SetBaseLine(box, baseline - halfXHeight - boxHeight / 2);
                     }
                     break;
 
