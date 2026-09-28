@@ -821,10 +821,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     : item.FlexBaseOuterWidth < item.HypotheticalOuterWidth - 0.01);
         }
 
+        double initialFreeSpace = 0;
+
         for (int pass = 0; pass < itemCount; pass++)
         {
             double remaining = available;
             double weightTotal = 0;
+            double factorTotal = 0;
 
             for (int i = 0; i < itemCount; i++)
             {
@@ -832,11 +835,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 remaining -= frozen[i] ? item.TargetOuterWidth : item.FlexBaseOuterWidth;
 
                 if (!frozen[i])
+                {
                     weightTotal += FlexWeight(item, growing);
+                    factorTotal += growing ? item.Grow : item.Shrink;
+                }
             }
 
             if (weightTotal <= 0)
                 return;
+
+            if (pass == 0)
+                initialFreeSpace = remaining;
+
+            remaining = LimitFreeSpaceByFlexFactors(remaining, initialFreeSpace, factorTotal);
 
             double totalViolation = 0;
 
@@ -1151,21 +1162,34 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         : flexBases[i] < hypothetical[i] - 0.01);
             }
 
+            double initialFreeSpace = 0;
+
             for (int pass = 0; pass < count; pass++)
             {
                 double remaining = available;
                 double weightTotal = 0;
+                double factorTotal = 0;
 
                 for (int i = 0; i < count; i++)
                 {
                     remaining -= frozen[i] ? targets[i] : flexBases[i];
 
                     if (!frozen[i])
+                    {
                         weightTotal += weights[i];
+                        factorTotal += growing
+                            ? ParseFlexFactor(items[i].FlexGrow, 0)
+                            : ParseFlexFactor(items[i].FlexShrink, 1);
+                    }
                 }
 
                 if (weightTotal <= 0)
                     break;
+
+                if (pass == 0)
+                    initialFreeSpace = remaining;
+
+                remaining = LimitFreeSpaceByFlexFactors(remaining, initialFreeSpace, factorTotal);
 
                 double totalViolation = 0;
 
@@ -1944,6 +1968,27 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     private static string FormatCssPx(double value) => value.ToString("0.####", CultureInfo.InvariantCulture) + "px";
+
+    /// <summary>
+    /// CSS Flexbox §9.7 step 4b: the free space a pass of the flex loop hands out. When the flex
+    /// factors of the items still flexing add up to less than 1, they take only that fraction of
+    /// the line's initial free space, if it is less than what remains, and leave the rest.
+    /// </summary>
+    /// <remarks>
+    /// The factors are the <c>flex-grow</c> or <c>flex-shrink</c> values themselves, not the
+    /// shrink factors scaled by the flex base sizes that divide the space between the items. A lone
+    /// <c>flex: 0.5 0 100px</c> item in a 400px row grows by half the 300px left over, to 250px, and
+    /// a <c>flex: 0 0.5 300px</c> one in a 200px row absorbs half its 100px overflow and is 250px.
+    /// Both used to take all of it, and filled the line.
+    /// </remarks>
+    private static double LimitFreeSpaceByFlexFactors(double remaining, double initialFreeSpace, double factorTotal)
+    {
+        if (factorTotal >= 1)
+            return remaining;
+
+        double fraction = initialFreeSpace * factorTotal;
+        return Math.Abs(fraction) < Math.Abs(remaining) ? fraction : remaining;
+    }
 
     private static double ParseFlexFactor(string value, double fallback)
     {
