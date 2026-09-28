@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using Broiler.CSS;
 using Broiler.Layout.Engine;
 using Xunit;
@@ -95,6 +96,33 @@ public sealed class AtomicOnlyLineTests
 
         Assert.Equal(12.8 - 10, ImageTop(boxes[0], block), 1);
         Assert.Equal(12.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// An image after a word, standing on the baseline or aligned <c>middle</c>, has a box as
+    /// wide and as tall as its rectangle, where the rectangle is: 16px in, after "xx", and 100 ×
+    /// 10px. Its box was 0px wide at the page's left edge, which is where script found it.
+    /// </summary>
+    [Theory]
+    [InlineData(CssConstants.Baseline)]
+    [InlineData(CssConstants.Middle)]
+    public void An_Images_Box_Is_Its_Rectangle(string verticalAlign)
+    {
+        var (root, block, boxes) = Build(b =>
+        {
+            Word(b, "xx");
+            Image(b);
+        });
+        boxes[0].VerticalAlign = verticalAlign;
+        root.PerformLayout(root.LayoutEnvironment);
+
+        var image = boxes[0];
+        var rectangle = image.Rectangles.Values.Single();
+        Assert.Equal(16, rectangle.X - block.Location.X, 1);
+        Assert.Equal(rectangle.X, image.Location.X, 1);
+        Assert.Equal(rectangle.Y, image.Location.Y, 1);
+        Assert.Equal(100, image.Size.Width, 1);
+        Assert.Equal(10, image.Size.Height, 1);
     }
 
     /// <summary>

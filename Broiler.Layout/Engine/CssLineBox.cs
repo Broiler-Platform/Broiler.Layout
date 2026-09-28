@@ -232,12 +232,15 @@ internal sealed class CssLineBox
                     word.Top += shift;
             }
 
-            // The box stands where its rectangle does, moved or not. It was put there only when
-            // the alignment moved it, so an image the flow had already stood on the baseline, one
-            // beside text or alone on its line, kept the place the box had before its line was
-            // laid out, the page's top-left corner.
-            b.Location = new PointF(b.Location.X, (float)baseline);
-            b.ActualBottom = baseline + r.Height;
+            // The box stands where its rectangle does, moved or not, and is as wide and as tall.
+            // It was put there only when the alignment moved it, so an image the flow had already
+            // stood on the baseline, one beside text or alone on its line, kept the place the box
+            // had before its line was laid out, the page's top-left corner. Only its top and
+            // height were set: script, which reads the box in preference to the line's rectangle
+            // once the box has a size, found an image beside text at the left edge of the page,
+            // 0px wide.
+            b.Location = new PointF(r.X, (float)baseline);
+            b.Size = new SizeF(r.Width, r.Height);
             return;
         }
 
