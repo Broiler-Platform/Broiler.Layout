@@ -327,6 +327,11 @@ internal partial class CssBox
         foreach (var p in placements)
         {
             double colWidth = TrackSpan(colSizes, p.PlacedCol, p.ColSpan, colGap);
+
+            // The item's grid area is its containing block from here on, and its percentage
+            // margins and padding refer to the area's width, the padding counted into what follows.
+            UseGridAreaAsPercentageBasis(p.Item, colWidth);
+
             GridItemInlineContribution(p.Item, out _, out double maxW);
 
             double marginX = p.Item.ActualMarginLeft + p.Item.ActualMarginRight;
@@ -336,6 +341,10 @@ internal partial class CssBox
             if (RowNeedsMeasuredHeight(rowSpecs, implicitRow, p.PlacedRow, p.RowSpan, rowDefinite)
                 && colWidth + 0.5 < maxW + marginX)
                 return false;
+
+            // Its content was laid out at the width it was measured at; an item that takes its
+            // area's width is laid out again at it before its height sizes the rows.
+            RelayoutItemAtAreaWidth(p.Item, colWidth - marginX);
 
             double marginY = p.Item.ActualMarginTop + p.Item.ActualMarginBottom;
 
@@ -473,6 +482,46 @@ internal partial class CssBox
     /// <summary>Set once the definite-track pass has positioned this grid's items,
     /// so the flex/grid cross-axis approximation does not re-align them.</summary>
     private bool _gridTrackLayoutApplied;
+
+    /// <summary>
+    /// Makes the width of <paramref name="item"/>'s grid area, <paramref name="areaWidth"/>, the
+    /// width its percentage margins and padding refer to, and moves and grows what it was measured
+    /// with by the change in its padding.
+    /// </summary>
+    /// <remarks>
+    /// CSS Grid §6.2: a grid item's containing block is its grid area, which is known once the
+    /// grid's columns are sized. The item is measured before that, as wide as its content, and its
+    /// percentages referred to its own width then: an empty item with <c>padding-top: 50%</c> had
+    /// none, the rows were sized without it, and the item, stretched to a 100px column afterwards,
+    /// was as tall as its row where browsers make it 50px. So the height the rows are sized from
+    /// grows by the growth of the item's padding at its top and bottom, the item's content moves by
+    /// the growth at its top and left, where it would have been laid out with the area's padding, and
+    /// an item that keeps its own width grows by the growth at its left and right.
+    /// </remarks>
+    private static void UseGridAreaAsPercentageBasis(CssBox item, double areaWidth)
+    {
+        double top = item.ActualPaddingTop, right = item.ActualPaddingRight;
+        double bottom = item.ActualPaddingBottom, left = item.ActualPaddingLeft;
+
+        item.GridAreaWidth = areaWidth;
+
+        double growTop = item.ActualPaddingTop - top, growRight = item.ActualPaddingRight - right;
+        double growBottom = item.ActualPaddingBottom - bottom, growLeft = item.ActualPaddingLeft - left;
+
+        if (Math.Abs(growTop) < 0.01 && Math.Abs(growRight) < 0.01
+            && Math.Abs(growBottom) < 0.01 && Math.Abs(growLeft) < 0.01)
+            return;
+
+        // OffsetLeft and OffsetTop move the item with its content; only the content moves here.
+        var location = item.Location;
+        item.OffsetLeft(growLeft);
+        item.OffsetTop(growTop);
+        item.Location = location;
+
+        item.Size = new SizeF(
+            (float)(item.Size.Width + growLeft + growRight),
+            (float)(item.Size.Height + growTop + growBottom));
+    }
 
     /// <summary>
     /// An item's inline-axis content contribution (min-content, max-content) for
@@ -833,7 +882,6 @@ internal partial class CssBox
         // baseline align-self/justify-self (self-start, center, baseline, …) keeps
         // the item at its content size and positions it in the area instead — a
         // percentage size always fills, resolving against the area regardless.
-        bool widthIsPercent = !string.IsNullOrEmpty(item.Width) && item.Width.EndsWith('%');
         bool heightIsPercent = !string.IsNullOrEmpty(item.Height) && item.Height.EndsWith('%');
 
         // CSS Box Alignment §6.1: `normal` — the default — behaves as `start`, not `stretch`, for a
@@ -842,9 +890,7 @@ internal partial class CssBox
         // `justify-self: stretch` still stretches.
         bool replacedKeepsSize = item.IntrinsicReplacedSize is { Width: > 0, Height: > 0 };
 
-        bool widthFills = FillsArea(item.Width)
-            && (widthIsPercent || (SelfAlignmentStretches(item.JustifySelf, JustifyItems)
-                                   && !(replacedKeepsSize && IsNormalAlignment(item.JustifySelf, JustifyItems))));
+        bool widthFills = ItemFillsAreaWidth(item);
         bool heightFills = FillsArea(item.Height)
             && (heightIsPercent || (SelfAlignmentStretches(item.AlignSelf, AlignItems)
                                     && !(replacedKeepsSize && IsNormalAlignment(item.AlignSelf, AlignItems))));
@@ -959,15 +1005,65 @@ internal partial class CssBox
     /// </remarks>
     private void RelayoutItemThatSizesItsOwnChildren(CssBox item, double borderBoxWidth, double borderBoxHeight)
     {
-        if (LayoutEnvironment is not { } environment)
-            return;
-
-        // Only flex containers: nothing else in the box tree reads its own used size while laying
+        // Only flex containers: nothing else in the box tree reads its own used height while laying
         // its children out, so for anything else this pass would cost a layout and change nothing.
+        // The width, which a block's children do read, is the item's already: see
+        // RelayoutItemAtAreaWidth.
         if (item.Display is not ("flex" or "inline-flex"))
             return;
 
         if (borderBoxWidth <= 0 || borderBoxHeight <= 0 || item.Boxes.Count == 0)
+            return;
+
+        RelayoutItem(item, borderBoxWidth, borderBoxHeight);
+    }
+
+    /// <summary>
+    /// Lays an item that takes its grid area's width out again at that width, before the rows are
+    /// sized from its height.
+    /// </summary>
+    /// <remarks>
+    /// The grid measures an item before it sizes its tracks, as wide as the item's content, and the
+    /// item's content was laid out at that width. Resized to its area afterwards, the item kept it:
+    /// in a 200px column, a block holding a word with a background of its own was 9.6px wide, the
+    /// word's width, where browsers make it fill the item; a child with <c>width: 50%</c> was half
+    /// the word; a child with <c>padding-top: 56.25%</c>, the intrinsic-ratio pattern of responsive
+    /// embeds, had no height, and the row was sized without it. Laid out again at its area's width,
+    /// the item's content takes the width it will have, and its height, which the rows are sized
+    /// from, is the one that width gives.
+    /// </remarks>
+    private void RelayoutItemAtAreaWidth(CssBox item, double borderBoxWidth)
+    {
+        if (!ItemFillsAreaWidth(item) || borderBoxWidth <= 0 || item.Boxes.Count == 0
+            || Math.Abs(borderBoxWidth - item.Size.Width) < 0.5
+            || StartsWithSubgrid(item.GridTemplateColumns) || StartsWithSubgrid(item.GridTemplateRows))
+            return;
+
+        RelayoutItem(item, borderBoxWidth, borderBoxHeight: null);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="item"/> takes the width of its grid area (see
+    /// <see cref="PlaceItemInArea"/>).
+    /// </summary>
+    private bool ItemFillsAreaWidth(CssBox item)
+    {
+        bool widthIsPercent = !string.IsNullOrEmpty(item.Width) && item.Width.EndsWith('%');
+        bool replacedKeepsSize = item.IntrinsicReplacedSize is { Width: > 0, Height: > 0 };
+
+        return FillsArea(item.Width)
+            && (widthIsPercent || (SelfAlignmentStretches(item.JustifySelf, JustifyItems)
+                                   && !(replacedKeepsSize && IsNormalAlignment(item.JustifySelf, JustifyItems))));
+    }
+
+    /// <summary>
+    /// Lays <paramref name="item"/> out again at the given border-box width and, when one is given,
+    /// height, by stating them as its <c>width</c> and <c>height</c> for the pass, and puts it back
+    /// where it was. Without a height, it keeps the height its content gives it.
+    /// </summary>
+    private void RelayoutItem(CssBox item, double borderBoxWidth, double? borderBoxHeight)
+    {
+        if (LayoutEnvironment is not { } environment)
             return;
 
         string savedWidth = item.Width;
@@ -978,10 +1074,14 @@ internal partial class CssBox
             ? borderBoxWidth
             : borderBoxWidth - item.ActualPaddingLeft - item.ActualPaddingRight
               - item.ActualBorderLeftWidth - item.ActualBorderRightWidth);
-        item.Height = FormatGridPx(item.UsesBorderBoxSizing
-            ? borderBoxHeight
-            : borderBoxHeight - item.ActualPaddingTop - item.ActualPaddingBottom
-              - item.ActualBorderTopWidth - item.ActualBorderBottomWidth);
+
+        if (borderBoxHeight is { } height)
+        {
+            item.Height = FormatGridPx(item.UsesBorderBoxSizing
+                ? height
+                : height - item.ActualPaddingTop - item.ActualPaddingBottom
+                  - item.ActualBorderTopWidth - item.ActualBorderBottomWidth);
+        }
 
         // The pass re-places the item before this puts it back, and everything it touches on the
         // way is recorded in the document's running extent — so the extent is snapshotted across
@@ -1008,9 +1108,7 @@ internal partial class CssBox
             item.OffsetTop(dy);
         }
 
-        item.Size = new SizeF((float)borderBoxWidth, (float)borderBoxHeight);
-        item.ActualRight = item.Location.X + borderBoxWidth;
-        item.ActualBottom = item.Location.Y + borderBoxHeight;
+        item.Size = new SizeF((float)borderBoxWidth, (float)(borderBoxHeight ?? item.Size.Height));
         item.RectanglesReset();
     }
 

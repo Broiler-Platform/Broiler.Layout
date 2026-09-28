@@ -30,6 +30,11 @@ internal sealed class CssLayoutEngineTable
 
     private double[] _columnWidths;
     private double[] _columnMinWidths;
+    private double[] _columnMaxWidths = [];
+
+    // The widths the columns were given by their cells or their <col>s, NaN for the others, as
+    // CalculateCountAndWidth found them before the others were given theirs.
+    private double[] _specifiedColumnWidths = [];
 
     private CssLayoutEngineTable(CssBox tableBox) => _tableBox = tableBox;
 
@@ -101,6 +106,13 @@ internal sealed class CssLayoutEngineTable
         // before sizing, so the used (winning) border widths drive cell layout.
         ResolveCollapsedBorders();
 
+        // CSS 2.1 §17.6.2: in the collapsing border model a table has no padding. In the separated
+        // model it has, between its border and the spacing around its cells, and its `width` counts
+        // it as it counts the border. The padding was dropped in both: `padding: 10px` around an x
+        // left the table 8px wide and the x at its corner, where browsers make it 28px wide.
+        if (_tableBox.BorderCollapse == CssConstants.Collapse)
+            _tableBox.PaddingLeft = _tableBox.PaddingTop = _tableBox.PaddingRight = _tableBox.PaddingBottom = "0";
+
         // Determine Row and Column Count, and ColumnWidths
         var availCellSpace = CalculateCountAndWidth();
 
@@ -111,9 +123,6 @@ internal sealed class CssLayoutEngineTable
 
         // While table width is larger than it should, and width is reducible
         EnforceMaximumSize();
-
-        // Ensure there's no padding
-        _tableBox.PaddingLeft = _tableBox.PaddingTop = _tableBox.PaddingRight = _tableBox.PaddingBottom = "0";
 
         //Actually layout cells!
         LayoutCells(g);
@@ -563,6 +572,8 @@ internal sealed class CssLayoutEngineTable
             }
         }
 
+        _specifiedColumnWidths = (double[])_columnWidths.Clone();
+
         return availCellSpace;
     }
 
@@ -671,14 +682,27 @@ internal sealed class CssLayoutEngineTable
                 occupedSpace += _columnWidths[i];
             }
 
-            // spread extra width between all columns
+            // CSS 2.1 §17.5.2.2: the table is as wide as its columns' content, or as the room there is
+            // if that is less. CSS Tables 3 shares the room left over the columns in proportion to how
+            // much wider their content would have them, each up to its maximum. The room was spread one
+            // column at a time instead, each taking what was left divided by the columns still to come,
+            // so what a column could not take went unused: in a 1024px page, a table with an auto width
+            // holding text and a 600px image was 853.36px wide, where browsers make it 1024px and give
+            // the text 424px.
+            double room = availCellSpace - occupedSpace;
+            double growth = 0;
+
             for (int i = 0; i < _columnWidths.Length; i++)
+                growth += Math.Max(0, maxFullWidths[i] - _columnWidths[i]);
+
+            if (room > 0 && growth > 0)
             {
-                if (maxFullWidths[i] > _columnWidths[i])
+                double share = Math.Min(1, room / growth);
+
+                for (int i = 0; i < _columnWidths.Length; i++)
                 {
-                    var temp = _columnWidths[i];
-                    _columnWidths[i] = Math.Min(_columnWidths[i] + (availCellSpace - occupedSpace) / Convert.ToSingle(_columnWidths.Length - i), maxFullWidths[i]);
-                    occupedSpace = occupedSpace + _columnWidths[i] - temp;
+                    if (maxFullWidths[i] > _columnWidths[i])
+                        _columnWidths[i] += (maxFullWidths[i] - _columnWidths[i]) * share;
                 }
             }
         }
@@ -796,6 +820,12 @@ internal sealed class CssLayoutEngineTable
     /// </summary>
     private void EnforceMinimumSize()
     {
+        if (_widthSpecified)
+        {
+            WidenColumnsToMinimumsWithinWidth();
+            return;
+        }
+
         foreach (CssBox row in _allRows)
         {
             foreach (CssBox cell in row.Boxes)
@@ -816,17 +846,91 @@ internal sealed class CssLayoutEngineTable
         }
     }
 
+    /// <summary>
+    /// CSS 2.1 §17.5.2.2: a table with a width of its own is that wide, or as wide as its columns'
+    /// minimums if they need more. Each column narrower than its minimum is widened to it, and the
+    /// columns wider than theirs give that room back, each in proportion to what it can spare: the
+    /// columns without a width of their own first, as CSS Tables 3 narrows a table's columns, then
+    /// the others. The table grows only by what they cannot spare.
+    /// </summary>
+    /// <remarks>
+    /// Widening a column took the room from the next column alone, so the table grew whenever that
+    /// column had none to spare: in a 1024px page, a table with <c>width: 100%</c> holding text and
+    /// a 600px image was 1112px wide, the text's column as wide as before, where browsers keep the
+    /// table 1024px wide and give the text's column 424px.
+    /// </remarks>
+    private void WidenColumnsToMinimumsWithinWidth()
+    {
+        double[] minWidths = GetColumnMinWidths();
+        double needed = 0;
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (_columnWidths[i] < minWidths[i])
+            {
+                needed += minWidths[i] - _columnWidths[i];
+                _columnWidths[i] = minWidths[i];
+            }
+        }
+
+        needed = GiveBackRoom(needed, minWidths, specified: false);
+        GiveBackRoom(needed, minWidths, specified: true);
+    }
+
+    /// <summary>
+    /// Narrows the columns with a width of their own, or those without, that are wider than their
+    /// minimums, each in proportion to what it can spare, by <paramref name="needed"/> together or
+    /// as much as they can spare, and returns what they could not.
+    /// </summary>
+    private double GiveBackRoom(double needed, double[] minWidths, bool specified)
+    {
+        if (needed <= 0)
+            return 0;
+
+        double spare = 0;
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (IsSpecified(i) == specified && _columnWidths[i] > minWidths[i])
+                spare += _columnWidths[i] - minWidths[i];
+        }
+
+        if (spare <= 0)
+            return needed;
+
+        double given = Math.Min(1, needed / spare);
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (IsSpecified(i) == specified && _columnWidths[i] > minWidths[i])
+                _columnWidths[i] -= (_columnWidths[i] - minWidths[i]) * given;
+        }
+
+        return Math.Max(0, needed - spare);
+    }
+
     private void LayoutCells(ILayoutEnvironment g)
     {
         // CSS2.1 §17.4.1: lay out top-side captions above the cell grid. They
         // span the table's used width and push the first row (and every later
         // row) down by their combined height. Bottom-side captions are laid out
         // after the rows (see below).
-        double captionWidth = GetWidthSum() + GetHorizontalSpacing() * (_columnCount + 1);
+        //
+        // CSS 2.1 §17.4: a caption is as wide as the table's border box, which GetWidthSum is, the
+        // spacing and the borders counted. The spacing was added again, so a caption ran past the
+        // table's right edge by it: with `border-spacing: 4px` and one column, 8px.
+        double captionWidth = GetWidthSum();
         double topCaptionHeight = LayoutTopCaptions(g, captionWidth);
 
-        double startx = Math.Max(_tableBox.ClientLeft + GetHorizontalSpacing(), 0);
-        double starty = Math.Max(_tableBox.ClientTop + topCaptionHeight + GetVerticalSpacing(), 0);
+        // CSS2.1 §17.6.1: border spacing lies between the cells, and between them and the
+        // table's border, so a table with no cells has none. It was put on both sides of the
+        // cells whether there were any or not: an empty table was 4x4px with the default
+        // border-spacing: 2px, where browsers make it 0x0px.
+        double horizontalSpacing = _columnCount > 0 ? GetHorizontalSpacing() : 0;
+        double verticalSpacing = _columnCount > 0 ? GetVerticalSpacing() : 0;
+
+        double startx = Math.Max(_tableBox.ClientLeft + horizontalSpacing, 0);
+        double starty = Math.Max(_tableBox.ClientTop + topCaptionHeight + verticalSpacing, 0);
         double cury = starty;
         double maxRight = startx;
         double maxBottom = 0f;
@@ -945,7 +1049,7 @@ internal sealed class CssLayoutEngineTable
             }
 
             rowBounds.Add((row, rowTop, maxBottom));
-            cury = maxBottom + GetVerticalSpacing();
+            cury = maxBottom + verticalSpacing;
 
             currentrow++;
         }
@@ -961,9 +1065,15 @@ internal sealed class CssLayoutEngineTable
         // the rows naturally occupy, distribute the surplus over the rows.
         maxBottom = DistributeExtraTableHeight(g, rowBounds, maxBottom, starty);
 
-        maxRight = Math.Max(maxRight, _tableBox.Location.X + _tableBox.ActualWidth);
-        _tableBox.ActualRight = maxRight + GetHorizontalSpacing() + _tableBox.ActualBorderRightWidth;
-        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + GetVerticalSpacing() + _tableBox.ActualBorderBottomWidth;
+        // A table's `width` is the width of its border box, as the columns were sized above:
+        // GetAvailableCellWidth takes the borders and the spacing off it. The table ends at the
+        // greater of that and the columns' own extent. Taking the width for the columns' extent put
+        // the right border and the spacing past it: `width: 320px` with a 10px border made a table
+        // 330px wide, and 332px with 2px of border spacing, where browsers make it 320px.
+        _tableBox.ActualRight = Math.Max(
+            maxRight + horizontalSpacing + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
+            _tableBox.Location.X + _tableBox.ActualWidth);
+        _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualPaddingBottom + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
         // extend the table's bottom to enclose them.
@@ -1041,15 +1151,24 @@ internal sealed class CssLayoutEngineTable
     }
 
     /// <summary>
-    /// CSS2.1 §17.4.1: lay out all top-side captions stacked from the table's
-    /// content-box top, returning their combined height so the cell grid can be
-    /// offset below them.
+    /// Where a caption begins: CSS 2.1 §17.4 lays it out across the table's border box, so at the
+    /// table's left border edge. It began inside the left border, and so ran past the right one:
+    /// with a 5px border, 5px to the right of where browsers put it.
+    /// </summary>
+    private double CaptionLeft => _tableBox.Location.X;
+
+    /// <summary>
+    /// CSS2.1 §17.4.1: lay out all top-side captions stacked from just inside
+    /// the table's top border, returning their combined height so the cell grid
+    /// can be offset below them.
     /// </summary>
     private double LayoutTopCaptions(ILayoutEnvironment g, double width)
     {
         double total = 0;
-        double x = _tableBox.ClientLeft;
-        double top = _tableBox.ClientTop;
+        double x = CaptionLeft;
+
+        // Above the table's padding: the caption lies outside the box the padding surrounds.
+        double top = _tableBox.Location.Y + _tableBox.ActualBorderTopWidth;
 
         foreach (var caption in _captions)
         {
@@ -1069,7 +1188,7 @@ internal sealed class CssLayoutEngineTable
     /// </summary>
     private double LayoutBottomCaptions(ILayoutEnvironment g, double width, double tableBottom)
     {
-        double x = _tableBox.ClientLeft;
+        double x = CaptionLeft;
         double y = tableBottom;
 
         foreach (var caption in _captions)
@@ -1230,19 +1349,6 @@ internal sealed class CssLayoutEngineTable
         }
 
         return false;
-    }
-
-    private double GetSpannedMinWidth(CssBox row, int realcolindex, int colspan)
-    {
-        double w = 0f;
-
-        for (int i = realcolindex; i < row.Boxes.Count || i < realcolindex + colspan - 1; i++)
-        {
-            if (i < GetColumnMinWidths().Length)
-                w += GetColumnMinWidths()[i];
-        }
-
-        return w;
     }
 
     // CSS2.1 §17.6.2.1 border-conflict-resolution priority of border styles
@@ -1624,7 +1730,13 @@ internal sealed class CssLayoutEngineTable
         }
         else
         {
-            return TableParent.AvailableWidth;
+            // CSS2.1 §9.5: a table placed beside floats has the space they leave it, as a block is
+            // narrowed to it. The algorithm took its container's whole width: beside a 100px float
+            // in 1024px, a table with an auto width and a long line of text came out 1024px wide
+            // and ran 100px past the edge, where browsers make it 924px wide and wrap the text.
+            return _tableBox.WidthBesideFloats is double space
+                ? Math.Min(TableParent.AvailableWidth, space)
+                : TableParent.AvailableWidth;
         }
     }
 
@@ -1644,40 +1756,24 @@ internal sealed class CssLayoutEngineTable
 
     private void GetColumnsMinMaxWidthByContent(bool onlyNans, out double[] minFullWidths, out double[] maxFullWidths)
     {
-        maxFullWidths = new double[_columnWidths.Length];
-        minFullWidths = new double[_columnWidths.Length];
+        MeasureColumns();
 
-        foreach (CssBox row in _allRows)
+        minFullWidths = (double[])_columnMinWidths.Clone();
+        maxFullWidths = (double[])_columnMaxWidths.Clone();
+
+        if (!onlyNans)
+            return;
+
+        // The columns given a width already keep it.
+        for (int i = 0; i < _columnWidths.Length; i++)
         {
-            for (int i = 0; i < row.Boxes.Count; i++)
-            {
-                int col = GetCellRealColumnIndex(row, row.Boxes[i]);
-                col = _columnWidths.Length > col ? col : _columnWidths.Length - 1;
-
-                if (onlyNans && !double.IsNaN(_columnWidths[col]) || i >= row.Boxes.Count)
-                    continue;
-
-                row.Boxes[i].GetMinMaxWidth(out double minWidth, out double maxWidth);
-
-                var colSpan = GetColSpan(row.Boxes[i]);
-                minWidth /= colSpan;
-                maxWidth /= colSpan;
-
-                for (int j = 0; j < colSpan; j++)
-                {
-                    var colIndex = col + j;
-
-                    if (colIndex < minFullWidths.Length)
-                        minFullWidths[colIndex] = Math.Max(minFullWidths[colIndex], minWidth);
-
-                    if (colIndex < maxFullWidths.Length)
-                        maxFullWidths[colIndex] = Math.Max(maxFullWidths[colIndex], maxWidth);
-                }
-            }
+            if (!double.IsNaN(_columnWidths[i]))
+                minFullWidths[i] = maxFullWidths[i] = 0;
         }
     }
 
-    private double GetAvailableCellWidth() => GetAvailableTableWidth() - GetHorizontalSpacing() * (_columnCount + 1) - _tableBox.ActualBorderLeftWidth - _tableBox.ActualBorderRightWidth;
+    private double GetAvailableCellWidth() => GetAvailableTableWidth() - GetHorizontalSpacing() * (_columnCount + 1) - _tableBox.ActualBorderLeftWidth - _tableBox.ActualBorderRightWidth
+        - _tableBox.ActualPaddingLeft - _tableBox.ActualPaddingRight;
 
     private double GetWidthSum()
     {
@@ -1694,8 +1790,8 @@ internal sealed class CssLayoutEngineTable
         //Take cell-spacing
         f += GetHorizontalSpacing() * (_columnWidths.Length + 1);
 
-        //Take table borders
-        f += _tableBox.ActualBorderLeftWidth + _tableBox.ActualBorderRightWidth;
+        //Take table borders and padding
+        f += _tableBox.ActualBorderLeftWidth + _tableBox.ActualBorderRightWidth + _tableBox.ActualPaddingLeft + _tableBox.ActualPaddingRight;
 
         return f;
     }
@@ -1708,26 +1804,188 @@ internal sealed class CssLayoutEngineTable
 
     private double[] GetColumnMinWidths()
     {
-        if (_columnMinWidths != null)
-            return _columnMinWidths;
+        MeasureColumns();
+        return _columnMinWidths;
+    }
 
-        _columnMinWidths = new double[_columnWidths.Length];
+    /// <summary>
+    /// Measures each column's minimum and maximum content widths from the cells in it, once a
+    /// layout.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS 2.1 §17.5.2.2: a column is at least as wide as its cells' minimum content width, the
+    /// width their content needs not to overflow them, and a cell spanning columns needs them, with
+    /// the spacing between them, to be as wide as it together. The cells in one column are measured
+    /// first. Then each cell spanning columns, those spanning fewer first, shares out over its
+    /// columns what they lack of its widths (see <see cref="ShareOut"/>).
+    /// </para>
+    /// <para>
+    /// A spanning cell's minimum went on its last column alone, less what the columns before it had
+    /// so far, and was its longest word alone; its maximum was split evenly over its columns. In a
+    /// table with <c>width: 100px</c>, a cell spanning two columns and holding a 40-letter word,
+    /// over a row of two cells holding an x, made the columns 50px and 320px wide, where browsers
+    /// make each 160px; with a 400px block in it the table stayed 100px wide, and the block ran out
+    /// of it.
+    /// </para>
+    /// </remarks>
+    private void MeasureColumns()
+    {
+        if (_columnMinWidths != null)
+            return;
+
+        int count = _columnWidths.Length;
+        var mins = new double[count];
+        var maxes = new double[count];
+        var spanning = new List<(CssBox Cell, int First, int Last)>();
+        int widestSpan = 0;
 
         foreach (CssBox row in _allRows)
         {
             foreach (CssBox cell in row.Boxes)
             {
-                int colspan = GetColSpan(cell);
-                int col = GetCellRealColumnIndex(row, cell);
-                int affectcol = Math.Min(col + colspan, _columnMinWidths.Length) - 1;
-                double spannedwidth = GetSpannedMinWidth(row, col, colspan) + (colspan - 1) * GetHorizontalSpacing();
+                int first = GetCellRealColumnIndex(row, cell);
+                int last = Math.Min(first + GetColSpan(cell), count) - 1;
 
-                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cell.GetMinimumWidth() - spannedwidth);
+                if (first > last)
+                    continue;
+
+                if (first < last)
+                {
+                    spanning.Add((cell, first, last));
+                    widestSpan = Math.Max(widestSpan, last - first);
+                    continue;
+                }
+
+                MeasureCell(cell, out double min, out double max);
+                mins[first] = Math.Max(mins[first], min);
+                maxes[first] = Math.Max(maxes[first], max);
             }
         }
 
-        return _columnMinWidths;
+        // A column given a width of its own is that wide at most, unless its cells need more.
+        for (int i = 0; i < count; i++)
+            maxes[i] = Math.Max(mins[i], IsSpecified(i) ? _specifiedColumnWidths[i] : maxes[i]);
+
+        for (int span = 1; span <= widestSpan; span++)
+        {
+            foreach (var (cell, first, last) in spanning)
+            {
+                if (last - first != span)
+                    continue;
+
+                MeasureCell(cell, out double min, out double max);
+                double spacing = span * GetHorizontalSpacing();
+
+                ShareOut(min - spacing, first, last, mins, maxes);
+
+                for (int i = first; i <= last; i++)
+                    maxes[i] = Math.Max(maxes[i], mins[i]);
+
+                ShareOut(max - spacing, first, last, maxes, maxes);
+            }
+        }
+
+        _columnMinWidths = mins;
+        _columnMaxWidths = maxes;
     }
+
+    /// <summary>
+    /// A cell's minimum content width, and its maximum, at least as wide.
+    /// </summary>
+    /// <remarks>
+    /// The minimum is the min-content width, which <see cref="CssBox.GetMinMaxWidth"/> measures with
+    /// the widths of the blocks in the cell, or its longest word where that is wider.
+    /// <see cref="CssBox.GetMinimumWidth"/> is the longest word alone, so a block with a width of
+    /// its own counted for nothing on its own: a table with <c>width: 100px</c> stayed 100px wide
+    /// around a 400px block in a cell, and the block ran out of it.
+    /// </remarks>
+    private static void MeasureCell(CssBox cell, out double min, out double max)
+    {
+        cell.GetMinMaxWidth(out double minContentWidth, out double maxContentWidth);
+        min = Math.Max(cell.GetMinimumWidth(), double.IsNaN(minContentWidth) ? 0 : minContentWidth);
+        max = Math.Max(min, double.IsNaN(maxContentWidth) ? 0 : maxContentWidth);
+    }
+
+    /// <summary>
+    /// Widens the columns <paramref name="first"/> to <paramref name="last"/>, as measured in
+    /// <paramref name="widths"/>, until together they are <paramref name="width"/> wide. The width
+    /// is shared out as CSS Tables 3 shares a table's width out over its columns: first the columns
+    /// given a width of their own, up to it, then the others, up to their maximums in
+    /// <paramref name="maxes"/>, each in proportion to what it has yet to take; past that, the
+    /// columns without a width of their own, in proportion to their maximums.
+    /// </summary>
+    private void ShareOut(double width, int first, int last, double[] widths, double[] maxes)
+    {
+        double current = 0, specifiedGuess = 0, maxGuess = 0;
+
+        for (int i = first; i <= last; i++)
+        {
+            current += widths[i];
+            specifiedGuess += IsSpecified(i) ? maxes[i] : widths[i];
+            maxGuess += maxes[i];
+        }
+
+        if (width <= current)
+            return;
+
+        double[] excessShares = width > maxGuess ? GetExcessShares(first, last, maxes) : [];
+
+        for (int i = first; i <= last; i++)
+        {
+            double share;
+
+            if (width <= specifiedGuess)
+                share = IsSpecified(i) ? widths[i] + (maxes[i] - widths[i]) * (width - current) / (specifiedGuess - current) : widths[i];
+            else if (width <= maxGuess)
+                share = IsSpecified(i) ? maxes[i] : widths[i] + (maxes[i] - widths[i]) * (width - specifiedGuess) / (maxGuess - specifiedGuess);
+            else
+                share = maxes[i] + (width - maxGuess) * excessShares[i - first];
+
+            widths[i] = Math.Max(widths[i], share);
+        }
+    }
+
+    /// <summary>
+    /// The shares of the columns <paramref name="first"/> to <paramref name="last"/> in what a
+    /// spanning cell needs beyond their maximums: the columns without a width of their own take
+    /// it, in proportion to their maximums, or evenly if none has any content; with no such
+    /// column, the others take it likewise.
+    /// </summary>
+    private double[] GetExcessShares(int first, int last, double[] maxes)
+    {
+        var shares = new double[last - first + 1];
+
+        foreach (bool specified in new[] { false, true })
+        {
+            double sum = 0;
+            int columns = 0;
+
+            for (int i = first; i <= last; i++)
+            {
+                if (IsSpecified(i) != specified)
+                    continue;
+
+                sum += maxes[i];
+                columns++;
+            }
+
+            if (columns == 0)
+                continue;
+
+            for (int i = first; i <= last; i++)
+            {
+                if (IsSpecified(i) == specified)
+                    shares[i - first] = sum > 0 ? maxes[i] / sum : 1.0 / columns;
+            }
+
+            break;
+        }
+
+        return shares;
+    }
+
+    private bool IsSpecified(int column) => !double.IsNaN(_specifiedColumnWidths[column]);
 
     private double GetHorizontalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? -1f : _tableBox.ActualBorderSpacingHorizontal;
     private static double GetHorizontalSpacing(CssBox box) => box.BorderCollapse == CssConstants.Collapse ? -1f : box.ActualBorderSpacingHorizontal;
