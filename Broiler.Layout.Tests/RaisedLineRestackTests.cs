@@ -23,8 +23,9 @@ namespace Broiler.Layout.Tests;
 /// </para>
 /// <para>
 /// Each block here is 150px wide with 20px lines, in a block in the root. Words are 8px wide a
-/// letter and 16px tall, so a line's baseline is 12.8px down it; "alpha beta gamma" fills the first
-/// line and "delta" starts the second. The raised box is an 8 × 10px inline-block, or image.
+/// letter and 16px tall, and stand half their 4px of leading down their line, so a line's baseline
+/// is 14.8px down it; "alpha beta gamma" fills the first line and "delta" starts the second. The
+/// raised box is an 8 × 10px inline-block, or image.
 /// </para>
 /// </remarks>
 public sealed class RaisedLineRestackTests
@@ -32,9 +33,9 @@ public sealed class RaisedLineRestackTests
     private static readonly Uri BaseUrl = new("file:///raised-line-restack.html");
 
     /// <summary>
-    /// A box raised 10px on the second line reaches 7.2px above its top, so the line moves 7.2px
+    /// A box raised 10px on the second line reaches 5.2px above its top, so the line moves 5.2px
     /// down: the box starts at the line's top, 20px down, "delta" 27.2px down, and the block is
-    /// 47.2px tall. The box started 12.8px down, over the first line, and the block was 40px.
+    /// 45.2px tall. The box started 14.8px down, over the first line, and the block was 40px.
     /// </summary>
     [Fact]
     public void A_Box_Raised_Above_The_Second_Lines_Top_Moves_The_Line_Down()
@@ -45,12 +46,12 @@ public sealed class RaisedLineRestackTests
         Assert.Equal(20, t.Raised[0].Location.Y - t.Block.ClientTop, 1);
         Assert.Equal(27.2, WordTop(t, "delta"), 1);
         Assert.Equal(27.2, WordTop(t, "omega"), 1);
-        Assert.Equal(47.2, t.Block.Size.Height, 1);
+        Assert.Equal(45.2, t.Block.Size.Height, 1);
     }
 
     /// <summary>
-    /// A line after the one moved down moves with it: with a third line, "zeta" is 7.2px lower too,
-    /// 47.2px down, and the block 67.2px tall.
+    /// A line after the one moved down moves with it: with a third line, "zeta" is 5.2px lower too,
+    /// 47.2px down, and the block 65.2px tall.
     /// </summary>
     [Fact]
     public void The_Lines_After_It_Move_Down_With_It()
@@ -59,12 +60,13 @@ public sealed class RaisedLineRestackTests
         Layout(t);
 
         Assert.Equal(47.2, WordTop(t, "zeta"), 1);
-        Assert.Equal(67.2, t.Block.Size.Height, 1);
+        Assert.Equal(65.2, t.Block.Size.Height, 1);
     }
 
     /// <summary>
     /// Raised content on the first line and on the second: each line moves down by as much as its
-    /// own content reaches above it, and the second by the first's too.
+    /// own content reaches above it, 5.2px, and the second by the first's too. The second box
+    /// starts 25.2px down, and the block is 50.4px tall.
     /// </summary>
     [Fact]
     public void Each_Line_Moves_Down_By_Its_Own_Content_And_The_Lines_Above()
@@ -80,8 +82,8 @@ public sealed class RaisedLineRestackTests
         Layout(t);
 
         Assert.Equal(0, t.Raised[0].Location.Y - t.Block.ClientTop, 1);
-        Assert.Equal(27.2, t.Raised[1].Location.Y - t.Block.ClientTop, 1);
-        Assert.Equal(54.4, t.Block.Size.Height, 1);
+        Assert.Equal(25.2, t.Raised[1].Location.Y - t.Block.ClientTop, 1);
+        Assert.Equal(50.4, t.Block.Size.Height, 1);
     }
 
     /// <summary>
@@ -99,7 +101,7 @@ public sealed class RaisedLineRestackTests
     }
 
     /// <summary>
-    /// Laid out a second time, the second line is 7.2px down still, and the block 47.2px tall.
+    /// Laid out a second time, the second line is 5.2px down still, and the block 45.2px tall.
     /// </summary>
     [Fact]
     public void A_Second_Layout_Gives_The_Same_Lines()
@@ -109,13 +111,13 @@ public sealed class RaisedLineRestackTests
         Layout(t);
 
         Assert.Equal(27.2, WordTop(t, "delta"), 1);
-        Assert.Equal(47.2, t.Block.Size.Height, 1);
+        Assert.Equal(45.2, t.Block.Size.Height, 1);
     }
 
     /// <summary>
     /// An image raised 10px on the second line moves the line down as the inline-block does, and
     /// its box, which is where it is drawn and measured, moves with it: the image starts at the
-    /// line's top, 20px down, and stays 10px tall. It started 12.8px down, over the first line.
+    /// line's top, 20px down, and stays 10px tall. It started 14.8px down, over the first line.
     /// </summary>
     [Fact]
     public void A_Raised_Image_Moves_Down_With_Its_Line_And_Keeps_Its_Height()
@@ -126,13 +128,13 @@ public sealed class RaisedLineRestackTests
         var image = t.Block.Boxes.OfType<CssBoxImage>().Single();
         Assert.Equal(20, image.Location.Y - t.Block.ClientTop, 1);
         Assert.Equal(10, image.Size.Height, 1);
-        Assert.Equal(47.2, t.Block.Size.Height, 1);
+        Assert.Equal(45.2, t.Block.Size.Height, 1);
     }
 
     /// <summary>
     /// An image raised 10px on the first line moves every line down, and its box with them: it
     /// starts at the block's top and stays 10px tall. Its word moved and its box did not, and it was
-    /// drawn and measured 7.2px above the block.
+    /// drawn and measured 5.2px above the block.
     /// </summary>
     [Fact]
     public void An_Image_Raised_On_The_First_Line_Starts_At_The_Blocks_Top()
@@ -170,9 +172,9 @@ public sealed class RaisedLineRestackTests
     }
 
     /// <summary>
-    /// Controls, which pass before and after: a box raised on the first line moves every line
-    /// down, and it starts at the block's top; and an inline box with 10px of top padding on the
-    /// second line, which is not part of the line, moves nothing.
+    /// Controls: a box raised on the first line moves every line down, and it starts at the
+    /// block's top; and an inline box with 10px of top padding on the second line, which is not
+    /// part of the line, moves nothing, its word standing 2px down the line as every word does.
     /// </summary>
     [Fact]
     public void Control_The_First_Line_And_An_Inline_Boxs_Padding()
@@ -191,7 +193,7 @@ public sealed class RaisedLineRestackTests
         });
         Layout(padded);
 
-        Assert.Equal(20, WordTop(padded, "delta"), 1);
+        Assert.Equal(22, WordTop(padded, "delta"), 1);
         Assert.Equal(40, padded.Block.Size.Height, 1);
     }
 

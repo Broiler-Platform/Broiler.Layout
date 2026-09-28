@@ -466,10 +466,11 @@ internal partial class CssBox
             top = Math.Min(top, rect.Top);
         }
 
+        // A word of text starts where its inline box does, half the box's leading above its glyphs.
         foreach (var word in line.Words)
         {
             bottom = Math.Max(bottom, word.Bottom);
-            top = Math.Min(top, word.Top);
+            top = Math.Min(top, CssLayoutEngine.WordLayoutTop(word));
         }
 
         if (top == double.MaxValue)
