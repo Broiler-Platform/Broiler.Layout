@@ -530,6 +530,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in Boxes)
         {
+            // See CssBoxHelper.GetMinMaxSumWords: an absolutely or fixed positioned child is out of
+            // flow and takes no room on any line.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child))
+                continue;
+
             double childWidth;
 
             if (child.Width != CssConstants.Auto && !string.IsNullOrEmpty(child.Width)
@@ -1028,6 +1033,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in Boxes)
         {
+            // See CssBoxHelper.GetMinMaxSumWords: a positioned child is out of flow.
+            if (CssBoxHelper.IsOutOfFlowPositioned(child))
+                continue;
+
             double childWidth;
 
             if (child.Width != CssConstants.Auto && !string.IsNullOrEmpty(child.Width)

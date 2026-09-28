@@ -157,9 +157,22 @@ internal static class CssBoxHelper
         else
         {
             foreach (CssBox childBox in box.Boxes)
+            {
+                // See GetMinMaxSumWords: a positioned child's words are out of flow with it.
+                if (IsOutOfFlowPositioned(childBox))
+                    continue;
+
                 GetMinimumWidth_LongestWord(childBox, ref maxWidth, ref maxWidthWord);
+            }
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is absolutely or fixed positioned, and so out of flow: it
+    /// takes no room in its parent's content (CSS 2.1 §9.6).
+    /// </summary>
+    internal static bool IsOutOfFlowPositioned(CssBox box) =>
+        box.Position == CssConstants.Absolute || box.Position == CssConstants.Fixed;
 
     public static double GetWidthMarginDeep(CssBox box)
     {
@@ -375,6 +388,14 @@ internal static class CssBoxHelper
             for (int i = 0; i < box.Boxes.Count; i++)
             {
                 CssBox childBox = box.Boxes[i];
+
+                // CSS Sizing 3 §5: a box's intrinsic sizes come from its in-flow content, and an
+                // absolutely or fixed positioned child is out of flow: it takes no room on any line
+                // or in any word's path. This walk measured it like any other child, so a dropdown
+                // menu 300px wide, positioned in an inline-block, a float or a table cell, made the
+                // box around it 300px wide, where browsers size that box to the rest of its content.
+                if (IsOutOfFlowPositioned(childBox))
+                    continue;
 
                 // A <br> forces a line break, so max-content is the widest line:
                 // close the running line here and start a fresh one. Otherwise the
