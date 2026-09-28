@@ -1381,7 +1381,14 @@ internal static class CssLayoutEngine
             // sized abspos with inline content, e.g. css-anchor-position anchored
             // labels, issue #1163). Boxes that keep their static Location (e.g.
             // native form controls) still rely on the adjustment.
-            if (!(box == blockbox && box.AbsposLocationFinalized))
+            //
+            // Nor is a box that flows its own content moved when its `top` and `left` are both
+            // auto: PerformLayoutImp put it at its static position with its margins, and its
+            // words were flowed from there, so AdjustAbsolutePosition, which has no offset to
+            // add, added its margins a second time. A box with `margin-top: 10px` drew its text
+            // 10px below its content top; one with a negative margin drew it above, which the
+            // lines, measured from where the flow put them, took for content raised above them.
+            if (!(box == blockbox && (box.AbsposLocationFinalized || HasAutoTopAndLeft(box))))
                 AdjustAbsolutePosition(box, 0, 0);
         }
 
@@ -2111,6 +2118,14 @@ internal static class CssLayoutEngine
         foreach (var child in box.Boxes)
             MeasureDescendantWords(g, child);
     }
+
+    /// <summary>
+    /// Whether the box's <c>top</c> and <c>left</c> are both <c>auto</c>, so that neither of them
+    /// places it.
+    /// </summary>
+    private static bool HasAutoTopAndLeft(CssBox box) =>
+        (string.IsNullOrEmpty(box.Top) || box.Top == CssConstants.Auto)
+        && (string.IsNullOrEmpty(box.Left) || box.Left == CssConstants.Auto);
 
     private static void AdjustAbsolutePosition(CssBox box, double left, double top)
     {
