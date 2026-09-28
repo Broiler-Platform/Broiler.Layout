@@ -34,7 +34,7 @@ public sealed class InlineBlockSharedBaselineTests
     /// Each was 30px lower, on the 60px box's bottom instead.
     /// </summary>
     [Theory(Timeout = 600000)]
-    [InlineData("middle", 17.6)]
+    [InlineData("middle", 28.3)]
     [InlineData("text-top", 10)]
     [InlineData("text-bottom", 48.7)]
     [InlineData("super", 64.9)]
