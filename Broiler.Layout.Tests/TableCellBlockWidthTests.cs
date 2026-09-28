@@ -23,10 +23,8 @@ namespace Broiler.Layout.Tests;
 /// browsers make the table 400px wide.
 /// </para>
 /// <para>
-/// A cell spanning columns is left to its words, as before. The engine puts what a spanning cell's
-/// words need beyond the columns before its last on the last one alone; with its blocks counted
-/// too, a 400px block in a cell spanning two columns made the second column 400px wide, where
-/// browsers share the block out over both.
+/// A cell spanning columns shares its widths out over them, its blocks with the rest; see
+/// <see cref="SpanningCellWidthTests"/>.
 /// </para>
 /// <para>
 /// Each table here is in a 500px block and has no border spacing; words are 16px tall and 8px wide

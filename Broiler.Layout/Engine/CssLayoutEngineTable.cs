@@ -30,6 +30,11 @@ internal sealed class CssLayoutEngineTable
 
     private double[] _columnWidths;
     private double[] _columnMinWidths;
+    private double[] _columnMaxWidths = [];
+
+    // The widths the columns were given by their cells or their <col>s, NaN for the others, as
+    // CalculateCountAndWidth found them before the others were given theirs.
+    private double[] _specifiedColumnWidths = [];
 
     private CssLayoutEngineTable(CssBox tableBox) => _tableBox = tableBox;
 
@@ -562,6 +567,8 @@ internal sealed class CssLayoutEngineTable
                 }
             }
         }
+
+        _specifiedColumnWidths = (double[])_columnWidths.Clone();
 
         return availCellSpace;
     }
@@ -1232,19 +1239,6 @@ internal sealed class CssLayoutEngineTable
         return false;
     }
 
-    private double GetSpannedMinWidth(CssBox row, int realcolindex, int colspan)
-    {
-        double w = 0f;
-
-        for (int i = realcolindex; i < row.Boxes.Count || i < realcolindex + colspan - 1; i++)
-        {
-            if (i < GetColumnMinWidths().Length)
-                w += GetColumnMinWidths()[i];
-        }
-
-        return w;
-    }
-
     // CSS2.1 §17.6.2.1 border-conflict-resolution priority of border styles
     // (most → least): hidden (handled separately) > double > solid > dashed >
     // dotted > ridge > outset > groove > inset > none.
@@ -1644,36 +1638,19 @@ internal sealed class CssLayoutEngineTable
 
     private void GetColumnsMinMaxWidthByContent(bool onlyNans, out double[] minFullWidths, out double[] maxFullWidths)
     {
-        maxFullWidths = new double[_columnWidths.Length];
-        minFullWidths = new double[_columnWidths.Length];
+        MeasureColumns();
 
-        foreach (CssBox row in _allRows)
+        minFullWidths = (double[])_columnMinWidths.Clone();
+        maxFullWidths = (double[])_columnMaxWidths.Clone();
+
+        if (!onlyNans)
+            return;
+
+        // The columns given a width already keep it.
+        for (int i = 0; i < _columnWidths.Length; i++)
         {
-            for (int i = 0; i < row.Boxes.Count; i++)
-            {
-                int col = GetCellRealColumnIndex(row, row.Boxes[i]);
-                col = _columnWidths.Length > col ? col : _columnWidths.Length - 1;
-
-                if (onlyNans && !double.IsNaN(_columnWidths[col]) || i >= row.Boxes.Count)
-                    continue;
-
-                row.Boxes[i].GetMinMaxWidth(out double minWidth, out double maxWidth);
-
-                var colSpan = GetColSpan(row.Boxes[i]);
-                minWidth /= colSpan;
-                maxWidth /= colSpan;
-
-                for (int j = 0; j < colSpan; j++)
-                {
-                    var colIndex = col + j;
-
-                    if (colIndex < minFullWidths.Length)
-                        minFullWidths[colIndex] = Math.Max(minFullWidths[colIndex], minWidth);
-
-                    if (colIndex < maxFullWidths.Length)
-                        maxFullWidths[colIndex] = Math.Max(maxFullWidths[colIndex], maxWidth);
-                }
-            }
+            if (!double.IsNaN(_columnWidths[i]))
+                minFullWidths[i] = maxFullWidths[i] = 0;
         }
     }
 
@@ -1708,47 +1685,188 @@ internal sealed class CssLayoutEngineTable
 
     private double[] GetColumnMinWidths()
     {
-        if (_columnMinWidths != null)
-            return _columnMinWidths;
+        MeasureColumns();
+        return _columnMinWidths;
+    }
 
-        _columnMinWidths = new double[_columnWidths.Length];
+    /// <summary>
+    /// Measures each column's minimum and maximum content widths from the cells in it, once a
+    /// layout.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS 2.1 §17.5.2.2: a column is at least as wide as its cells' minimum content width, the
+    /// width their content needs not to overflow them, and a cell spanning columns needs them, with
+    /// the spacing between them, to be as wide as it together. The cells in one column are measured
+    /// first. Then each cell spanning columns, those spanning fewer first, shares out over its
+    /// columns what they lack of its widths (see <see cref="ShareOut"/>).
+    /// </para>
+    /// <para>
+    /// A spanning cell's minimum went on its last column alone, less what the columns before it had
+    /// so far, and was its longest word alone; its maximum was split evenly over its columns. In a
+    /// table with <c>width: 100px</c>, a cell spanning two columns and holding a 40-letter word,
+    /// over a row of two cells holding an x, made the columns 50px and 320px wide, where browsers
+    /// make each 160px; with a 400px block in it the table stayed 100px wide, and the block ran out
+    /// of it.
+    /// </para>
+    /// </remarks>
+    private void MeasureColumns()
+    {
+        if (_columnMinWidths != null)
+            return;
+
+        int count = _columnWidths.Length;
+        var mins = new double[count];
+        var maxes = new double[count];
+        var spanning = new List<(CssBox Cell, int First, int Last)>();
+        int widestSpan = 0;
 
         foreach (CssBox row in _allRows)
         {
             foreach (CssBox cell in row.Boxes)
             {
-                int colspan = GetColSpan(cell);
-                int col = GetCellRealColumnIndex(row, cell);
-                int affectcol = Math.Min(col + colspan, _columnMinWidths.Length) - 1;
+                int first = GetCellRealColumnIndex(row, cell);
+                int last = Math.Min(first + GetColSpan(cell), count) - 1;
 
-                if (colspan > 1)
+                if (first > last)
+                    continue;
+
+                if (first < last)
                 {
-                    // A cell spanning columns puts what its longest word needs beyond the columns
-                    // before its last on the last one alone. Its blocks are left out of that: a
-                    // 400px block in a cell spanning two columns made the second column 400px wide,
-                    // where browsers share the block out over both.
-                    double spannedwidth = GetSpannedMinWidth(row, col, colspan) + (colspan - 1) * GetHorizontalSpacing();
-                    _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cell.GetMinimumWidth() - spannedwidth);
+                    spanning.Add((cell, first, last));
+                    widestSpan = Math.Max(widestSpan, last - first);
                     continue;
                 }
 
-                // CSS 2.1 §17.5.2.2: a column is at least as wide as its cells' minimum content
-                // width, the width their content needs not to overflow them. GetMinimumWidth is the
-                // longest word alone, so a block with a width of its own counted for nothing: a
-                // table with `width: 100px` stayed 100px wide around a 400px block in a cell, and the
-                // block ran out of it. The min-content width counts the block too.
-                cell.GetMinMaxWidth(out double minContentWidth, out _);
-                double cellMinWidth = Math.Max(cell.GetMinimumWidth(), double.IsNaN(minContentWidth) ? 0 : minContentWidth);
-
-                // The whole of it: less the minimums the columns from this one to its row's end had
-                // from the rows above, a block or a long word under a row of words left its column
-                // short of it.
-                _columnMinWidths[affectcol] = Math.Max(_columnMinWidths[affectcol], cellMinWidth);
+                MeasureCell(cell, out double min, out double max);
+                mins[first] = Math.Max(mins[first], min);
+                maxes[first] = Math.Max(maxes[first], max);
             }
         }
 
-        return _columnMinWidths;
+        // A column given a width of its own is that wide at most, unless its cells need more.
+        for (int i = 0; i < count; i++)
+            maxes[i] = Math.Max(mins[i], IsSpecified(i) ? _specifiedColumnWidths[i] : maxes[i]);
+
+        for (int span = 1; span <= widestSpan; span++)
+        {
+            foreach (var (cell, first, last) in spanning)
+            {
+                if (last - first != span)
+                    continue;
+
+                MeasureCell(cell, out double min, out double max);
+                double spacing = span * GetHorizontalSpacing();
+
+                ShareOut(min - spacing, first, last, mins, maxes);
+
+                for (int i = first; i <= last; i++)
+                    maxes[i] = Math.Max(maxes[i], mins[i]);
+
+                ShareOut(max - spacing, first, last, maxes, maxes);
+            }
+        }
+
+        _columnMinWidths = mins;
+        _columnMaxWidths = maxes;
     }
+
+    /// <summary>
+    /// A cell's minimum content width, and its maximum, at least as wide.
+    /// </summary>
+    /// <remarks>
+    /// The minimum is the min-content width, which <see cref="CssBox.GetMinMaxWidth"/> measures with
+    /// the widths of the blocks in the cell, or its longest word where that is wider.
+    /// <see cref="CssBox.GetMinimumWidth"/> is the longest word alone, so a block with a width of
+    /// its own counted for nothing on its own: a table with <c>width: 100px</c> stayed 100px wide
+    /// around a 400px block in a cell, and the block ran out of it.
+    /// </remarks>
+    private static void MeasureCell(CssBox cell, out double min, out double max)
+    {
+        cell.GetMinMaxWidth(out double minContentWidth, out double maxContentWidth);
+        min = Math.Max(cell.GetMinimumWidth(), double.IsNaN(minContentWidth) ? 0 : minContentWidth);
+        max = Math.Max(min, double.IsNaN(maxContentWidth) ? 0 : maxContentWidth);
+    }
+
+    /// <summary>
+    /// Widens the columns <paramref name="first"/> to <paramref name="last"/>, as measured in
+    /// <paramref name="widths"/>, until together they are <paramref name="width"/> wide. The width
+    /// is shared out as CSS Tables 3 shares a table's width out over its columns: first the columns
+    /// given a width of their own, up to it, then the others, up to their maximums in
+    /// <paramref name="maxes"/>, each in proportion to what it has yet to take; past that, the
+    /// columns without a width of their own, in proportion to their maximums.
+    /// </summary>
+    private void ShareOut(double width, int first, int last, double[] widths, double[] maxes)
+    {
+        double current = 0, specifiedGuess = 0, maxGuess = 0;
+
+        for (int i = first; i <= last; i++)
+        {
+            current += widths[i];
+            specifiedGuess += IsSpecified(i) ? maxes[i] : widths[i];
+            maxGuess += maxes[i];
+        }
+
+        if (width <= current)
+            return;
+
+        double[] excessShares = width > maxGuess ? GetExcessShares(first, last, maxes) : [];
+
+        for (int i = first; i <= last; i++)
+        {
+            double share;
+
+            if (width <= specifiedGuess)
+                share = IsSpecified(i) ? widths[i] + (maxes[i] - widths[i]) * (width - current) / (specifiedGuess - current) : widths[i];
+            else if (width <= maxGuess)
+                share = IsSpecified(i) ? maxes[i] : widths[i] + (maxes[i] - widths[i]) * (width - specifiedGuess) / (maxGuess - specifiedGuess);
+            else
+                share = maxes[i] + (width - maxGuess) * excessShares[i - first];
+
+            widths[i] = Math.Max(widths[i], share);
+        }
+    }
+
+    /// <summary>
+    /// The shares of the columns <paramref name="first"/> to <paramref name="last"/> in what a
+    /// spanning cell needs beyond their maximums: the columns without a width of their own take
+    /// it, in proportion to their maximums, or evenly if none has any content; with no such
+    /// column, the others take it likewise.
+    /// </summary>
+    private double[] GetExcessShares(int first, int last, double[] maxes)
+    {
+        var shares = new double[last - first + 1];
+
+        foreach (bool specified in new[] { false, true })
+        {
+            double sum = 0;
+            int columns = 0;
+
+            for (int i = first; i <= last; i++)
+            {
+                if (IsSpecified(i) != specified)
+                    continue;
+
+                sum += maxes[i];
+                columns++;
+            }
+
+            if (columns == 0)
+                continue;
+
+            for (int i = first; i <= last; i++)
+            {
+                if (IsSpecified(i) == specified)
+                    shares[i - first] = sum > 0 ? maxes[i] / sum : 1.0 / columns;
+            }
+
+            break;
+        }
+
+        return shares;
+    }
+
+    private bool IsSpecified(int column) => !double.IsNaN(_specifiedColumnWidths[column]);
 
     private double GetHorizontalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? -1f : _tableBox.ActualBorderSpacingHorizontal;
     private static double GetHorizontalSpacing(CssBox box) => box.BorderCollapse == CssConstants.Collapse ? -1f : box.ActualBorderSpacingHorizontal;
