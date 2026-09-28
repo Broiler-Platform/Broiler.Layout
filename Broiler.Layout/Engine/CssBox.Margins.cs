@@ -353,7 +353,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (child.Position == CssConstants.Relative)
                 childBottom -= CssBoxHelper.GetRelativeOffsetY(child);
 
-            maxChildBottom = Math.Max(maxChildBottom, childBottom);
+            // An inline box is laid out in this box's lines, whose extent CreateLineBoxes has
+            // already made this box's height, and it has no bottom of its own: its Location is not
+            // kept by line layout, and OffsetTop moves it with every shift of the boxes around it.
+            // Reading it gave a flex item holding one word, which a row centred 33.5px down, the
+            // bottom of a text box shifted there twice, 67px down.
+            if (child.Display != CssConstants.Inline)
+                maxChildBottom = Math.Max(maxChildBottom, childBottom);
+
             lastInFlowChild = child;
         }
 
