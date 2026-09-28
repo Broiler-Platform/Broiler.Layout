@@ -1535,7 +1535,15 @@ internal static class CssLayoutEngine
             foreach (var child in b.Boxes)
                 child.PerformLayout(g);
 
-            double childMaxBottom = b.Location.Y;
+            // An inline-block, and a flex or grid item, establishes a block formatting context
+            // (CSS2.1 §9.4.1, CSS Flexbox §3), so its content box ends at the bottom margin edge of
+            // its lowest in-flow child: that margin cannot collapse through it (§8.3.1), including a
+            // margin that has collapsed through the child from the child's own last child. Its own
+            // padding and border follow (§10.6.7). This branch ended at the child's border box: a
+            // `display: inline-block; padding: 40px` box holding a 20px block was 60px tall where
+            // browsers make it 100, and DuckDuckGo's hero section (`padding: 40px 24px`, an h1 and
+            // a p) was 56px short in any column that did not stretch it.
+            double childMaxBottom = b.Location.Y + b.ActualBorderTopWidth + b.ActualPaddingTop;
 
             foreach (var child in b.Boxes)
             {
@@ -1550,10 +1558,24 @@ internal static class CssLayoutEngine
                 if (child.Position is CssConstants.Absolute or CssConstants.Fixed)
                     continue;
 
-                childMaxBottom = Math.Max(childMaxBottom, child.ActualBottom);
+                if (child.Display == CssConstants.None)
+                    continue;
+
+                // CSS2.1 §9.4.3: a relative offset moves the child visually, not in the flow.
+                double childBottom = child.ActualBottom;
+                if (child.Position == CssConstants.Relative)
+                    childBottom -= CssBoxHelper.GetRelativeOffsetY(child);
+
+                // A float's margins never collapse; an in-flow child's bottom margin is the one
+                // that has collapsed through it from its own last child, if any has.
+                double childMarginBottom = child.Float != CssConstants.None
+                    ? child.ActualMarginBottom
+                    : CssBoxHelper.GetPropagatedMarginBottom(child);
+
+                childMaxBottom = Math.Max(childMaxBottom, childBottom + childMarginBottom);
             }
 
-            b.ActualBottom = childMaxBottom;
+            b.ActualBottom = childMaxBottom + b.ActualPaddingBottom + b.ActualBorderBottomWidth;
         }
 
         // --- Compute height ---
