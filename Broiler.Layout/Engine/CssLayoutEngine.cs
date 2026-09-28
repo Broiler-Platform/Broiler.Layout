@@ -3373,8 +3373,19 @@ internal static class CssLayoutEngine
         // on the strut's baseline from the flow, below the line's top, and alone on its line it
         // put the baseline as far below again: at 16px/20px, a 10px image was 9.7px down its line
         // and the line 29.7px tall, where browsers put it 5px down a 20px line.
-        if ((lineTop < double.MaxValue || inlineBoxTop < double.MaxValue) && lineBox.FlowTop is double flowTop)
+        //
+        // A line holding only boxes aligned `top` or `bottom` has its strut as well, and they are
+        // aligned to the line box it makes. It had none, and a 10px box aligned `bottom` alone in
+        // 16px/20px text stood at the top of its line, where browsers put it 10px down.
+        bool holdsLineBoxAligned = false;
+        foreach (var box in topBottomBoxes)
+            holdsLineBoxAligned |= !IsInAbsposSubtree(box, lineBox.OwnerBox);
+
+        if ((lineTop < double.MaxValue || inlineBoxTop < double.MaxValue || holdsLineBoxAligned)
+            && lineBox.FlowTop is double flowTop)
+        {
             lineTop = Math.Min(lineTop, flowTop);
+        }
 
         if (lineTop == double.MaxValue)
             lineTop = inlineBoxTop;
