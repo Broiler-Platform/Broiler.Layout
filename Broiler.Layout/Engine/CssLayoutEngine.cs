@@ -2869,6 +2869,25 @@ internal static class CssLayoutEngine
     private static bool IsBaselineAligned(CssBox box) =>
         string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline;
 
+    /// <summary>
+    /// How far <c>vertical-align: sub</c> lowers the box's baseline below its parent's: a fifth of
+    /// the parent's font size, and a pixel, as Chromium has it. CSS 2.1 §10.8.1 leaves "the proper
+    /// position for subscripts of the parent's box" to the user agent, but it is the parent's font
+    /// that sets it, not the box's own height: half the height of the box lowered a 60px
+    /// inline-block by 30px, where browsers lower it by about 4px.
+    /// </summary>
+    private static double SubscriptShift(CssBox box) => ParentEmHeight(box) / 5 + 1;
+
+    /// <summary>
+    /// How far <c>vertical-align: super</c> raises the box's baseline above its parent's: a third
+    /// of the parent's font size, and a pixel, as Chromium has it. A fifth of the box's own height
+    /// raised a 10px inline-block by 2px, where browsers raise it by about 6px.
+    /// </summary>
+    private static double SuperscriptShift(CssBox box) => ParentEmHeight(box) / 3 + 1;
+
+    /// <summary>The font size, in CSS pixels, of the box's parent, or of the box if it has none.</summary>
+    private static double ParentEmHeight(CssBox box) => (box.ParentBox ?? box).GetEmHeight();
+
     private static void ApplyVerticalAlignment(CssLineBox lineBox)
     {
         // CSS 2.1 §10.8: The baseline is where text sits, approximated as
@@ -2988,11 +3007,11 @@ internal static class CssLayoutEngine
             switch (box.VerticalAlign)
             {
                 case CssConstants.Sub:
-                    lineBox.SetBaseLine(box, baseline - boxAscent + lineBox.Rectangles[box].Height * .5f);
+                    lineBox.SetBaseLine(box, baseline - boxAscent + SubscriptShift(box));
                     break;
 
                 case CssConstants.Super:
-                    lineBox.SetBaseLine(box, baseline - boxAscent - lineBox.Rectangles[box].Height * .2f);
+                    lineBox.SetBaseLine(box, baseline - boxAscent - SuperscriptShift(box));
                     break;
 
                 case CssConstants.TextTop:
