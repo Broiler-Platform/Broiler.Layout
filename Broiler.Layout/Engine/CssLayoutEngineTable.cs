@@ -1630,7 +1630,13 @@ internal sealed class CssLayoutEngineTable
         }
         else
         {
-            return TableParent.AvailableWidth;
+            // CSS2.1 §9.5: a table placed beside floats has the space they leave it, as a block is
+            // narrowed to it. The algorithm took its container's whole width: beside a 100px float
+            // in 1024px, a table with an auto width and a long line of text came out 1024px wide
+            // and ran 100px past the edge, where browsers make it 924px wide and wrap the text.
+            return _tableBox.WidthBesideFloats is double space
+                ? Math.Min(TableParent.AvailableWidth, space)
+                : TableParent.AvailableWidth;
         }
     }
 
