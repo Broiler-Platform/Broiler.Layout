@@ -444,7 +444,13 @@ internal static class CssLayoutEngine
                 // the baseline as the strut's do. Every block here is of the anonymous kind, the
                 // ones the page's elements make too, so a line holding an inline-block of text was
                 // a strut's descent taller than browsers make it.
+                //
+                // So is a box not aligned to the baseline, as an image is below: the strut's descent
+                // lies below the baseline, and a box aligned `middle`, `top`, by a length or any
+                // other way does not stand on it. An empty 30px inline-block aligned middle made a
+                // 34px line of 20px text, where browsers make it 30px.
                 if (blockBox.Kind == BoxKind.Anonymous
+                    && IsBaselineAligned(rect.Key)
                     && ((rect.Key.Display == CssConstants.InlineBlock && LastLineBaseline(rect.Key) == null)
                         || rect.Key.Display is "inline-flex" or "inline-grid"))
                 {
