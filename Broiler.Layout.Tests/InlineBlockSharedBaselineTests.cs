@@ -13,10 +13,10 @@ namespace Broiler.Layout.Tests;
 /// <remarks>
 /// <para>
 /// Empty inline-blocks have their bottom margin edge for a baseline, and this engine stands the ones
-/// aligned to the baseline on the lowest bottom among them. It took that bottom from every such box
-/// not aligned <c>top</c> or <c>bottom</c>, so one aligned <c>middle</c>, <c>text-top</c>,
-/// <c>super</c> or by a length set it with the bottom the flow left it, and pushed the boxes on the
-/// baseline down to it.
+/// aligned to the baseline on the line's baseline, which the lowest of their bottoms can push down.
+/// It once took that bottom from every such box not aligned <c>top</c> or <c>bottom</c>, so one
+/// aligned <c>middle</c>, <c>text-top</c>, <c>super</c> or by a length set it with the bottom the
+/// flow left it, and pushed the boxes on the baseline down to it.
 /// </para>
 /// <para>
 /// Each line here holds an empty 8×60px inline-block aligned as given, then an 8×20px and an 8×30px
@@ -34,12 +34,12 @@ public sealed class InlineBlockSharedBaselineTests
     /// Each was 30px lower, on the 60px box's bottom instead.
     /// </summary>
     [Theory(Timeout = 600000)]
-    [InlineData("middle", 31.2)]
+    [InlineData("middle", 14)]
     [InlineData("text-top", 10)]
-    [InlineData("text-bottom", 54)]
-    [InlineData("super", 69.2)]
-    [InlineData("sub", 27.2)]
-    [InlineData("10px", 67.2)]
+    [InlineData("text-bottom", 36.8)]
+    [InlineData("super", 52)]
+    [InlineData("sub", 10)]
+    [InlineData("10px", 50)]
     public void Boxes_On_The_Baseline_Stand_On_Their_Own_Bottom(string verticalAlign, float shortTop)
     {
         var (block, shortBox, other) = Lay(verticalAlign);

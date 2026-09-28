@@ -2470,6 +2470,11 @@ internal static class CssLayoutEngine
         if (box.Display != CssConstants.InlineBlock || box.UsesBottomMarginEdgeBaseline)
             return null;
 
+        // An inline-block holding words of its own, as a ::before with display: inline-block does,
+        // lays them out on its parent's line, and their baseline is its baseline.
+        if (box.Words.Count > 0)
+            return WordsBaseline(box.Words, box);
+
         CssLineBox? last = null;
         double lastBottom = double.MinValue;
         FindLastLine(box, box, ref last, ref lastBottom);
@@ -2483,12 +2488,22 @@ internal static class CssLayoutEngine
                 return null;
         }
 
+        return WordsBaseline(last.Words, box);
+    }
+
+    /// <summary>
+    /// Where the words aligned to the baseline among <paramref name="words"/> stand, a word of text
+    /// its font's ascent below its top and an image at its bottom; where any of them does when none
+    /// is aligned to it; or null when there are no words in the flow of <paramref name="root"/>.
+    /// </summary>
+    private static double? WordsBaseline(IEnumerable<CssRect> words, CssBox root)
+    {
         double aligned = double.MinValue;
         double any = double.MinValue;
 
-        foreach (var word in last.Words)
+        foreach (var word in words)
         {
-            if (word.OwnerBox == null || IsInAbsposSubtree(word.OwnerBox, box))
+            if (word.OwnerBox == null || IsInAbsposSubtree(word.OwnerBox, root))
                 continue;
 
             double wordBaseline = word.Top + (word.IsImage
@@ -2631,54 +2646,42 @@ internal static class CssLayoutEngine
         // the image, so the strut contributed nothing and the image's own bottom became the
         // baseline.
         //
-        // An inline-block with a line of text in it, aligned to the baseline, counts as the text
-        // does: its last line's baseline is its baseline. Where it stands in the flow, at the line's
-        // top, its baseline can only be at or below the strut's, so it can only move the line's
-        // baseline down, and the text beside it with it, never raise the box above the line. One
-        // raised or lowered from the baseline is left out, as every inline-block was, and placed
-        // from the baseline the rest of the line sets.
+        // An inline-block aligned to the baseline counts as well. One with a line of text in it
+        // counts as the text does: its last line's baseline is its baseline. One whose baseline is
+        // its bottom margin edge (CssBox.UsesBottomMarginEdgeBaseline) counts as an image does,
+        // with that edge. Where either stands in the flow, at the line's top, its baseline can only
+        // be at or below the strut's, so it can only move the line's baseline down, and the text
+        // beside it with it, never raise the box above the line. One raised or lowered from the
+        // baseline is left out, as every inline-block was, and placed from the baseline the rest of
+        // the line sets.
         foreach (var box in lineBox.Rectangles.Keys)
         {
-            if ((box.Display != CssConstants.InlineBlock
-                    || ((string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline)
-                        && LastLineBaseline(box) != null))
-                && !topBottomBoxes.Contains(box)
-                && !IsAlignedToParentFontMetrics(box.VerticalAlign))
+            if (topBottomBoxes.Contains(box) || IsAlignedToParentFontMetrics(box.VerticalAlign))
+                continue;
+
+            bool bottomEdge = box.UsesBottomMarginEdgeBaseline;
+            if (box.Display == CssConstants.InlineBlock
+                && (!IsBaselineAligned(box) || (!bottomEdge && LastLineBaseline(box) == null)))
             {
-                double boxBaseline = lineBox.Rectangles[box].Top + BaselineAscentOf(box, lineBox);
-                baseline = Math.Max(baseline, boxBaseline);
+                continue;
             }
+
+            double boxBaseline = lineBox.Rectangles[box].Top + BaselineAscentOf(box, lineBox)
+                + (bottomEdge ? box.ActualMarginBottom : 0);
+            baseline = Math.Max(baseline, boxBaseline);
         }
 
-        // CSS2.1 §10.8.1: an atomic inline-block's baseline is its bottom margin edge, so two of
-        // different heights on one line stand on a shared baseline — the shorter is pushed down
-        // until their bottoms are flush. They were left where the flow put them, at the top of the
-        // line, so they came out top-aligned instead; an inline <svg> beside a taller one is the
-        // case this was found through, and a plain empty inline-block behaves identically.
-        //
-        // The shared bottom is taken from the atomic inlines themselves rather than from the
-        // line's baseline. The strut's baseline is the spec's answer, but this engine computes it
-        // without the half-leading that `line-height` contributes, so on a line whose strut is the
-        // taller of the two it sits well below the text and would push an atomic inline that far
-        // down the line — where today it is merely left at the top. Aligning them to each other
-        // fixes the case that is wrong without resting on a number that is not yet right: it can
-        // only ever move a box down onto a taller neighbour, and a line holding one atomic inline
-        // (or none) is left exactly as it was.
+        // CSS2.1 §10.8.1: an atomic inline-block's baseline is its bottom margin edge, so one aligned
+        // to the baseline stands on the line's baseline with that edge, as an image does, and the
+        // text beside it stands level with it: two of different heights have their bottoms flush,
+        // and the words beside them stand on the same line as their bottoms. They were once left
+        // where the flow put them, at the top of the line; then stood on the lowest bottom among
+        // them, with the text left at the top, because the strut's baseline, measured with a font
+        // height a third too large, sat well below the text and would have pushed them down past
+        // it. With the font's height taken as it is, the line's baseline is where the text stands.
         //
         // It is the *margin* box that stands on the baseline, and the rectangle here is the border
-        // box, so the bottom margin is added on both sides of the comparison.
-        //
-        // Only the boxes that stand on the baseline say where it is. One aligned `middle`,
-        // `text-top`, `super`, by a length or any other way stands somewhere else, and where the
-        // flow left its bottom says nothing about the baseline: a 60px inline-block aligned
-        // `middle` beside a 20px one aligned to the baseline pushed the 20px one 44px down the
-        // line, to its own bottom, where browsers put it about 14px down.
-        double atomicInlineBottom = double.MinValue;
-        foreach (var kvp in lineBox.Rectangles)
-        {
-            if (kvp.Key.UsesBottomMarginEdgeBaseline && IsBaselineAligned(kvp.Key))
-                atomicInlineBottom = Math.Max(atomicInlineBottom, kvp.Value.Bottom + kvp.Key.ActualMarginBottom);
-        }
+        // box, so the bottom margin is added on both sides.
 
         // --- Phase 1: Position all non-top/bottom boxes ---
         var boxes = new List<CssBox>(lineBox.Rectangles.Keys);
@@ -2689,10 +2692,10 @@ internal static class CssLayoutEngine
 
             if (IsBaselineAligned(box)
                 && box.UsesBottomMarginEdgeBaseline
-                && atomicInlineBottom > double.MinValue)
+                && baseline > float.MinValue)
             {
                 lineBox.SetBaseLine(box,
-                    atomicInlineBottom - box.ActualMarginBottom - lineBox.Rectangles[box].Height);
+                    baseline - box.ActualMarginBottom - lineBox.Rectangles[box].Height);
                 continue;
             }
 

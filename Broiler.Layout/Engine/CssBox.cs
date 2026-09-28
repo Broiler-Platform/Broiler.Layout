@@ -386,6 +386,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </remarks>
     private static bool HasInFlowLineContent(CssBox box)
     {
+        // Words the box holds itself are laid out on its parent's line, as a ::before with
+        // display: inline-block has its text.
+        if (box.Words.Count > 0 && !box.IsImage)
+            return true;
+
         foreach (var line in box.LineBoxes)
         {
             if (line.Words.Count > 0)
