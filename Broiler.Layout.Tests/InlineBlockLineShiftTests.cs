@@ -68,17 +68,20 @@ public sealed class InlineBlockLineShiftTests
 
     /// <summary>
     /// A move of the lines moves the inline-block's content once: an inline-block inside the one
-    /// that is moved stays at the top of its container, and that container's content at its top.
+    /// that is moved stands where it stands in its container on lines that do not move, and that
+    /// container's content at its top.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void Content_Nested_In_An_Inline_Block_Moves_Once()
     {
+        var (_, still, stillContent) = Lay("inline-block", link: null, _ => { }, nestInlineBlock: true);
         var (_, box, content) = Lay("inline-block", link: null, _ => { }, raisedBefore: true, nestInlineBlock: true);
 
         var block = (CssBox)content;
         var nested = block.ParentBox!;
-        Assert.Equal(box.Location.Y, nested.Location.Y, 1);
-        Assert.Equal(box.Location.Y, block.Location.Y, 1);
+        var stillNested = ((CssBox)stillContent).ParentBox!;
+        Assert.Equal(stillNested.Location.Y - still.Location.Y, nested.Location.Y - box.Location.Y, 1);
+        Assert.Equal(nested.Location.Y, block.Location.Y, 1);
         Assert.Equal(60, box.ActualBottom - box.Location.Y, 1);
     }
 
@@ -100,9 +103,7 @@ public sealed class InlineBlockLineShiftTests
     /// inline-block that holds a word of its own, as a <c>::before</c> with
     /// <c>display: inline-block</c> does, has it on the block's line, and when a raised box moves
     /// the lines it moves as far as the link's word beside it. The raised box is aligned to the
-    /// bottom of the line, which it reaches 44px above: one aligned to the middle would set where
-    /// the inline-block stands, since this engine stands an inline-block on the lowest bottom of the
-    /// inline-blocks beside it, whatever their alignment.
+    /// bottom of the line, which it reaches 44px above.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void Control_An_Inline_Block_Holding_Its_Own_Word_Moves_It_Once()
