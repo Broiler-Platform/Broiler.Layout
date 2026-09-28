@@ -803,6 +803,12 @@ internal sealed class CssLayoutEngineTable
     /// </summary>
     private void EnforceMinimumSize()
     {
+        if (_widthSpecified)
+        {
+            WidenColumnsToMinimumsWithinWidth();
+            return;
+        }
+
         foreach (CssBox row in _allRows)
         {
             foreach (CssBox cell in row.Boxes)
@@ -821,6 +827,69 @@ internal sealed class CssLayoutEngineTable
                     _columnWidths[col + 1] -= diff;
             }
         }
+    }
+
+    /// <summary>
+    /// CSS 2.1 §17.5.2.2: a table with a width of its own is that wide, or as wide as its columns'
+    /// minimums if they need more. Each column narrower than its minimum is widened to it, and the
+    /// columns wider than theirs give that room back, each in proportion to what it can spare: the
+    /// columns without a width of their own first, as CSS Tables 3 narrows a table's columns, then
+    /// the others. The table grows only by what they cannot spare.
+    /// </summary>
+    /// <remarks>
+    /// Widening a column took the room from the next column alone, so the table grew whenever that
+    /// column had none to spare: in a 1024px page, a table with <c>width: 100%</c> holding text and
+    /// a 600px image was 1112px wide, the text's column as wide as before, where browsers keep the
+    /// table 1024px wide and give the text's column 424px.
+    /// </remarks>
+    private void WidenColumnsToMinimumsWithinWidth()
+    {
+        double[] minWidths = GetColumnMinWidths();
+        double needed = 0;
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (_columnWidths[i] < minWidths[i])
+            {
+                needed += minWidths[i] - _columnWidths[i];
+                _columnWidths[i] = minWidths[i];
+            }
+        }
+
+        needed = GiveBackRoom(needed, minWidths, specified: false);
+        GiveBackRoom(needed, minWidths, specified: true);
+    }
+
+    /// <summary>
+    /// Narrows the columns with a width of their own, or those without, that are wider than their
+    /// minimums, each in proportion to what it can spare, by <paramref name="needed"/> together or
+    /// as much as they can spare, and returns what they could not.
+    /// </summary>
+    private double GiveBackRoom(double needed, double[] minWidths, bool specified)
+    {
+        if (needed <= 0)
+            return 0;
+
+        double spare = 0;
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (IsSpecified(i) == specified && _columnWidths[i] > minWidths[i])
+                spare += _columnWidths[i] - minWidths[i];
+        }
+
+        if (spare <= 0)
+            return needed;
+
+        double given = Math.Min(1, needed / spare);
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (IsSpecified(i) == specified && _columnWidths[i] > minWidths[i])
+                _columnWidths[i] -= (_columnWidths[i] - minWidths[i]) * given;
+        }
+
+        return Math.Max(0, needed - spare);
     }
 
     private void LayoutCells(ILayoutEnvironment g)
