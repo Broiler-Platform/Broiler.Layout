@@ -184,7 +184,7 @@ internal static partial class SvgRenderer
     /// <summary>Distance from the top of the ascent box to the baseline, in CSS pixels.</summary>
     private static double AscentOf(ILayoutFont font, float fontSizePx)
         => font != null
-            ? font.Height * CssMetrics.PtToPx * TypicalAscentRatio
+            ? font.Height * TypicalAscentRatio
             : fontSizePx * TypicalAscentRatio;
 
     /// <summary>

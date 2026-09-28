@@ -34,12 +34,12 @@ public sealed class InlineBlockSharedBaselineTests
     /// Each was 30px lower, on the 60px box's bottom instead.
     /// </summary>
     [Theory(Timeout = 600000)]
-    [InlineData("middle", 28.3)]
+    [InlineData("middle", 31.2)]
     [InlineData("text-top", 10)]
-    [InlineData("text-bottom", 48.7)]
-    [InlineData("super", 64.9)]
-    [InlineData("sub", 22.9)]
-    [InlineData("10px", 62.9)]
+    [InlineData("text-bottom", 54)]
+    [InlineData("super", 69.2)]
+    [InlineData("sub", 27.2)]
+    [InlineData("10px", 67.2)]
     public void Boxes_On_The_Baseline_Stand_On_Their_Own_Bottom(string verticalAlign, float shortTop)
     {
         var (block, shortBox, other) = Lay(verticalAlign);
