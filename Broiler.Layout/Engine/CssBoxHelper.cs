@@ -986,6 +986,6 @@ internal static class CssBoxHelper
         CollectEmptyBoxMargins(box, ref maxPos, ref maxNeg);
 
         double collapsed = maxPos + maxNeg;
-        return collapsed - box.CollapsedMarginTop;
+        return collapsed - box.MarginSpentAboveTop;
     }
 }
