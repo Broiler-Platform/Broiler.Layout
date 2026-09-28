@@ -142,8 +142,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // inline-block, or the inline-block itself) is already laid out by the
         // time this block runs.  Harmless once the submodule patch lands (the
         // <br> then carries no .95em height to drop).
+        //
+        // An inline element holding the line's text is misclassified the same way: the text is in
+        // the element's children, not in the element, so <a>one</a><br>two was three lines, the
+        // middle one empty and 15.2px tall, where browsers make it two. The <br> ends the line of
+        // any inline content that holds text or an image, so its height is dropped there too.
+        var previous = LayoutBoxUtils.GetPreviousSibling(this);
+
         if (IsBrElement && !string.IsNullOrEmpty(Height) && Height != CssConstants.Auto
-            && CssLayoutEngine.EndsWithAtomicInlineBlock(LayoutBoxUtils.GetPreviousSibling(this)))
+            && (CssLayoutEngine.EndsWithAtomicInlineBlock(previous) || CssLayoutEngine.HoldsInlineContent(previous)))
         {
             Height = CssConstants.Auto;
         }
