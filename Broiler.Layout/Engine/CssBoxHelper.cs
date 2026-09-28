@@ -789,6 +789,11 @@ internal static class CssBoxHelper
         return box.Float != CssConstants.None
             || box.Display == CssConstants.InlineBlock
             || box.Display == CssConstants.TableCell
+            // CSS2.1 §9.4.1 names table captions with table cells. A caption's first child's
+            // top margin collapsed through the caption's top, and the table put the caption
+            // back where it belongs and the child with it: <caption><p style="margin-top:
+            // 16px"> lost the 16px, where browsers keep it inside the caption.
+            || box.Display == CssConstants.TableCaption
             // CSS Display 3 §2.5: `flow-root` is exactly "block box that
             // establishes a new block formatting context".
             || box.Display == "flow-root"
