@@ -60,7 +60,15 @@ internal sealed class CssLineBox
         double leftspacing = box.ActualBorderLeftWidth + box.ActualPaddingLeft;
         double rightspacing = box.ActualBorderRightWidth + box.ActualPaddingRight;
         double topspacing = box.ActualBorderTopWidth + box.ActualPaddingTop;
-        double bottomspacing = box.ActualBorderBottomWidth + box.ActualPaddingTop;
+        double bottomspacing = box.ActualBorderBottomWidth + box.ActualPaddingBottom;
+
+        // What the box holds reaches as high and as low in the inline box around it as it does in
+        // this one: its own vertical padding and border lie outside its content area and take no
+        // part in its parent's (CSS2.1 §10.6.1), where its horizontal ones take up the parent's line.
+        // Carried out with the rest, they grew every inline box around it by as much, so a link
+        // with no padding holding one with 10px painted 10px above and below its words.
+        double contentTop = y;
+        double contentBottom = b;
 
         if ((box.FirstHostingLineBox != null && box.FirstHostingLineBox.Equals(this)) || box.IsImage)
             x -= leftspacing;
@@ -85,8 +93,18 @@ internal sealed class CssLineBox
                 (float)Math.Max(f.Right, r), (float)Math.Max(f.Bottom, b));
         }
 
-        if (box.ParentBox != null && box.ParentBox.IsInline)
-            UpdateRectangle(box.ParentBox, x, y, r, b);
+        // An inline box's rectangle is part of the rectangles of the inline boxes it sits in, up to
+        // the block this line belongs to and not into it. That block can itself be inline-level, an
+        // inline-block or an absolutely positioned inline box laid out as a block, with its content
+        // on lines of its own. Bubbling into it gave it a rectangle on its own line, as though it
+        // were its own inline content, reaching out to its border edge: its lines then reached above
+        // its content box by its top padding and border, and were moved down by as much, the box
+        // with them. A `display: inline-block; padding: 40px` box holding a word came out 40px low
+        // and 139px tall, where it is 96px tall at the top of its line. The inline boxes around it
+        // got their rectangles from its lines too; CssLayoutEngine.BubbleAtomicInlineRectangles
+        // gives them theirs on the line it sits on.
+        if (box.ParentBox != null && box.ParentBox.IsInline && box.ParentBox != OwnerBox)
+            UpdateRectangle(box.ParentBox, x, contentTop, r, contentBottom);
     }
 
     /// <summary>

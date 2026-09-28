@@ -338,6 +338,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     public bool IsImage => Words.Count == 1 && Words[0].IsImage;
 
     /// <summary>
+    /// Whether this is the box of an inline, non-replaced element — a <c>display: inline</c> box
+    /// that is neither an image nor a <c>&lt;br&gt;</c> — whose vertical padding and border CSS2.1
+    /// §10.6.1 keeps out of its line: they "start at the top and bottom of the content area, and
+    /// [have] nothing to do with the 'line-height'".
+    /// </summary>
+    /// <remarks>
+    /// Such a box's rectangle on a line is the extent of the words inside it grown by its vertical
+    /// padding and border, and by those of the inline boxes it holds (see
+    /// <see cref="CssLineBox.UpdateRectangle"/>). Line layout measures a line by its words and by
+    /// the atomic inline-level boxes on it instead: those rectangles are what paint and script
+    /// read.
+    /// </remarks>
+    internal bool IsInlineNonReplaced => Display == CssConstants.Inline && !IsImage && !IsBrElement;
+
+    /// <summary>
     /// Whether this <c>inline-block</c>'s baseline is its bottom margin edge rather than the
     /// baseline of a line box inside it — CSS2.1 §10.8.1.
     /// </summary>
@@ -444,6 +459,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // sit outside it or even before it. Root only, and a no-op in standards mode or
                 // with no table in the document. See TablesInheritColorFromBodyQuirk.
                 TablesInheritColorFromBodyQuirk.Apply(this);
+
+                // The anonymous blocks the parser leaves out, around text beside a block in an
+                // inline-block or anywhere inside an inline-level box. Before anything is measured,
+                // so every intrinsic width sees the same tree; a no-op once they are there.
+                AnonymousBlockBoxes.Generate(this);
             }
 
             // PROTOTYPE (BROILER_VERTICAL_FLOW): a vertical-writing-mode rotation
