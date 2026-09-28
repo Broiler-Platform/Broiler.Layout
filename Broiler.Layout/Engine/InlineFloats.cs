@@ -92,7 +92,7 @@ internal static class InlineFloats
         if (floatBox.InlineFloatPlacement is not { } placement)
             return null;
 
-        double lineTop = placement.LineTop;
+        double lineTop = placement.LineTop + placement.Line.RestackTop;
 
         var owner = placement.Line.OwnerBox;
 
@@ -102,7 +102,9 @@ internal static class InlineFloats
         if (placement.ContentWidth <= 0)
             return lineTop;
 
-        double lineBottom = Math.Max(lineTop, placement.Line.FlowBottom ?? lineTop);
+        double lineBottom = Math.Max(lineTop, placement.Line.FlowBottom is double flowBottom
+            ? flowBottom + placement.Line.RestackBottom
+            : lineTop);
         double height = lineBottom - lineTop;
         var bands = LineFloatBands.Of(precedingFloats);
         double room = bands.RightAt(lineTop, height, contentRight) - bands.LeftAt(lineTop, height, contentLeft);

@@ -45,6 +45,18 @@ internal sealed class CssLineBox
     /// </remarks>
     internal double? FlowBottom { get; set; }
 
+    /// <summary>
+    /// How far the line's top has moved down since the flow put it at <see cref="FlowTop"/>: by as
+    /// much as content raised above the lines before it moved them (CSS2.1 §10.8.1).
+    /// </summary>
+    internal double RestackTop { get; set; }
+
+    /// <summary>
+    /// How far the line's bottom has moved down since the flow ended it at <see cref="FlowBottom"/>:
+    /// <see cref="RestackTop"/>, and as much again as content raised above the line's own top.
+    /// </summary>
+    internal double RestackBottom { get; set; }
+
     public double LineBottom
     {
         get

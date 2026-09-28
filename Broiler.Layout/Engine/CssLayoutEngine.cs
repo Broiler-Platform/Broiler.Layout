@@ -398,7 +398,6 @@ internal static class CssLayoutEngine
         // The line box height is 162px, so the div's auto height = 162px
         // (plus padding/border).
         maxBottom = starty;
-        double minTop = starty;
 
         // A flex container's lines are how this engine places its items, one per line in a column,
         // not line boxes: every item is blockified (CSS Display 3 §2.7) and lies in no inline
@@ -464,7 +463,6 @@ internal static class CssLayoutEngine
                     maxBottom = Math.Max(maxBottom, marginBoxBottom);
                 }
 
-                minTop = Math.Min(minTop, rect.Value.Top);
             }
 
             foreach (var word in linebox.Words)
@@ -496,7 +494,6 @@ internal static class CssLayoutEngine
                         + lineStrut * (1.0 - TypicalAscentRatio));
                 }
 
-                minTop = Math.Min(minTop, word.Top - (word.IsImage ? ImageWordMarginTop(word) : 0));
             }
 
             double lineTop = double.MaxValue;
@@ -535,8 +532,11 @@ internal static class CssLayoutEngine
             // inline-block alone on a line stands on the strut's baseline, below the line's top,
             // and a line measured from the box was as much taller than its line height: at
             // 16px/20px, a 10px inline-block made a 24.85px line, where browsers make it 20px.
+            // Nor does content raised above that top start a line after the first: such a line
+            // is moved down below, with its strut, until the content starts at its top. The first
+            // line is measured from what is highest on it, as it always was.
             if (hasLineContent && linebox.FlowTop is double flowTop)
-                lineTop = Math.Min(lineTop, flowTop);
+                lineTop = ReferenceEquals(linebox, blockBox.LineBoxes[0]) ? Math.Min(lineTop, flowTop) : flowTop;
 
             if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
@@ -545,68 +545,46 @@ internal static class CssLayoutEngine
                 maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, lineTop));
         }
 
-        // CSS2.1 §10.8.1: The line box height is the distance between
-        // the uppermost box top and the lowermost box bottom.  When
-        // inline-level boxes overflow above the starting flow position
-        // (minTop < starty), the full line box height must be reflected
-        // in maxBottom so subsequent siblings are positioned correctly.
-        if (minTop < starty)
+        // CSS2.1 §10.8.1: a line box reaches from the top of the highest box on it to the bottom of
+        // the lowest, and line boxes stack (§9.4.2). Content that vertical-align raises above the
+        // top of the line the flow put it on moves that line down until it starts at the line's
+        // top, and every line after it with it, and the block is as much taller.
+        //
+        // Only content above the block's own top was moved, by moving every line down together,
+        // which only content on the first line can reach: content raised above a later line's top
+        // reached into the line above it. An image raised 10px on a second line of 16px/20px text
+        // started 14.85px down its block, over the first line, where browsers start it 20px down
+        // and make the block 5px taller.
+        //
+        // A box aligned `top` or `bottom` is aligned to the line box, not to the baseline, and
+        // moves no line after the first: its line is made to hold it, not moved down for it. It
+        // moves the first line as before.
+        double restack = 0;
+
+        foreach (var linebox in blockBox.LineBoxes)
         {
-            double lineBoxHeight = maxBottom - minTop;
-            maxBottom = Math.Max(maxBottom, starty + lineBoxHeight);
+            if (restack > 0)
+                ShiftLineBox(linebox, restack);
 
-            // CSS2.1 §9.4.2: Line boxes are laid out beginning at the
-            // top of the containing block.  When vertical-align raises
-            // inline-blocks above the flow start, the entire line box
-            // content must be shifted downward so it renders within the
-            // block container's content area (from starty to
-            // starty + lineBoxHeight) instead of overflowing above.
-            // The shift amount is computed from the global minTop across
-            // ALL line boxes in the block (lines 162-176), so it must be
-            // applied uniformly to all line boxes.
-            double shift = starty - minTop;
-            foreach (var linebox in blockBox.LineBoxes)
+            bool firstLine = ReferenceEquals(linebox, blockBox.LineBoxes[0]);
+            double flowTop = (linebox.FlowTop ?? starty) + restack;
+            double contentTop = LineContentTop(linebox, blockBox, withLineBoxAligned: firstLine);
+            double raised = 0;
+
+            if (contentTop < flowTop - 0.01)
             {
-                // Shift line box rectangle positions
-                var keys = new List<CssBox>(linebox.Rectangles.Keys);
-                foreach (var box in keys)
-                {
-                    var r = linebox.Rectangles[box];
-                    linebox.Rectangles[box] = new RectangleF(r.X, (float)(r.Y + shift), r.Width, r.Height);
-
-                    // An inline-block, or an inline flex or grid container, that the flow placed on
-                    // this line whole moves with everything in it, as SetBaseLine moves one: what it
-                    // holds is positioned absolutely, on lines and in blocks of its own. Moving its
-                    // Location alone left that content behind, and adding the shift to ActualBottom
-                    // as well, which is the Location plus the height, made the box taller by the
-                    // shift. An inline flex or grid container was not moved at all, only its
-                    // rectangle on this line.
-                    //
-                    // An inline-block holding words of its own, as a ::before with
-                    // `display: inline-block` does, is moved as before: its words are on these
-                    // lines, and are moved below.
-                    if (box.Words.Count == 0
-                        && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
-                    {
-                        box.OffsetTop(shift);
-                    }
-                    else if (box.Display == CssConstants.InlineBlock)
-                    {
-                        box.Location = new PointF(box.Location.X, (float)(box.Location.Y + shift));
-                        box.ActualBottom += shift;
-                    }
-
-                    // Update the box's own Rectangles copy (assigned
-                    // earlier by AssignRectanglesToBoxes).
-                    if (box.Rectangles.ContainsKey(linebox))
-                        box.Rectangles[linebox] = linebox.Rectangles[box];
-                }
-
-                // Shift word positions
-                foreach (var word in linebox.Words)
-                    word.Top += shift;
+                raised = flowTop - contentTop;
+                ShiftLineBox(linebox, raised);
             }
+
+            // Where the line is now, for the floats placed from it (InlineFloats): its top has
+            // moved with the lines above it, and its bottom with its own content too.
+            linebox.RestackTop = restack;
+            linebox.RestackBottom = restack + raised;
+            restack += raised;
         }
+
+        maxBottom += restack;
 
         // CSS2.1 §9.4.3: the lines are settled, so the boxes the flow placed on them whole take
         // their relative offsets now.
@@ -938,6 +916,85 @@ internal static class CssLayoutEngine
         }
 
         return top;
+    }
+
+    /// <summary>
+    /// The top of what is on <paramref name="linebox"/>: its words, and the boxes placed on it
+    /// whole, but not the padding and borders of the inline boxes around its words, which are not
+    /// part of it (CSS2.1 §10.6.1), nor what is out of the flow, nor, unless
+    /// <paramref name="withLineBoxAligned"/>, the boxes aligned to the line box's top or bottom.
+    /// <see cref="double.MaxValue"/> for a line with nothing on it.
+    /// </summary>
+    private static double LineContentTop(CssLineBox linebox, CssBox blockBox, bool withLineBoxAligned)
+    {
+        double top = double.MaxValue;
+
+        foreach (var rect in linebox.Rectangles)
+        {
+            if (IsInAbsposSubtree(rect.Key, blockBox) || rect.Key.IsInlineNonReplaced)
+                continue;
+
+            if (!withLineBoxAligned && rect.Key.VerticalAlign is CssConstants.Top or CssConstants.Bottom)
+                continue;
+
+            top = Math.Min(top, rect.Value.Top);
+        }
+
+        foreach (var word in linebox.Words)
+        {
+            if (IsInAbsposSubtree(word.OwnerBox, blockBox))
+                continue;
+
+            top = Math.Min(top, word.Top - (word.IsImage ? ImageWordMarginTop(word) : 0));
+        }
+
+        return top;
+    }
+
+    /// <summary>
+    /// Moves everything on <paramref name="linebox"/> down by <paramref name="shift"/>: its words,
+    /// its rectangles, and the boxes placed on it whole with what is in them.
+    /// </summary>
+    private static void ShiftLineBox(CssLineBox linebox, double shift)
+    {
+        var keys = new List<CssBox>(linebox.Rectangles.Keys);
+        foreach (var box in keys)
+        {
+            var r = linebox.Rectangles[box];
+            linebox.Rectangles[box] = new RectangleF(r.X, (float)(r.Y + shift), r.Width, r.Height);
+
+            // An inline-block, or an inline flex or grid container, that the flow placed on
+            // this line whole moves with everything in it, as SetBaseLine moves one: what it
+            // holds is positioned absolutely, on lines and in blocks of its own. Moving its
+            // Location alone left that content behind, and adding the shift to ActualBottom
+            // as well, which is the Location plus the height, made the box taller by the
+            // shift. An inline flex or grid container was not moved at all, only its
+            // rectangle on this line.
+            //
+            // An inline-block holding words of its own, as a ::before with
+            // `display: inline-block` does, and an image, which SetBaseLine places with its
+            // word, move their own box alone: their words are on these lines, and are moved
+            // below. The image's box was left where it was, and it was drawn and measured above
+            // its word; the inline-block's was moved and made taller by the shift too, its
+            // ActualBottom being its Location plus its height.
+            if (box.Words.Count == 0
+                && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
+            {
+                box.OffsetTop(shift);
+            }
+            else if (box.Display == CssConstants.InlineBlock || box.IsImage)
+            {
+                box.Location = new PointF(box.Location.X, (float)(box.Location.Y + shift));
+            }
+
+            // Update the box's own Rectangles copy (assigned
+            // earlier by AssignRectanglesToBoxes).
+            if (box.Rectangles.ContainsKey(linebox))
+                box.Rectangles[linebox] = linebox.Rectangles[box];
+        }
+
+        foreach (var word in linebox.Words)
+            word.Top += shift;
     }
 
     /// <summary>
