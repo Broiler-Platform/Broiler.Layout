@@ -599,6 +599,12 @@ internal sealed class CssLayoutEngineTable
                         continue;
                     }
 
+                    // CSS 2.1 §17.5.2.2: a column is as wide as its cells' border boxes, and a cell's
+                    // width is its content box's, as any box's is, unless its box-sizing says
+                    // otherwise. It was taken for the border box: a cell 50px wide with 5px of
+                    // padding made a 50px column, where browsers make it 60px.
+                    len = cell.ResolveSpecifiedWidthToBorderBox(len);
+
                     len /= Convert.ToSingle(colspan);
 
                     for (int j = columnIndex; j < endColumn; j++)
