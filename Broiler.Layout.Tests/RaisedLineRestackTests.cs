@@ -135,6 +135,48 @@ public sealed class RaisedLineRestackTests
     }
 
     /// <summary>
+    /// A span with <c>line-height: 40px</c> raised on the second line reaches above its top by as
+    /// much as it is raised, and the line moves down by that: "zeta" stands half the span's 24px of
+    /// leading below the line's top, 32px down, and the line is the span's 40px, so the block is
+    /// 60px tall. "delta" stands on the baseline, 42px down for a 10px raise and 38.3px for
+    /// <c>super</c>, which raises by a third of the block's 16px font and a pixel. The line was
+    /// measured 40px down from where the flow put it, before it moved down, and the block was as
+    /// much too tall as the span is raised: 70px and 66.3px.
+    /// </summary>
+    [Theory]
+    [InlineData("10px", 42)]
+    [InlineData(CssConstants.Super, 38.33)]
+    public void A_Raised_Span_With_A_Taller_Line_Height_On_The_Second_Line(string verticalAlign, double deltaTop)
+    {
+        var t = Build(b => { Text(b, "alpha beta gamma delta "); Span(b, "40px", verticalAlign, "zeta"); Text(b, " omega"); });
+        Layout(t);
+
+        Assert.Equal(32, WordTop(t, "zeta"), 1);
+        Assert.Equal(deltaTop, WordTop(t, "delta"), 1);
+        Assert.Equal(deltaTop, WordTop(t, "omega"), 1);
+        Assert.Equal(60, t.Block.Size.Height, 1);
+    }
+
+    /// <summary>
+    /// Controls, which pass before and after: the span raised 10px on the first line makes the
+    /// block 40px tall, and on the second line on the baseline, 60px.
+    /// </summary>
+    [Fact]
+    public void Control_A_Span_With_A_Taller_Line_Height_On_The_First_Line_Or_On_The_Baseline()
+    {
+        var first = Build(b => { Span(b, "40px", "10px", "zeta"); Text(b, " omega"); });
+        Layout(first);
+
+        Assert.Equal(40, first.Block.Size.Height, 1);
+
+        var onBaseline = Build(b => { Text(b, "alpha beta gamma delta "); Span(b, "40px", CssConstants.Baseline, "zeta"); Text(b, " omega"); });
+        Layout(onBaseline);
+
+        Assert.Equal(32, WordTop(onBaseline, "zeta"), 1);
+        Assert.Equal(60, onBaseline.Block.Size.Height, 1);
+    }
+
+    /// <summary>
     /// Laid out a second time, the second line is 5.2px down still, and the block 45.2px tall.
     /// </summary>
     [Fact]
@@ -275,6 +317,26 @@ public sealed class RaisedLineRestackTests
             Height = height + "px",
             VerticalAlign = verticalAlign,
         };
+
+    /// <summary>
+    /// A span with the given line height and alignment holding <paramref name="text"/>, in an
+    /// anonymous inline box that inherits the span's style, as the box a text node makes does.
+    /// </summary>
+    private static void Span(CssBox parent, string lineHeight, string verticalAlign, string text)
+    {
+        var span = new CssBox(parent, new HtmlTag("span", false, null), BaseUrl)
+        {
+            Display = "inline",
+            LineHeight = lineHeight,
+            VerticalAlign = verticalAlign,
+        };
+
+        var box = new CssBox(span, null, BaseUrl);
+        box.InheritStyle();
+        box.Display = "inline";
+        box.Text = text.AsMemory();
+        box.ParseToWords();
+    }
 
     private static void Image(CssBox parent, string verticalAlign) =>
         _ = new CssBoxImage(parent, new HtmlTag("img", true, new System.Collections.Generic.Dictionary<string, string> { ["src"] = "i.png" }), BaseUrl)
