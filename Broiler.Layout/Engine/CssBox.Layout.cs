@@ -428,6 +428,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 - ContainingBlock.ActualBorderLeftWidth - ContainingBlock.ActualBorderRightWidth;
             double remainingSpace = containingContentWidth - Size.Width;
 
+            _usedMarginLeftWasAuto |= MarginLeft == CssConstants.Auto;
+            _usedMarginRightWasAuto |= MarginRight == CssConstants.Auto;
+
             if (MarginLeft == CssConstants.Auto && MarginRight == CssConstants.Auto)
             {
                 if (remainingSpace >= 0)
@@ -827,11 +830,22 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double contentWidth = containing.Size.Width
             - containing.ActualBorderLeftWidth - containing.ActualBorderRightWidth
             - containing.ActualPaddingLeft - containing.ActualPaddingRight;
+        double marginRight = ActualMarginRight;
+
+        // Beside floats, the margins take what the floats leave of that space, whose edges
+        // PlaceBesideFloats found with the margins that are not auto already inside them.
+        if (LeftBesideFloats is double spaceLeft && WidthBesideFloats is double spaceWidth)
+        {
+            contentLeft = spaceLeft;
+            contentWidth = spaceWidth;
+            marginRight = 0;
+        }
+
         double free = contentWidth - Size.Width;
         if (free <= 0)
             return;
 
-        double marginLeft = IsSpecifiedMarginRightAuto ? free / 2 : Math.Max(0, free - ActualMarginRight);
+        double marginLeft = IsSpecifiedMarginRightAuto ? free / 2 : Math.Max(0, free - marginRight);
         double shift = contentLeft + marginLeft - Location.X;
         if (Math.Abs(shift) > 0.01)
             OffsetLeft(shift);
@@ -1174,6 +1188,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // right floats.  If it cannot fit beside the floats,
             // clear below them.
             WidthBesideFloats = null;
+            LeftBesideFloats = null;
 
             if (Float == CssConstants.None && Position != CssConstants.Absolute && Position != CssConstants.Fixed
                 && CssBoxHelper.EstablishesBfc(this))
@@ -1350,6 +1365,23 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     internal double? WidthBesideFloats { get; private set; }
 
     /// <summary>
+    /// The left edge of the space <see cref="WidthBesideFloats"/> measures, or <c>null</c> when no
+    /// float is beside this box.
+    /// </summary>
+    internal double? LeftBesideFloats { get; private set; }
+
+    /// <summary>
+    /// Whether this box's left margin was <c>auto</c> when <see cref="ResolveBlockUsedWidth"/>
+    /// resolved it against the containing block, which rewrites it to the length it came to.
+    /// </summary>
+    private bool _usedMarginLeftWasAuto;
+
+    /// <summary>
+    /// Whether this box's right margin was <c>auto</c>; see <see cref="_usedMarginLeftWasAuto"/>.
+    /// </summary>
+    private bool _usedMarginRightWasAuto;
+
+    /// <summary>
     /// CSS2.1 §9.5: the border box of a box in normal flow that establishes a new block formatting
     /// context must not overlap the margin box of any floats in the same one, and if necessary it
     /// is placed below them. From <paramref name="top"/> down, places the border box,
@@ -1360,6 +1392,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private void PlaceBesideFloats(double boxWidth, double boxHeight, bool autoWidth, ref double left, ref double top)
     {
         WidthBesideFloats = null;
+        LeftBesideFloats = null;
 
         var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
 
@@ -1369,14 +1402,25 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double containerLeft = ContainingBlock.Location.X + ContainingBlock.ActualPaddingLeft + ContainingBlock.ActualBorderLeftWidth;
         double containerRight = ContainingBlock.ClientLeft + ContainingBlock.AvailableWidth;
 
+        // CSS2.1 §10.3.3: auto margins take the space left over, and beside floats that is what
+        // the floats leave of the line (§9.5), not the whole containing block. The box is placed
+        // in that space with its auto margins as nothing, and they take what it leaves after:
+        // after a 100px left float, a 300px wide box with `margin: 0 auto` was centred in the
+        // page, 362px in, where browsers centre it in the 924px beside the float, 412px in. A
+        // table has no width yet; ResolveTableAutoMargins centres it once it has one.
+        bool autoLeft = IsSpecifiedMarginLeftAuto || _usedMarginLeftWasAuto;
+        bool autoRight = IsSpecifiedMarginRightAuto || _usedMarginRightWasAuto;
+        double marginLeft = autoLeft ? 0 : ActualMarginLeft;
+        double marginRight = autoRight ? 0 : ActualMarginRight;
+
         // Try to fit beside floats; if not possible, clear
         // below them.  100 iterations is a safe upper bound
         // since each iteration advances past at least one
         // float's bottom edge.
         for (int bfcIter = 0; bfcIter < 100; bfcIter++)
         {
-            double leftEdge = containerLeft + ActualMarginLeft;
-            double rightEdge = containerRight - ActualMarginRight;
+            double leftEdge = containerLeft + marginLeft;
+            double rightEdge = containerRight - marginRight;
             bool besideFloat = false;
 
             foreach (var fb in precedingFloats)
@@ -1414,8 +1458,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 if (availableWidth < Size.Width && autoWidth)
                     Size = new SizeF((float)availableWidth, Size.Height);
 
+                if ((autoLeft || autoRight) && Display != CssConstants.Table && availableWidth > boxWidth)
+                    left = PlaceInSpaceByAutoMargins(leftEdge, availableWidth - boxWidth, autoLeft, autoRight, containerLeft, containerRight, boxWidth);
+
                 if (besideFloat)
+                {
                     WidthBesideFloats = availableWidth;
+                    LeftBesideFloats = leftEdge;
+                }
 
                 break;
             }
@@ -1445,6 +1495,24 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             top = nextTop;
         }
+    }
+
+    /// <summary>
+    /// Where a box <paramref name="free"/> narrower than the space from <paramref name="spaceLeft"/>
+    /// goes in it by its auto margins: in the middle where both are auto, and against the right
+    /// where the left one alone is. The margins are rewritten to what they come to between the box
+    /// and its containing block's content edges.
+    /// </summary>
+    private double PlaceInSpaceByAutoMargins(double spaceLeft, double free, bool autoLeft, bool autoRight,
+        double containerLeft, double containerRight, double boxWidth)
+    {
+        double left = spaceLeft + (autoLeft && autoRight ? free / 2 : autoLeft ? free : 0);
+
+        MarginLeft = (left - containerLeft).ToString("F4", CultureInfo.InvariantCulture) + "px";
+        MarginRight = (containerRight - left - boxWidth).ToString("F4", CultureInfo.InvariantCulture) + "px";
+        InvalidateActualMargins();
+
+        return left;
     }
 
     /// <summary>
