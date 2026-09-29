@@ -334,7 +334,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // block with `padding-bottom: 10px` holding a paragraph with `margin-top: 20px` began
             // where the box before it ended and held the paragraph 20px down, where browsers
             // begin the block 20px down with the paragraph at its top.
-            && _parentBox.ActualPaddingTop < 0.1 && _parentBox.ActualBorderTopWidth < 0.1
+            && !CssBoxHelper.HasTopPaddingOrBorder(_parentBox)
             // CSS2.1 §8.3.1: "margins of elements that establish new block formatting contexts
             // do not collapse with their in-flow children" — so a parent that establishes one
             // contains its first child's top margin instead of taking it as its own. The two
@@ -538,7 +538,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // do not collapse with its in-flow children's, so its last child's bottom margin stays
             // inside it, as its first child's top margin does.
             && !isBfc
-            && ActualPaddingBottom < 0.1 && ActualBorderBottomWidth < 0.1
+            && !CssBoxHelper.HasBottomPaddingOrBorder(this)
             && autoHeight
             // CSS2.1 §8.3.1: margins of the root element's box do not collapse, so the
             // body's bottom margin stays inside the root's height instead of propagating
