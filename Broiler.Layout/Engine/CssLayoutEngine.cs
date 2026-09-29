@@ -454,11 +454,8 @@ internal static class CssLayoutEngine
                     && ((rect.Key.Display == CssConstants.InlineBlock && LastLineBaseline(rect.Key) == null)
                         || rect.Key.Display is "inline-flex" or "inline-grid"))
                 {
-                    double lineStrut = blockBox.ActualLineHeight > 0
-                        ? blockBox.ActualLineHeight
-                        : blockBox.ActualFont.Height;
                     double marginBoxBottom = rect.Value.Bottom + rect.Key.ActualMarginBottom
-                        + lineStrut * (1.0 - TypicalAscentRatio);
+                        + StrutDescent(blockBox);
 
                     maxBottom = Math.Max(maxBottom, marginBoxBottom);
                 }
@@ -485,13 +482,8 @@ internal static class CssLayoutEngine
                         || string.IsNullOrEmpty(word.OwnerBox.VerticalAlign)
                         || word.OwnerBox.VerticalAlign == CssConstants.Baseline))
                 {
-                    double lineStrut = blockBox.ActualLineHeight > 0
-                        ? blockBox.ActualLineHeight
-                        : blockBox.ActualFont.Height;
-
                     maxBottom = Math.Max(maxBottom,
-                        word.Bottom + ImageWordMarginBottom(word)
-                        + lineStrut * (1.0 - TypicalAscentRatio));
+                        word.Bottom + ImageWordMarginBottom(word) + StrutDescent(blockBox));
                 }
 
             }
@@ -521,7 +513,7 @@ internal static class CssLayoutEngine
                 if (IsInAbsposSubtree(word.OwnerBox, blockBox))
                     continue;
 
-                lineTop = Math.Min(lineTop, word.Top);
+                lineTop = Math.Min(lineTop, WordLayoutTop(word));
                 hasLineContent = true;
             }
 
@@ -945,7 +937,7 @@ internal static class CssLayoutEngine
             if (IsInAbsposSubtree(word.OwnerBox, blockBox))
                 continue;
 
-            top = Math.Min(top, word.Top - (word.IsImage ? ImageWordMarginTop(word) : 0));
+            top = Math.Min(top, word.IsImage ? word.Top - ImageWordMarginTop(word) : WordLayoutTop(word));
         }
 
         return top;
@@ -995,6 +987,9 @@ internal static class CssLayoutEngine
 
         foreach (var word in linebox.Words)
             word.Top += shift;
+
+        if (linebox.Baseline is double baseline)
+            linebox.Baseline = baseline + shift;
     }
 
     /// <summary>
@@ -1274,12 +1269,8 @@ internal static class CssLayoutEngine
                             || string.IsNullOrEmpty(word.OwnerBox.VerticalAlign)
                             || word.OwnerBox.VerticalAlign == CssConstants.Baseline))
                     {
-                        double lineStrut = blockbox.ActualLineHeight > 0
-                            ? blockbox.ActualLineHeight
-                            : blockbox.ActualFont.Height;
                         maxbottom = Math.Max(maxbottom,
-                            word.Bottom + imageMarginBottom
-                            + lineStrut * (1.0 - TypicalAscentRatio));
+                            word.Bottom + imageMarginBottom + StrutDescent(blockbox));
                     }
 
                     if (b.Position == CssConstants.Absolute)
@@ -1985,11 +1976,8 @@ internal static class CssLayoutEngine
             && ((b.Display == CssConstants.InlineBlock && LastLineBaseline(b) == null)
                 || b.Display is "inline-flex" or "inline-grid"))
         {
-            double lineStrut = blockbox.ActualLineHeight > 0
-                ? blockbox.ActualLineHeight
-                : blockbox.ActualFont.Height;
             maxbottom = Math.Max(maxbottom,
-                b.ActualBottom + b.ActualMarginBottom + lineStrut * (1.0 - TypicalAscentRatio));
+                b.ActualBottom + b.ActualMarginBottom + StrutDescent(blockbox));
         }
 
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
@@ -2592,10 +2580,10 @@ internal static class CssLayoutEngine
     /// leading above its glyphs and half below, and the line box as tall as all of them together,
     /// the block's own (the strut) among them. A line counted a word's line height only where it was
     /// shorter than the word, so <c>&lt;a style="line-height: 60px"&gt;</c> in a block of normal line
-    /// height left the block one word tall, where browsers make it 60px. The glyphs stay where they
-    /// are, at the line's top as this engine places them for the block's own line height, and the
-    /// line is as tall as the inline boxes together from there. Other lines keep the measure they
-    /// had, which leaves the half-leading out.
+    /// height left the block one word tall, where browsers make it 60px. The glyphs stand where
+    /// vertical alignment put them, half their box's leading below its top, and the line is as tall
+    /// as the inline boxes together from <paramref name="lineTop"/>, the top of the highest of them.
+    /// Other lines are measured by the block's line height and their words.
     /// </remarks>
     internal static double TallInlineBoxLineBottom(CssBox blockBox, CssLineBox line, double lineTop)
     {
@@ -2616,11 +2604,14 @@ internal static class CssLayoutEngine
         if (!holdsTallerBox)
             return double.MinValue;
 
-        // The strut: the block's line height around its font's glyphs, at the line's top.
+        // The strut: the block's line height around its font's glyphs, which stand on the line's
+        // baseline.
         double fontHeight = blockBox.ActualFont.Height;
-        double strutLeading = blockLineHeight > 0 ? (blockLineHeight - fontHeight) / 2 : 0;
-        double top = lineTop - strutLeading;
-        double bottom = lineTop + fontHeight + strutLeading;
+        double strutGlyphTop = line.Baseline is double lineBaseline
+            ? lineBaseline - fontHeight * TypicalAscentRatio
+            : lineTop;
+        double top = strutGlyphTop - HalfLeading(blockBox);
+        double bottom = strutGlyphTop + fontHeight + LeadingBelow(blockBox);
 
         foreach (var word in line.Words)
         {
@@ -2635,9 +2626,10 @@ internal static class CssLayoutEngine
             }
 
             double lineHeight = WordLineHeight(word);
-            double halfLeading = lineHeight > 0 ? (lineHeight - word.Height) / 2 : 0;
-            top = Math.Min(top, word.Top - halfLeading);
-            bottom = Math.Max(bottom, word.Bottom + halfLeading);
+            double leading = lineHeight > 0 ? lineHeight - word.Height : 0;
+            double above = Math.Floor(leading / 2);
+            top = Math.Min(top, word.Top - above);
+            bottom = Math.Max(bottom, word.Bottom + leading - above);
         }
 
         foreach (var (box, rect) in line.Rectangles)
@@ -2869,6 +2861,45 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
+    /// How far the box's line height reaches above its glyphs (CSS 2.1 §10.8.1): half its leading,
+    /// the line height less the font's height, negative for a line height less than the font's.
+    /// As browsers do, the half is floored to a whole pixel, and what that leaves goes below the
+    /// glyphs (<see cref="LeadingBelow"/>). 0 for a box with no line height.
+    /// </summary>
+    internal static double HalfLeading(CssBox box)
+    {
+        double lineHeight = box.ActualLineHeight;
+        return lineHeight > 0 ? Math.Floor((lineHeight - box.ActualFont.Height) / 2) : 0;
+    }
+
+    /// <summary>
+    /// How far the box's line height reaches below its glyphs: the rest of its leading, the half
+    /// that <see cref="HalfLeading"/> puts above them less what the floor took off it.
+    /// </summary>
+    internal static double LeadingBelow(CssBox box)
+    {
+        double lineHeight = box.ActualLineHeight;
+        return lineHeight > 0 ? lineHeight - box.ActualFont.Height - HalfLeading(box) : 0;
+    }
+
+    /// <summary>
+    /// How far below the baseline the strut of <paramref name="blockBox"/>'s lines reaches: its
+    /// font's descent and the leading below it. It was taken as a fifth of the line height, which
+    /// is the font's descent only where the line height is the font's height: a 100px image on the
+    /// baseline of a 60px line had 12px below it, where browsers leave the strut's 25px.
+    /// </summary>
+    internal static double StrutDescent(CssBox blockBox) =>
+        blockBox.ActualFont.Height * (1.0 - TypicalAscentRatio) + LeadingBelow(blockBox);
+
+    /// <summary>
+    /// The top of the inline box a word of text stands in on its line: the leading above its glyphs
+    /// higher, which a line height less than the font's height puts below them. An image's top is
+    /// its own.
+    /// </summary>
+    internal static double WordLayoutTop(CssRect word) =>
+        word.IsImage || word.OwnerBox == null ? word.Top : word.Top - HalfLeading(word.OwnerBox);
+
+    /// <summary>
     /// How far below a box's top edge its baseline sits, for the purpose of aligning it on the line.
     /// </summary>
     /// <remarks>
@@ -3087,9 +3118,17 @@ internal static class CssLayoutEngine
         // baseline is at the top of the content area and must not be
         // overridden by child inline-block font metrics.
         double lineTop = double.MaxValue;
+        double inlineBoxTop = double.MaxValue;
         foreach (var kvp in lineBox.Rectangles)
         {
-            if (!topBottomBoxes.Contains(kvp.Key))
+            if (topBottomBoxes.Contains(kvp.Key))
+                continue;
+
+            // An inline box's padding and border are not part of the line (CSS2.1 §10.6.1), and
+            // its rectangle reaches above the line by them: the strut stood that much higher.
+            if (kvp.Key.IsInlineNonReplaced)
+                inlineBoxTop = Math.Min(inlineBoxTop, kvp.Value.Top);
+            else
                 lineTop = Math.Min(lineTop, kvp.Value.Top);
         }
 
@@ -3097,13 +3136,20 @@ internal static class CssLayoutEngine
         // on the strut's baseline from the flow, below the line's top, and alone on its line it
         // put the baseline as far below again: at 16px/20px, a 10px image was 9.7px down its line
         // and the line 29.7px tall, where browsers put it 5px down a 20px line.
-        if (lineTop < double.MaxValue && lineBox.FlowTop is double flowTop)
+        if ((lineTop < double.MaxValue || inlineBoxTop < double.MaxValue) && lineBox.FlowTop is double flowTop)
             lineTop = Math.Min(lineTop, flowTop);
 
-        // Start with the strut baseline (parent's font ascent from line top).
+        if (lineTop == double.MaxValue)
+            lineTop = inlineBoxTop;
+
+        // Start with the strut baseline: the block's font ascent below the line's top, and half
+        // its leading above that. CSS 2.1 §10.8.1 gives the strut, as every inline box, its line
+        // height with half the leading above its glyphs and half below; the glyphs stood at the
+        // line's top, and a 16px letter in a 60px line was drawn at its top, where browsers draw
+        // it 21px down.
         double parentFontHeight = lineBox.OwnerBox?.ActualFont.Height ?? 0;
         double baseline = (lineTop < double.MaxValue)
-            ? lineTop + parentFontHeight * TypicalAscentRatio
+            ? lineTop + (lineBox.OwnerBox is { } owner ? HalfLeading(owner) : 0) + parentFontHeight * TypicalAscentRatio
             : float.MinValue;
 
         // Non-inline-block boxes also contribute to the baseline — but only the ones that are
@@ -3139,8 +3185,11 @@ internal static class CssLayoutEngine
                 continue;
             }
 
+            // An inline box's text stands half its own leading below the line's top too, where
+            // the flow put its words.
             double boxBaseline = lineBox.Rectangles[box].Top + BaselineAscentOf(box, lineBox)
-                + (bottomEdge ? box.ActualMarginBottom : 0);
+                + (bottomEdge ? box.ActualMarginBottom : 0)
+                + (box.IsInlineNonReplaced ? HalfLeading(box) : 0);
             baseline = Math.Max(baseline, boxBaseline);
         }
 
@@ -3155,6 +3204,8 @@ internal static class CssLayoutEngine
         //
         // It is the *margin* box that stands on the baseline, and the rectangle here is the border
         // box, so the bottom margin is added on both sides.
+
+        lineBox.Baseline = baseline > float.MinValue ? baseline : null;
 
         // --- Phase 1: Position all non-top/bottom boxes ---
         var boxes = new List<CssBox>(lineBox.Rectangles.Keys);

@@ -23,8 +23,9 @@ namespace Broiler.Layout.Tests;
 /// </para>
 /// <para>
 /// Each block here is 320px wide with a 20px line height, in a block in the root. Its font is
-/// 16px tall and stands on a baseline 12.8px below its top; the strut's descent is 4px. Words are
-/// 8px wide a letter.
+/// 16px tall, with an ascent of 12.8px, and stands half its 4px of leading below the line's top: the
+/// strut's baseline is 14.8px below the line's top, and its descent below the baseline 5.2px, the
+/// font's 3.2px and the other half of the leading. Words are 8px wide a letter.
 /// </para>
 /// </remarks>
 public sealed class AtomicOnlyLineTests
@@ -32,7 +33,7 @@ public sealed class AtomicOnlyLineTests
     private static readonly Uri BaseUrl = new("file:///atomic-only-line.html");
 
     /// <summary>
-    /// An empty 100 × 10px inline-block alone stands on the baseline, 2.8px down, and the block is
+    /// An empty 100 × 10px inline-block alone stands on the baseline, 4.8px down, and the block is
     /// 20px tall. The block was 22.8px tall.
     /// </summary>
     [Fact]
@@ -41,7 +42,7 @@ public sealed class AtomicOnlyLineTests
         var (root, block, boxes) = Build(b => InlineBlock(b, 10));
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(12.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
+        Assert.Equal(14.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
         Assert.Equal(20, block.Size.Height, 1);
     }
 
@@ -58,12 +59,12 @@ public sealed class AtomicOnlyLineTests
         });
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(12.8 - 10, boxes[1].Location.Y - block.Location.Y, 1);
+        Assert.Equal(14.8 - 10, boxes[1].Location.Y - block.Location.Y, 1);
         Assert.Equal(20, block.Size.Height, 1);
     }
 
     /// <summary>
-    /// A 100 × 10px image alone stands on the strut's baseline, 2.8px down, and the block is 20px
+    /// A 100 × 10px image alone stands on the strut's baseline, 4.8px down, and the block is 20px
     /// tall. It stood 5.6px down, and the block was 25.6px tall.
     /// </summary>
     [Fact]
@@ -72,12 +73,12 @@ public sealed class AtomicOnlyLineTests
         var (root, block, boxes) = Build(Image);
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(12.8 - 10, ImageTop(boxes[0], block), 1);
+        Assert.Equal(14.8 - 10, ImageTop(boxes[0], block), 1);
         Assert.Equal(20, block.Size.Height, 1);
     }
 
     /// <summary>
-    /// The image's box stands where its rectangle does, 2.8px down, alone on its line or beside a
+    /// The image's box stands where its rectangle does, 4.8px down, alone on its line or beside a
     /// word. Beside a word, where the flow had stood the image on the baseline already and the
     /// alignment did not move it, the box stayed at the page's top-left corner.
     /// </summary>
@@ -94,8 +95,8 @@ public sealed class AtomicOnlyLineTests
         });
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(12.8 - 10, ImageTop(boxes[0], block), 1);
-        Assert.Equal(12.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
+        Assert.Equal(14.8 - 10, ImageTop(boxes[0], block), 1);
+        Assert.Equal(14.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
     }
 
     /// <summary>
@@ -135,18 +136,18 @@ public sealed class AtomicOnlyLineTests
         root.PerformLayout(root.LayoutEnvironment);
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(12.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
+        Assert.Equal(14.8 - 10, boxes[0].Location.Y - block.Location.Y, 1);
         Assert.Equal(20, block.Size.Height, 1);
     }
 
     /// <summary>
-    /// Controls, which pass before and after: beside a word, the inline-block stands on the
-    /// word's baseline and the block is 20px tall; a 30px inline-block alone stands at the line's
-    /// top, and the block is its height and the strut's descent, 34px.
+    /// Controls: beside a word, the inline-block stands on the word's baseline and the block is
+    /// 20px tall; a 30px inline-block alone stands at the line's top, and the block is its height
+    /// and the strut's descent, 35.2px.
     /// </summary>
     [Theory]
-    [InlineData(true, 10, 2.8, 20)]
-    [InlineData(false, 30, 0, 34)]
+    [InlineData(true, 10, 4.8, 20)]
+    [InlineData(false, 30, 0, 35.2)]
     public void Control_Beside_A_Word_Or_Taller_Than_The_Strut(bool word, int height, double top, double blockHeight)
     {
         var (root, block, boxes) = Build(b =>

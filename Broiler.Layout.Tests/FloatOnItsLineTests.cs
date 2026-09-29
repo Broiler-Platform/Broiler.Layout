@@ -24,8 +24,8 @@ namespace Broiler.Layout.Tests;
 /// </para>
 /// <para>
 /// Each block here is 150px wide with 20px lines, in a block in the root. Words are 8px wide a
-/// letter and 16px tall, and a space is 4px wide, so "aaaa bbbb cccc dddd" (140px) fills a line.
-/// The floats are 20 × 30px unless noted.
+/// letter and 16px tall, standing 2px down their line, and a space is 4px wide, so
+/// "aaaa bbbb cccc dddd" (140px) fills a line. The floats are 20 × 30px unless noted.
 /// </para>
 /// </remarks>
 public sealed class FloatOnItsLineTests
@@ -292,11 +292,17 @@ public sealed class FloatOnItsLineTests
         Assert.Equal(y, box.Location.Y - t.Block.ClientTop, 1);
     }
 
-    private static void AssertWordAt(Tree t, string text, double x, double y)
+    /// <summary>
+    /// Asserts the word is <paramref name="x"/> in, on the line <paramref name="lineTop"/> down: its
+    /// glyphs stand half the line's leading, (20 − 16) / 2 = 2px, below the line's top.
+    /// </summary>
+    private static void AssertWordAt(Tree t, string text, double x, double lineTop)
     {
+        const double HalfLeading = 2;
+
         var word = Descendants(t.Block).SelectMany(b => b.Words).Single(w => w.Text == text);
         Assert.Equal(x, word.Left - t.Block.ClientLeft, 1);
-        Assert.Equal(y, word.Top - t.Block.ClientTop, 1);
+        Assert.Equal(lineTop + HalfLeading, word.Top - t.Block.ClientTop, 1);
     }
 
     private sealed class FakeLayoutEnvironment : ILayoutEnvironment

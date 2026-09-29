@@ -127,8 +127,12 @@ public sealed class AbsposStaticMarginTests
 
     private static void Layout(Tree t) => t.Root.PerformLayout(t.Root.LayoutEnvironment);
 
+    /// <summary>
+    /// The top of the line the word stands on: its glyphs stand half the line's leading,
+    /// (20 − 16) / 2 = 2px, below it.
+    /// </summary>
     private static double WordTop(Tree t, string text) =>
-        t.Box.Boxes.SelectMany(b => b.Words).Single(w => w.Text == text).Top;
+        t.Box.Boxes.SelectMany(b => b.Words).Single(w => w.Text == text).Top - 2;
 
     private sealed class FakeLayoutEnvironment : ILayoutEnvironment
     {
