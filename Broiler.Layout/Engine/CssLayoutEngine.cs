@@ -1406,15 +1406,24 @@ internal static class CssLayoutEngine
             }
         }
 
+        // CSS 2.1 §10.3.1, §10.6.1: `width` and `height` do not apply to an inline, non-replaced
+        // box, which is as wide as what it holds and as tall as its line height; only a replaced
+        // one, an <svg> or a <canvas> laid out inline, takes them. Every inline box took them here:
+        // the empty <source width="84" height="29"> of a <picture> took 84px of its line, a span
+        // holding "xy" with `width: 84px` was 84px wide, and a line wrapping after a span with
+        // `height: 50px` started 50px down, where browsers give the first nothing, the second the
+        // width of "xy", and start the line 20px down.
+        bool takesSize = !box.IsInlineNonReplaced || box.IsReplaced;
+
         // handle height setting
-        if (maxbottom - startY < box.ActualHeight)
+        if (takesSize && maxbottom - startY < box.ActualHeight)
             maxbottom += box.ActualHeight - (maxbottom - startY);
 
         // handle width setting
         // CSS 2.1 §10.3.9: inline-block boxes handle their own sizing in
         // FlowInlineBlock — do not register them here when processing
         // their own internal content (box == blockbox).
-        if (box.IsInline && box != blockbox && 0 <= curx - startX && curx - startX < box.ActualWidth)
+        if (takesSize && box.IsInline && box != blockbox && 0 <= curx - startX && curx - startX < box.ActualWidth)
         {
             // hack for actual width handling
             curx += box.ActualWidth - (curx - startX);
