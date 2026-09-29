@@ -54,10 +54,23 @@ internal sealed class LineFloatBands
         foreach (var candidate in CssBoxHelper.CollectPrecedingFloatsInBfc(blockBox))
             Add(ref floats, candidate);
 
-        foreach (var child in blockBox.Boxes)
+        // Its own floats include those inside the inline boxes it holds, which are placed in its
+        // lines as the ones beside them are.
+        foreach (var child in InlineFloats.Of(blockBox))
             Add(ref floats, child);
 
         return floats == null ? EmptyBands : new LineFloatBands(floats);
+    }
+
+    /// <summary>The bands <paramref name="floats"/> leave, those of them that have been placed.</summary>
+    internal static LineFloatBands Of(IEnumerable<CssBox> floats)
+    {
+        List<CssBox>? placed = null;
+
+        foreach (var candidate in floats)
+            Add(ref placed, candidate);
+
+        return placed == null ? EmptyBands : new LineFloatBands(placed);
     }
 
     private static void Add(ref List<CssBox>? floats, CssBox candidate)

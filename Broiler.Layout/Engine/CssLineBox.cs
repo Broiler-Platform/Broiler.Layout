@@ -33,6 +33,18 @@ internal sealed class CssLineBox
     /// </remarks>
     internal double? FlowTop { get; set; }
 
+    /// <summary>
+    /// The bottom of the line, where the flow ended it, before vertical alignment moved what is on
+    /// it: the lowest the flow had reached when it began the next line, or when it ended. Null for a
+    /// line made outside the flow.
+    /// </summary>
+    /// <remarks>
+    /// A float that does not fit beside what is on its line goes below the line (CSS 2.1 §9.5.1),
+    /// which is here, not at the next line's top: that line may be moved further down, past floats
+    /// it does not fit beside.
+    /// </remarks>
+    internal double? FlowBottom { get; set; }
+
     public double LineBottom
     {
         get
