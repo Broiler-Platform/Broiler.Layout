@@ -3159,18 +3159,24 @@ internal static class CssLayoutEngine
     {
         double shift = 0;
         for (var parent = box.ParentBox; parent is { Display: CssConstants.Inline }; parent = parent.ParentBox)
-        {
-            shift += parent.VerticalAlign switch
-            {
-                CssConstants.Sub => SubscriptShift(parent),
-                CssConstants.Super => -SuperscriptShift(parent),
-                CssConstants.Middle or CssConstants.TextTop or CssConstants.TextBottom => ParentFontShift(parent),
-                _ => -LengthRaise(parent),
-            };
-        }
+            shift += BaselineShift(parent);
 
         return shift;
     }
+
+    /// <summary>
+    /// How far below its parent's baseline the box's own <c>vertical-align</c> puts its baseline:
+    /// <c>sub</c> lowers it and <c>super</c> raises it, a length raises it by as much, and an inline
+    /// box aligned to its parent's font moves it as <see cref="ParentFontShift"/> does. 0 for a box
+    /// on the baseline, or aligned <c>top</c> or <c>bottom</c>.
+    /// </summary>
+    private static double BaselineShift(CssBox box) => box.VerticalAlign switch
+    {
+        CssConstants.Sub => SubscriptShift(box),
+        CssConstants.Super => -SuperscriptShift(box),
+        CssConstants.Middle or CssConstants.TextTop or CssConstants.TextBottom => ParentFontShift(box),
+        _ => -LengthRaise(box),
+    };
 
     /// <summary>
     /// How far below its parent's baseline an inline, non-replaced box that <c>middle</c>,
@@ -3433,6 +3439,14 @@ internal static class CssLayoutEngine
             double boxBaseline = lineBox.Rectangles[box].Top + BaselineAscentOf(box, lineBox)
                 + (bottomEdge ? box.ActualMarginBottom : 0)
                 + (box.IsInlineNonReplaced ? HalfLeading(box) : 0);
+
+            // A box lowered from the baseline, by its own alignment or by an inline box around it,
+            // stands as much below where the flow put it, and starts at the line's top with the
+            // baseline as much higher. Put where it would stand unlowered, the baseline was as
+            // much too low: a span with `line-height: 40px` lowered 10px in 16px/20px text made a
+            // 50px line, where browsers make it 40px. A box raised stands above the line's top,
+            // and moves the line down after (CreateLineBoxes).
+            boxBaseline -= Math.Max(0, ParentBaselineShift(box) + BaselineShift(box));
             baseline = Math.Max(baseline, boxBaseline);
         }
 
