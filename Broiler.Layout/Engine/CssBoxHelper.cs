@@ -343,6 +343,12 @@ internal static class CssBoxHelper
         // This box's own border and padding, and a table's spacing between its cells, are on the
         // path of everything inside it: its line and each word in it are that much wider. They come
         // off again below, once the box is done, so its siblings do not carry them.
+        //
+        // A table in the collapsing border model and its cells take halves of the borders they
+        // share, resolved when the table is laid out; one measured before that is resolved here.
+        if (box.Display is CssConstants.Table or CssConstants.InlineTable)
+            CssLayoutEngineTable.EnsureCollapsedBorders(box);
+
         double edges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth + box.ActualPaddingRight + box.ActualPaddingLeft;
         if (box.Display == CssConstants.Table)
             edges += CssLayoutEngineTable.GetTableSpacing(box);
@@ -374,10 +380,6 @@ internal static class CssBoxHelper
                 maxSum += word.FullWidth + (word.HasSpaceBefore ? word.OwnerBox.ActualWordSpacing : 0);
                 min = Math.Max(min, paddingSum + word.Width);
             }
-
-            // remove the last word padding
-            if (box.Words.Count > 0 && !box.Words[^1].HasSpaceAfter)
-                maxSum -= box.Words[^1].ActualWordSpacing;
         }
         else if (box.TryGetFlexRowIntrinsicContentWidths(out double flexMin, out double flexMax))
         {
@@ -663,6 +665,28 @@ internal static class CssBoxHelper
         box.HtmlTag is { } tag && tag.Name.Equals("html", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Whether <paramref name="box"/> has top padding or a top border, which separates its top
+    /// margin from its first in-flow child's (CSS2.1 §8.3.1).
+    /// </summary>
+    /// <remarks>
+    /// Margins are adjoining only where "no line boxes, no clearance, no padding and no border
+    /// separate them", and any padding or border does, however thin. Padding and borders under
+    /// 0.1px were taken for none: www.mediawiki.org's <c>.mw-page-container</c> has
+    /// <c>padding-top: 0.05px</c> to keep its site notice's 24px top margin inside it, and began
+    /// 24px below the header, where browsers begin it right below.
+    /// </remarks>
+    internal static bool HasTopPaddingOrBorder(CssBox box) =>
+        box.ActualPaddingTop > 0 || box.ActualBorderTopWidth > 0;
+
+    /// <summary>
+    /// Whether <paramref name="box"/> has bottom padding or a bottom border, which separates its
+    /// bottom margin from its last in-flow child's (CSS2.1 §8.3.1), however thin, as <see
+    /// cref="HasTopPaddingOrBorder"/> has it at the top.
+    /// </summary>
+    internal static bool HasBottomPaddingOrBorder(CssBox box) =>
+        box.ActualPaddingBottom > 0 || box.ActualBorderBottomWidth > 0;
+
+    /// <summary>
     /// Returns the effective bottom margin for a box, accounting for
     /// parent-child bottom-margin collapse (CSS 2.1 §8.3.1).
     /// When a box has no bottom border, no bottom padding, and auto height,
@@ -673,7 +697,7 @@ internal static class CssBoxHelper
     {
         double mb = box.ActualMarginBottom;
 
-        if (box.ActualBorderBottomWidth > 0.1 || box.ActualPaddingBottom > 0.1)
+        if (HasBottomPaddingOrBorder(box))
             return mb;
 
         // CSS2.1 §8.3.1: "Margins of the root element's box do not collapse." The root
@@ -719,6 +743,25 @@ internal static class CssBoxHelper
 
         if (lastInFlow == null)
             return mb;
+
+        // An empty last child's margins collapse through it (§8.3.1), and with the margins before
+        // it, so this box's margin joins the whole set: the margins the child stands below, its own
+        // and its children's. Only its own were taken: after a 30px block, an empty last child with
+        // margin-top: 20px handed on nothing, where browsers put the 20px below this box.
+        // CssBox.MarginBottomCollapse ends the box where the set begins. The set of a first child
+        // begins above this box, which is then empty itself and hands the set on as one, and one
+        // that collapses with a top margin that has clearance stays inside this box (§8.3.1; see
+        // CssBox.ClearsFloats).
+        if (IsEmptyCollapsible(lastInFlow) && !lastInFlow.MarginTopCollapsesWithParent)
+        {
+            if (lastInFlow.ClearsFloats)
+                return mb;
+
+            double setPositive = Math.Max(Math.Max(mb, 0), lastInFlow.CollapsedMarginTop);
+            double setNegative = Math.Min(Math.Min(mb, 0), lastInFlow.NegativeMarginTopAbove);
+            CollectEmptyBoxMargins(lastInFlow, ref setPositive, ref setNegative);
+            return setPositive + setNegative;
+        }
 
         double childMb = GetPropagatedMarginBottom(lastInFlow);
 
@@ -900,10 +943,7 @@ internal static class CssBoxHelper
         if (EstablishesBfc(box))
             return false;
 
-        if (box.ActualBorderTopWidth > 0.1 || box.ActualBorderBottomWidth > 0.1)
-            return false;
-
-        if (box.ActualPaddingTop > 0.1 || box.ActualPaddingBottom > 0.1)
+        if (HasTopPaddingOrBorder(box) || HasBottomPaddingOrBorder(box))
             return false;
 
         // Check if height resolves to zero/auto

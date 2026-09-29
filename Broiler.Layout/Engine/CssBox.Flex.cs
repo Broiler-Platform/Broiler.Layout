@@ -280,7 +280,6 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (currentLine.Items.Count > 0 || lines.Count == 0)
             lines.Add(currentLine);
 
-        double cursorY = contentTop;
         bool reverse = FlexDirection?.Trim().Equals("row-reverse", StringComparison.OrdinalIgnoreCase) == true;
 
         foreach (var line in lines)
@@ -296,13 +295,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 if (itemHeight > line.CrossSize)
                     line.CrossSize = itemHeight;
             }
+        }
 
-            // CSS Flexbox §9.4 step 15: a single-line container's line *is* its content box across
-            // the cross axis when that is definite, rather than the tallest item — so a 100px-tall
-            // container gives its line 100px to stretch into even when nothing in it is that tall.
-            if (lines.Count == 1 && definiteContentHeight is { } definite && definite > line.CrossSize)
-                line.CrossSize = definite;
+        ResolveFlexRowLineCrossSizes(lines, wrap, definiteContentHeight, rowGap, out double linesStart, out double lineGap);
 
+        double cursorY = contentTop + linesStart;
+        double contentExtent = 0;
+
+        foreach (var line in lines)
+        {
             StretchFlexLineItems(line);
 
             double usedWidth = 0;
@@ -363,13 +364,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     child.Size = new SizeF((float)borderBoxWidth, child.Size.Height);
             }
 
-            cursorY += line.CrossSize + rowGap;
+            cursorY += line.CrossSize + lineGap;
+            contentExtent += line.CrossSize + rowGap;
         }
 
         if (lines.Count > 0)
-            cursorY -= rowGap;
+            contentExtent -= rowGap;
 
-        ActualBottom = cursorY + ActualPaddingBottom + ActualBorderBottomWidth;
+        // The lines' own extent, not where align-content has moved them to within the container's
+        // height: a container is as tall as its lines, and its min-height, max-height or definite
+        // height, which is where the free space the lines share came from, is applied after.
+        ActualBottom = contentTop + contentExtent + ActualPaddingBottom + ActualBorderBottomWidth;
         ActualRight = Location.X + Size.Width;
 
         LayoutOutOfFlowFlexChildren(g, contentLeft, contentTop);
@@ -1958,6 +1963,88 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return height > 0 ? height : null;
     }
 
+    /// <summary>
+    /// Sizes a row flex container's lines across the cross axis, once each is as tall as its
+    /// tallest item, and returns where the first goes and the gap between them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS Flexbox §9.4 step 15: a single-line container's line is the container's inner cross
+    /// size when that is definite; step 8: otherwise it is the tallest item's, clamped to the
+    /// container's min and max cross sizes. The line was the tallest item's alone: a container 32px
+    /// tall by its min-height aligned its items in a 20px line at its top, so an icon centred in
+    /// an inline-flex button stood at the button's top, where browsers centre it, 6px down. And a
+    /// line only grew to a definite height: in a container 10px tall, a 20px item centred in it
+    /// stood at its top, where browsers put it 5px above.
+    /// </para>
+    /// <para>
+    /// Steps 15 and 16 again: a multi-line container's lines keep their own sizes, and share the
+    /// room the container has beyond them, from its definite height or its min-height, by
+    /// <c>align-content</c>; <c>normal</c> stretches them, as <c>stretch</c> does. A lone line of a
+    /// wrapping container grew to a definite height whatever <c>align-content</c> said, and was
+    /// clamped to the min and max heights as if the container did not wrap.
+    /// </para>
+    /// </remarks>
+    private void ResolveFlexRowLineCrossSizes(
+        List<FlexLineLayout> lines, bool wrap, double? definiteContentHeight, double rowGap,
+        out double lineOffset, out double lineGap)
+    {
+        lineOffset = 0;
+        lineGap = rowGap;
+
+        if (!wrap)
+        {
+            var line = lines[0];
+            line.CrossSize = ClampToContentHeightBounds(definiteContentHeight ?? line.CrossSize);
+            return;
+        }
+
+        double used = Math.Max(0, lines.Count - 1) * rowGap;
+
+        foreach (var line in lines)
+            used += line.CrossSize;
+
+        double free = ClampToContentHeightBounds(definiteContentHeight ?? used) - used;
+        string align = NormalizeBoxAlignment(AlignContent);
+
+        if (align is "" or "auto" or "normal")
+            align = "stretch";
+
+        if (align == "stretch")
+        {
+            if (free > 0.5)
+            {
+                double share = free / lines.Count;
+
+                foreach (var line in lines)
+                    line.CrossSize += share;
+            }
+
+            return;
+        }
+
+        ResolveContentDistribution(align, lines.Count, Math.Max(0, free), rowGap, out lineOffset, out lineGap);
+    }
+
+    /// <summary>
+    /// <paramref name="contentHeight"/> clamped to this box's <c>min-height</c> and
+    /// <c>max-height</c>, taken as content heights; <c>min-height</c> wins where they conflict.
+    /// </summary>
+    private double ClampToContentHeightBounds(double contentHeight)
+    {
+        var bounds = ResolveBlockSizeBounds();
+        if (bounds.IsUnconstrained)
+            return contentHeight;
+
+        double edges = UsesBorderBoxSizing
+            ? ActualPaddingTop + ActualPaddingBottom + ActualBorderTopWidth + ActualBorderBottomWidth
+            : 0;
+        double min = Math.Max(0, bounds.Min - edges);
+        double max = double.IsPositiveInfinity(bounds.Max) ? double.PositiveInfinity : Math.Max(0, bounds.Max - edges);
+
+        return Math.Max(Math.Min(contentHeight, max), min);
+    }
+
     private static void LayoutFlexItemAtTargetHeight(ILayoutEnvironment g, CssBox child, double targetOuterHeight)
     {
         double targetBorderBoxHeight = Math.Max(0, targetOuterHeight - child.ActualMarginTop - child.ActualMarginBottom);
@@ -2212,7 +2299,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 .ToContentBoxBounds(child.ResolveBlockSizeBounds(), blockEdges)
                 .Clamp(target - blockEdges);
 
-            if (target <= 0 || target <= child.Size.Height + 0.5)
+            // A line can be shorter than the item too, when its container's definite height or
+            // max-height makes it so (ResolveFlexRowLineCrossSizes), and the item is then as short
+            // as the line, its content overflowing it.
+            if (target <= 0 || Math.Abs(target - child.Size.Height) <= 0.5)
                 continue;
 
             child.Size = new SizeF(child.Size.Width, (float)target);
@@ -2225,10 +2315,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (align is "" or "auto" or "normal")
             align = NormalizeBoxAlignment(AlignItems);
 
+        // CSS Box Alignment 3 §4.4: a flex item's alignment is unsafe unless it says otherwise, so
+        // an item taller than its line, as one is in a line its container's max-height clamps
+        // (§9.4 step 8), overflows it on both sides when centred and above it when aligned to
+        // the end.
         double itemOuterHeight = GetFlexItemOuterHeight(child);
         double freeSpace = lineCrossSize - itemOuterHeight;
-        if (freeSpace <= 0)
-            return 0;
 
         return align switch
         {

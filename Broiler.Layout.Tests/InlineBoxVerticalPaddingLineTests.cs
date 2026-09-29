@@ -101,8 +101,9 @@ public sealed class InlineBoxVerticalPaddingLineTests
 
     /// <summary>
     /// In an 8px block with a 30px line height, one word to a line, a link with 10px of top padding
-    /// on the second line: the block is two lines, 60px tall. The second line was measured from the
-    /// top of the link's padding and ended 10px short, at 50px.
+    /// on the second line: the block is two lines, 60px tall, and the link's word stands half the
+    /// line's 14px of leading into the second, 37px down. The second line was measured from the top
+    /// of the link's padding and ended 10px short, at 50px.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void A_Padded_Link_On_A_Later_Line_Keeps_That_Line_Its_Height()
@@ -115,7 +116,7 @@ public sealed class InlineBoxVerticalPaddingLineTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(block.Location.Y + 30, second.Top, 1);
+        Assert.Equal(block.Location.Y + 30 + 7, second.Top, 1);
         Assert.Equal(60, block.Size.Height, 1);
     }
 

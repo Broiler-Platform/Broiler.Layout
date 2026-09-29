@@ -12,7 +12,27 @@ namespace Broiler.Layout.Engine;
 /// </summary>
 internal static class LayoutBoxUtils
 {
-    public static bool ContainsInlinesOnly(CssBox box)
+    /// <summary>
+    /// Whether <paramref name="box"/>'s children are all inline-level, besides floats and
+    /// <c>display: none</c> ones, where an inline table does not count as one.
+    /// </summary>
+    /// <remarks>
+    /// An inline table is inline-level (see <see cref="CssBox.IsInline"/>), but the rows in it are
+    /// not, and the parser's fix-up for a block inside an inline box
+    /// (<c>DomParser.CorrectBlockInsideInline</c>, in Broiler.HTML) asks this method whether a box's
+    /// children are all inline before it takes apart those of them holding blocks: it took the
+    /// table apart, and its rows and cells went into the box beside it. The layout asks
+    /// <see cref="LaysOutOnLines"/>, which counts the table in.
+    /// </remarks>
+    public static bool ContainsInlinesOnly(CssBox box) => ContainsInlinesOnly(box, inlineTablesCount: false);
+
+    /// <summary>
+    /// Whether <paramref name="box"/> lays its children out on lines: they are all inline-level,
+    /// inline tables among them, besides floats and <c>display: none</c> ones.
+    /// </summary>
+    public static bool LaysOutOnLines(CssBox box) => ContainsInlinesOnly(box, inlineTablesCount: true);
+
+    private static bool ContainsInlinesOnly(CssBox box, bool inlineTablesCount)
     {
         // CSS Flexbox §4 / CSS Grid §6: All direct children of a flex or
         // grid container become flex/grid items, which are sized using
@@ -42,6 +62,9 @@ internal static class LayoutBoxUtils
             // instead of the block path (which would split the text around
             // the float and introduce unwanted line breaks).
             if (!b.IsInline && b.Float == CssConstants.None)
+                return false;
+
+            if (b.Display == CssConstants.InlineTable && b.Float == CssConstants.None && !inlineTablesCount)
                 return false;
         }
 
@@ -114,10 +137,12 @@ internal static class LayoutBoxUtils
             int diff = 1;
             CssBox sib = conBlock.Boxes[index - diff];
 
-            while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed) && index - diff - 1 >= 0)
+            // A float is out of the flow too (CSS2.1 §9.5): the space after one is the space after
+            // the text before it, and was dropped, so "a<i style=float:left></i> b" read "ab".
+            while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed || sib.Float != CssConstants.None) && index - diff - 1 >= 0)
                 sib = conBlock.Boxes[index - ++diff];
 
-            return sib.Display == CssConstants.None ? null : sib;
+            return sib.Display == CssConstants.None || sib.Float != CssConstants.None ? null : sib;
         }
 
         return null;

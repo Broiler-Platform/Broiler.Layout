@@ -180,6 +180,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         _listItemBox?.OffsetTop(amount);
 
+        // Where the baselines of the lines the box lays its content out on are moves with that
+        // content. The line-clamp measure reads them once the box's children are placed, and a
+        // child moved after its lines were laid out, by a margin it passed on or by flex or grid
+        // placement, kept baselines where its lines had been.
+        foreach (CssLineBox line in LineBoxes)
+        {
+            if (line.Baseline is double baseline)
+                line.Baseline = baseline + amount;
+        }
+
         Location = new PointF(Location.X, (float)(Location.Y + amount));
     }
 
