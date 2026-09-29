@@ -30,7 +30,7 @@ internal static class CssLayoutEngine
     /// Latin fonts.  Used to compute baseline position when full font
     /// metrics are not directly available (CSS2.1 §10.8 strut).
     /// </summary>
-    private const double TypicalAscentRatio = 0.8;
+    internal const double TypicalAscentRatio = 0.8;
 
     /// <summary>
     /// Resolves a replaced element's specified width/height to a definite pixel
@@ -467,7 +467,13 @@ internal static class CssLayoutEngine
                 if (IsInAbsposSubtree(word.OwnerBox, blockBox))
                     continue;
 
-                maxBottom = Math.Max(maxBottom, InlineWordLineBoxBottom(word));
+                // A word of text reaches as low as the inline box it stands in, the leading below
+                // its glyphs lower (CSS 2.1 §10.8.1), as it reaches as high as the leading above
+                // them (WordLayoutTop). The glyphs alone were measured: text that vertical-align
+                // lowered left the line short by that leading, and a line of 16px/20px text with a
+                // word aligned `sub` in it was 22.76px tall, where browsers make it 24.19px.
+                maxBottom = Math.Max(maxBottom,
+                    word.IsImage ? InlineWordLineBoxBottom(word) : WordLayoutBottom(word));
 
                 // CSS2.1 §10.8: a baseline-aligned inline replaced element (image)
                 // sits with its bottom on the baseline, so the line box still
@@ -532,6 +538,17 @@ internal static class CssLayoutEngine
 
             if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, lineTop + blockBox.ActualLineHeight);
+
+            // The strut stands on the line's baseline, as the text on it does, and reaches the
+            // strut's descent below it (StrutDescent). Measured a line height down from the line's
+            // top, it was too high by as much as content above the strut raised that top: a span
+            // aligned `text-bottom` in a 10px font, alone on a line of 16px/20px text, reaches
+            // above the strut, and the line ended where the span does, 1.44px above the strut.
+            if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems
+                && linebox.Baseline is double lineBaseline)
+            {
+                maxBottom = Math.Max(maxBottom, lineBaseline + StrutDescent(blockBox));
+            }
 
             if (hasLineContent && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, lineTop));
@@ -2900,6 +2917,14 @@ internal static class CssLayoutEngine
         word.IsImage || word.OwnerBox == null ? word.Top : word.Top - HalfLeading(word.OwnerBox);
 
     /// <summary>
+    /// The bottom of the inline box a word of text stands in on its line: the leading below its
+    /// glyphs lower (<see cref="LeadingBelow"/>), which a line height less than the font's height
+    /// puts above their bottom. An image's bottom is its own.
+    /// </summary>
+    internal static double WordLayoutBottom(CssRect word) =>
+        word.IsImage || word.OwnerBox == null ? word.Bottom : word.Bottom + LeadingBelow(word.OwnerBox);
+
+    /// <summary>
     /// How far below a box's top edge its baseline sits, for the purpose of aligning it on the line.
     /// </summary>
     /// <remarks>
@@ -3111,7 +3136,8 @@ internal static class CssLayoutEngine
     /// <summary>
     /// How far below the line's baseline the baseline of the box's parent lies: each inline box
     /// around the box, up to the block, that <c>sub</c>, <c>super</c> or a length lowers or raises
-    /// from its own parent's baseline moves it by as much.
+    /// from its own parent's baseline moves it by as much, and so does one that <c>middle</c>,
+    /// <c>text-top</c> or <c>text-bottom</c> aligns to its parent's font (ParentFontShift).
     /// </summary>
     private static double ParentBaselineShift(CssBox box)
     {
@@ -3122,11 +3148,59 @@ internal static class CssLayoutEngine
             {
                 CssConstants.Sub => SubscriptShift(parent),
                 CssConstants.Super => -SuperscriptShift(parent),
+                CssConstants.Middle or CssConstants.TextTop or CssConstants.TextBottom => ParentFontShift(parent),
                 _ => -LengthRaise(parent),
             };
         }
 
         return shift;
+    }
+
+    /// <summary>
+    /// How far below its parent's baseline an inline, non-replaced box that <c>middle</c>,
+    /// <c>text-top</c> or <c>text-bottom</c> aligns to its parent's font puts its own baseline; 0
+    /// for any other box.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.8.1 aligns an inline, non-replaced box by its line height: its glyphs with half
+    /// its leading above them and the rest below (<see cref="HalfLeading"/>,
+    /// <see cref="LeadingBelow"/>). <c>text-top</c> puts the top of that at the top of the parent's
+    /// content area, its font's ascent above its baseline; <c>text-bottom</c> puts the bottom at the
+    /// bottom of it, its font's descent below; <c>middle</c> puts its middle half the parent's
+    /// x-height above the parent's baseline, taken as a quarter of the parent's font height as for
+    /// an atomic box.
+    /// </remarks>
+    private static double ParentFontShift(CssBox box)
+    {
+        if (!box.IsInlineNonReplaced || !IsAlignedToParentFontMetrics(box.VerticalAlign))
+            return 0;
+
+        double parentFontHeight = (box.ParentBox ?? box).ActualFont.Height;
+        double fontHeight = box.ActualFont.Height;
+        double above = fontHeight * TypicalAscentRatio + HalfLeading(box);
+        double below = fontHeight * (1.0 - TypicalAscentRatio) + LeadingBelow(box);
+
+        return box.VerticalAlign switch
+        {
+            CssConstants.TextTop => above - parentFontHeight * TypicalAscentRatio,
+            CssConstants.TextBottom => parentFontHeight * (1.0 - TypicalAscentRatio) - below,
+            _ => (above - below) / 2 - parentFontHeight / 4,
+        };
+    }
+
+    /// <summary>
+    /// Whether an inline box around the box, up to the block, is aligned to its parent's font
+    /// (<see cref="IsAlignedToParentFontMetrics"/>).
+    /// </summary>
+    private static bool IsInsideBoxAlignedToParentFont(CssBox box)
+    {
+        for (var parent = box.ParentBox; parent is { Display: CssConstants.Inline }; parent = parent.ParentBox)
+        {
+            if (IsAlignedToParentFontMetrics(parent.VerticalAlign))
+                return true;
+        }
+
+        return false;
     }
 
     private static void ApplyVerticalAlignment(CssLineBox lineBox)
@@ -3209,10 +3283,17 @@ internal static class CssLayoutEngine
         // beside it with it, never raise the box above the line. One raised or lowered from the
         // baseline is left out, as every inline-block was, and placed from the baseline the rest of
         // the line sets.
+        //
+        // What is inside an inline box aligned to its parent's font stands where that box puts it,
+        // and says no more about where the line's baseline is than the box does.
         foreach (var box in lineBox.Rectangles.Keys)
         {
-            if (topBottomBoxes.Contains(box) || IsAlignedToParentFontMetrics(box.VerticalAlign))
+            if (topBottomBoxes.Contains(box)
+                || IsAlignedToParentFontMetrics(box.VerticalAlign)
+                || IsInsideBoxAlignedToParentFont(box))
+            {
                 continue;
+            }
 
             bool bottomEdge = box.UsesBottomMarginEdgeBaseline;
             if (box.Display == CssConstants.InlineBlock
@@ -3277,6 +3358,20 @@ internal static class CssLayoutEngine
             // positions the box by its top, so we must subtract the box height to
             // convert from the desired bottom-edge position to the top-edge position.
             double boxAscent = BaselineAscentOf(box, lineBox);
+
+            // An inline, non-replaced box aligned to its parent's font is aligned by its line
+            // height, not by its glyphs or its padding box (ParentFontShift), and its text, in an
+            // inline box of its own, stands on the baseline that puts it on. The switch below
+            // aligned the box alone, which holds no words, so its text stayed on the line's
+            // baseline: the text of a span aligned `text-bottom` stood where one on the baseline
+            // does.
+            if (box.IsInlineNonReplaced && IsAlignedToParentFontMetrics(box.VerticalAlign))
+            {
+                if (baseline > float.MinValue)
+                    lineBox.SetBaseLine(box, parentBaseline + ParentFontShift(box) - boxAscent);
+
+                continue;
+            }
 
             //Important notes on http://www.w3.org/TR/CSS21/tables.html#height-layout
             switch (box.VerticalAlign)
@@ -3368,14 +3463,25 @@ internal static class CssLayoutEngine
                 }
             }
 
-            // Also consider word positions for the final line box bounds.
+            // A word of text reaches as far as the inline box it stands in, the leading above and
+            // below its glyphs (WordLayoutTop, WordLayoutBottom), and the strut stands on the
+            // baseline as far above and below it as its line height (CSS 2.1 §10.8.1). The glyphs
+            // alone were measured: a 30px box aligned `bottom` beside 16px/20px text ended where
+            // the glyphs do, 1.44px above the bottom of the strut, which the line then reached
+            // below the box.
             foreach (var word in lineBox.Words)
             {
                 if (!topBottomBoxes.Contains(word.OwnerBox))
                 {
-                    finalTop = Math.Min(finalTop, word.Top);
-                    finalBottom = Math.Max(finalBottom, word.Bottom);
+                    finalTop = Math.Min(finalTop, WordLayoutTop(word));
+                    finalBottom = Math.Max(finalBottom, WordLayoutBottom(word));
                 }
+            }
+
+            if (baseline > float.MinValue && lineBox.OwnerBox is { ActualLineHeight: > 0 } strutBox)
+            {
+                finalTop = Math.Min(finalTop, baseline - parentFontHeight * TypicalAscentRatio - HalfLeading(strutBox));
+                finalBottom = Math.Max(finalBottom, baseline + StrutDescent(strutBox));
             }
 
             foreach (CssBox box in boxes)
