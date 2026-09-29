@@ -896,6 +896,12 @@ internal static class CssLayoutEngine
     /// does not fit in the band there, and returns the y it settles at. Each step drops to the
     /// bottom of the shallowest float still in the way, so the walk is bounded by the float count.
     /// </summary>
+    /// <remarks>
+    /// The line is shifted down "until either some content fits or there are no more floats
+    /// present", so what is wider than the block itself goes below the floats beside it, and
+    /// overflows there as it would with no float at all. It stayed beside them, running on across
+    /// the floats' side, where browsers put it below them.
+    /// </remarks>
     private static double DropLineBelowNarrowBands(
         CssBox blockbox,
         double top,
@@ -907,17 +913,12 @@ internal static class CssLayoutEngine
         if (needed <= 0 || contentRight >= 90999 || blockbox.LineFloatBands is not { IsEmpty: false } bands)
             return top;
 
-        // The word may be wider than the block itself, in which case no drop can help and the
-        // line overflows where it is — the same answer the un-floated path gives.
-        if (needed > contentRight - contentLeft)
-            return top;
-
         for (int step = 0; step < 64; step++)
         {
             double left = bands.LeftAt(top, lineHeight, contentLeft);
             double right = bands.RightAt(top, lineHeight, contentRight);
 
-            if (right - left >= needed)
+            if (right - left >= needed || (left <= contentLeft && right >= contentRight))
                 return top;
 
             double next = bands.NextBandBottom(top, lineHeight);
@@ -930,6 +931,12 @@ internal static class CssLayoutEngine
 
         return top;
     }
+
+    /// <summary>
+    /// Whether anything is on <paramref name="line"/> yet: a word, or a box placed on it whole, as
+    /// an inline-block is.
+    /// </summary>
+    private static bool LineHoldsContent(CssLineBox line) => line.Words.Count > 0 || line.Rectangles.Count > 0;
 
     private static void FlowBox(ILayoutEnvironment g, CssBox blockbox, CssBox box, double limitRight, double linespacing, double startx, ref CssLineBox line, ref double curx, ref double cury, ref double maxRight, ref double maxbottom)
     {
@@ -1095,6 +1102,26 @@ internal static class CssLayoutEngine
 
                         if (word.IsImage || word.Equals(b.FirstWord))
                             curx += leftspacing;
+                    }
+
+                    // CSS2.1 §9.5: a line box beside floats too narrow for its first content is
+                    // shifted down until the content fits or no float is beside it. Only a line
+                    // that wrapped was: the first word on the block's first line, or after a
+                    // <br>, stayed beside a float it did not fit beside and ran on across the
+                    // float's side, where browsers put it below the float.
+                    else if (!word.IsLineBreak && !word.IsSpaces && !LineHoldsContent(line)
+                        && curx + word.Width + rightspacing > lineRight)
+                    {
+                        double bandLeft = BandLeftAt(blockbox, cury, boxLineHeight, startx);
+                        double dropped = DropLineBelowNarrowBands(
+                            blockbox, cury, boxLineHeight, startx, limitRight,
+                            curx - bandLeft + word.Width + rightspacing);
+
+                        if (dropped > cury)
+                        {
+                            curx += BandLeftAt(blockbox, dropped, boxLineHeight, startx) - bandLeft;
+                            cury = dropped;
+                        }
                     }
 
                     if (maxbottom - cury < lineHeightAfterWrap)
@@ -1513,14 +1540,39 @@ internal static class CssLayoutEngine
         double ibBorderLeft = curx - b.ActualBorderLeftWidth - b.ActualPaddingLeft;
         double edgeBeforeBox = ibBorderLeft - b.ActualMarginLeft;
         double totalExtent = b.ActualMarginLeft + ibBoxWidth + b.ActualMarginRight;
-        if (edgeBeforeBox + totalExtent > limitRight && edgeBeforeBox > startx)
+
+        // CSS2.1 §9.5: the line is as wide as the band the floats beside it leave, and a line too
+        // narrow for its first content is shifted down until the content fits or no float is
+        // beside it. The box was checked against the block's whole width and, first on its line,
+        // was never moved: an inline-block too wide for the room beside a left float went to the
+        // block's left edge, over the float, where browsers put it below the float.
+        double lineHeight = blockbox.ActualLineHeight > 0 ? blockbox.ActualLineHeight : blockbox.ActualFont.Height;
+        double bandLeft = BandLeftAt(blockbox, cury, lineHeight, startx);
+
+        if (edgeBeforeBox + totalExtent > BandRightAt(blockbox, cury, lineHeight, limitRight))
         {
-            // The strut's descent below a box on the line it leaves is already in maxbottom (see
-            // below). It was added here too, below any line an inline-block wrapped from, which put
-            // a row of inline-blocks holding text a descent lower than browsers put it.
-            curx = startx + leftspacing;
-            cury = maxbottom + linespacing;
-            line = new CssLineBox(blockbox);
+            if (edgeBeforeBox > bandLeft)
+            {
+                // The strut's descent below a box on the line it leaves is already in maxbottom (see
+                // below). It was added here too, below any line an inline-block wrapped from, which
+                // put a row of inline-blocks holding text a descent lower than browsers put it.
+                cury = DropLineBelowNarrowBands(
+                    blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
+                curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
+                line = new CssLineBox(blockbox);
+            }
+            else
+            {
+                double dropped = DropLineBelowNarrowBands(
+                    blockbox, cury, lineHeight, startx, limitRight, edgeBeforeBox - bandLeft + totalExtent);
+
+                if (dropped > cury)
+                {
+                    curx += BandLeftAt(blockbox, dropped, lineHeight, startx) - bandLeft;
+                    cury = dropped;
+                }
+            }
+
             ibBorderLeft = curx - b.ActualBorderLeftWidth - b.ActualPaddingLeft;
         }
 
