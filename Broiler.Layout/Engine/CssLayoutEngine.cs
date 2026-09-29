@@ -565,9 +565,12 @@ internal static class CssLayoutEngine
         // started 14.85px down its block, over the first line, where browsers start it 20px down
         // and make the block 5px taller.
         //
-        // A box aligned `top` or `bottom` is aligned to the line box, not to the baseline, and
-        // moves no line after the first: its line is made to hold it, not moved down for it. It
-        // moves the first line as before.
+        // A box aligned `bottom` ends at the bottom of the rest of its line, and one taller than the
+        // rest reaches above the line's top: the line moves down to hold it too. It moved no line
+        // after the first, and a 40px box aligned `bottom` on the second line of 16px/20px text
+        // started at the block's top, over the first line, where browsers start it 20px down and
+        // make the second line 40px tall. A box aligned `top` starts where the rest of its line
+        // does, and moves nothing that the rest does not.
         double restack = 0;
 
         foreach (var linebox in blockBox.LineBoxes)
@@ -575,9 +578,8 @@ internal static class CssLayoutEngine
             if (restack > 0)
                 ShiftLineBox(linebox, restack);
 
-            bool firstLine = ReferenceEquals(linebox, blockBox.LineBoxes[0]);
             double flowTop = (linebox.FlowTop ?? starty) + restack;
-            double contentTop = LineContentTop(linebox, blockBox, withLineBoxAligned: firstLine);
+            double contentTop = LineContentTop(linebox, blockBox);
             double raised = 0;
 
             if (contentTop < flowTop - 0.01)
@@ -930,20 +932,16 @@ internal static class CssLayoutEngine
     /// <summary>
     /// The top of what is on <paramref name="linebox"/>: its words, and the boxes placed on it
     /// whole, but not the padding and borders of the inline boxes around its words, which are not
-    /// part of it (CSS2.1 §10.6.1), nor what is out of the flow, nor, unless
-    /// <paramref name="withLineBoxAligned"/>, the boxes aligned to the line box's top or bottom.
+    /// part of it (CSS2.1 §10.6.1), nor what is out of the flow.
     /// <see cref="double.MaxValue"/> for a line with nothing on it.
     /// </summary>
-    private static double LineContentTop(CssLineBox linebox, CssBox blockBox, bool withLineBoxAligned)
+    private static double LineContentTop(CssLineBox linebox, CssBox blockBox)
     {
         double top = double.MaxValue;
 
         foreach (var rect in linebox.Rectangles)
         {
             if (IsInAbsposSubtree(rect.Key, blockBox) || rect.Key.IsInlineNonReplaced)
-                continue;
-
-            if (!withLineBoxAligned && rect.Key.VerticalAlign is CssConstants.Top or CssConstants.Bottom)
                 continue;
 
             top = Math.Min(top, rect.Value.Top);
