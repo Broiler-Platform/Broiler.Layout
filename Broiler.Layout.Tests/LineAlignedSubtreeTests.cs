@@ -146,6 +146,45 @@ public sealed class LineAlignedSubtreeTests
     }
 
     /// <summary>
+    /// A 10px inline-block aligned <c>bottom</c> alone on its line ends at the bottom of the line
+    /// the strut makes, 10px down its 20px. The line had no strut to align it to, and the box stood
+    /// at the top.
+    /// </summary>
+    [Fact]
+    public void A_Box_Aligned_Bottom_Alone_On_Its_Line_Ends_At_The_Struts_Bottom()
+    {
+        var block = Block();
+        var box = Box(block, 10, CssConstants.Bottom);
+        Layout(block);
+
+        Assert.Equal(10, box.Location.Y - block.Location.Y, 1);
+        Assert.Equal(20, block.Size.Height, 1);
+    }
+
+    /// <summary>
+    /// Controls, which pass before and after: alone on its line, a 10px inline-block aligned
+    /// <c>top</c> starts at the top of a 20px line, and a 40px one aligned <c>bottom</c> at the top
+    /// of the 40px line it makes.
+    /// </summary>
+    [Fact]
+    public void Control_A_Box_Aligned_Top_Or_A_Taller_One_Aligned_Bottom_Alone_On_Its_Line()
+    {
+        var top = Block();
+        var topBox = Box(top, 10, CssConstants.Top);
+        Layout(top);
+
+        Assert.Equal(0, topBox.Location.Y - top.Location.Y, 1);
+        Assert.Equal(20, top.Size.Height, 1);
+
+        var tall = Block();
+        var tallBox = Box(tall, 40, CssConstants.Bottom);
+        Layout(tall);
+
+        Assert.Equal(0, tallBox.Location.Y - tall.Location.Y, 1);
+        Assert.Equal(40, tall.Size.Height, 1);
+    }
+
+    /// <summary>
     /// Controls, which pass before and after: "a" and a span aligned <c>top</c> or <c>bottom</c>
     /// holding "t" in the block's own font and line height stand together at the top of a 20px line;
     /// and in a span aligned <c>bottom</c> holding "u" and a 40px inline-block, the subtree is taller
