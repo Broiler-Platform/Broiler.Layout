@@ -3189,6 +3189,13 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
+    /// The height of the font of the box's parent, whose content area <c>text-top</c> and
+    /// <c>text-bottom</c> align the box to: an inline box around it, or the block the line is in.
+    /// </summary>
+    private static double ParentFontHeightOf(CssBox box, CssLineBox lineBox) =>
+        (box.ParentBox ?? lineBox.OwnerBox)?.ActualFont.Height ?? 0;
+
+    /// <summary>
     /// Whether an inline box around the box, up to the block, is aligned to its parent's font
     /// (<see cref="IsAlignedToParentFontMetrics"/>).
     /// </summary>
@@ -3387,20 +3394,25 @@ internal static class CssLayoutEngine
                 case CssConstants.TextTop:
                     // CSS 2.1 §10.8.1: Align the top of the box with the
                     // top of the parent element's content area (font top).
+                    //
+                    // The parent's font, not the block's: in a 32px span in 16px text, an image
+                    // aligned `text-top` stood at the top of a 16px letter, 12.8px below the
+                    // span's, where browsers put it level with the span's letters.
                     if (baseline > float.MinValue)
                     {
-                        double parentContentTop = parentBaseline - parentFontHeight * TypicalAscentRatio;
+                        double parentContentTop = parentBaseline - ParentFontHeightOf(box, lineBox) * TypicalAscentRatio;
                         lineBox.SetBaseLine(box, parentContentTop);
                     }
                     break;
 
                 case CssConstants.TextBottom:
                     // CSS 2.1 §10.8.1: Align the bottom of the box with the
-                    // bottom of the parent element's content area (font bottom).
+                    // bottom of the parent element's content area (font bottom),
+                    // the parent's font's, as for `text-top`.
                     if (baseline > float.MinValue && lineBox.Rectangles.TryGetValue(box, out RectangleF value))
                     {
                         double boxHeight = value.Height;
-                        double parentContentBottom = parentBaseline + parentFontHeight * (1.0 - TypicalAscentRatio);
+                        double parentContentBottom = parentBaseline + ParentFontHeightOf(box, lineBox) * (1.0 - TypicalAscentRatio);
                         lineBox.SetBaseLine(box, parentContentBottom - boxHeight);
                     }
                     break;
