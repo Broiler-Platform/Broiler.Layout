@@ -23,6 +23,37 @@ internal sealed class CssLineBox
     public Dictionary<CssBox, RectangleF> Rectangles { get; }
 
     /// <summary>
+    /// The inline boxes the flow put on the line with nothing in them, in the order it put them
+    /// there, each at its <see cref="CssBoxProperties.Location"/>: the left of its content, at the
+    /// top of the line.
+    /// </summary>
+    /// <remarks>
+    /// They are not in <see cref="Rectangles"/> while the line is laid out, since a rectangle
+    /// would make a line holding nothing else count as content (CssLayoutEngine.FlowBox); they get
+    /// theirs once the line's baseline is placed (CssLayoutEngine.PlaceEmptyInlineBoxes).
+    /// </remarks>
+    internal List<EmptyInlineBox> EmptyInlineBoxes { get; } = [];
+
+    /// <summary>
+    /// The collapsible white space the flow has put on the line since the last word or box it
+    /// placed on it whole: the space after that word, and any run of white space after that.
+    /// </summary>
+    internal double TrailingSpace { get; set; }
+
+    /// <summary>How many words and boxes placed whole the flow has put on the line.</summary>
+    internal int ContentCount { get; private set; }
+
+    /// <summary>
+    /// Notes that the flow put a word or a box whole on the line, with
+    /// <paramref name="trailingSpace"/> of collapsible white space after it.
+    /// </summary>
+    internal void ReportContent(double trailingSpace)
+    {
+        ContentCount++;
+        TrailingSpace = trailingSpace;
+    }
+
+    /// <summary>
     /// The top of the line, where the flow put it, before vertical alignment moved what is on it;
     /// null for a line made outside the flow.
     /// </summary>
@@ -147,6 +178,45 @@ internal sealed class CssLineBox
         // gives them theirs on the line it sits on.
         if (box.ParentBox != null && box.ParentBox.IsInline && box.ParentBox != OwnerBox)
             UpdateRectangle(box.ParentBox, x, contentTop, r, contentBottom);
+    }
+
+    /// <summary>
+    /// Gives <paramref name="box"/>, an inline box holding nothing on the line, its rectangle there:
+    /// from <paramref name="x"/> to <paramref name="r"/>, the edges of its content, with its padding
+    /// and border around them, and as tall as the content area <paramref name="contentArea"/> gives
+    /// it. The inline boxes around it take it in along the line only.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.6.1: an inline box's content area is as tall as its own font, whatever it holds.
+    /// An inline box around the box keeps the height what else it holds on the line gives it, and
+    /// one holding nothing else there gets its own content area. Fitted to the box as
+    /// <see cref="UpdateRectangle"/> fits them to a word, a span of 16px text around an empty span in
+    /// a 40px font was 46.4px tall, where browsers keep it 17px tall.
+    /// </remarks>
+    internal void UpdateRectangleAlongLine(
+        CssBox box, double x, double r, Func<CssBox, (double Top, double Bottom)> contentArea)
+    {
+        if (box.FirstHostingLineBox != null && box.FirstHostingLineBox.Equals(this))
+            x -= box.ActualBorderLeftWidth + box.ActualPaddingLeft;
+
+        if (box.LastHostingLineBox != null && box.LastHostingLineBox.Equals(this))
+            r += box.ActualBorderRightWidth + box.ActualPaddingRight;
+
+        if (Rectangles.TryGetValue(box, out RectangleF f))
+        {
+            Rectangles[box] = RectangleF.FromLTRB(
+                (float)Math.Min(f.X, x), f.Top, (float)Math.Max(f.Right, r), f.Bottom);
+        }
+        else
+        {
+            var (top, bottom) = contentArea(box);
+            Rectangles.Add(box, RectangleF.FromLTRB(
+                (float)x, (float)(top - box.ActualBorderTopWidth - box.ActualPaddingTop),
+                (float)r, (float)(bottom + box.ActualBorderBottomWidth + box.ActualPaddingBottom)));
+        }
+
+        if (box.ParentBox != null && box.ParentBox.IsInline && box.ParentBox != OwnerBox)
+            UpdateRectangleAlongLine(box.ParentBox, x, r, contentArea);
     }
 
     /// <summary>
@@ -306,3 +376,17 @@ internal sealed class CssLineBox
         return string.Join(" ", ws);
     }
 }
+
+/// <summary>
+/// An inline box the flow put on a line with nothing in it (<see cref="CssLineBox.EmptyInlineBoxes"/>).
+/// </summary>
+/// <param name="Box">The box.</param>
+/// <param name="SpaceBefore">
+/// The collapsible white space the flow put on the line between the word or box placed whole before
+/// the box and the box (<see cref="CssLineBox.TrailingSpace"/>).
+/// </param>
+/// <param name="ContentBefore">
+/// How many words and boxes placed whole the flow had put on the line before the box; when it had
+/// put no more by the end of the line, nothing but white space and empty boxes follows the box there.
+/// </param>
+internal readonly record struct EmptyInlineBox(CssBox Box, double SpaceBefore, int ContentBefore);
