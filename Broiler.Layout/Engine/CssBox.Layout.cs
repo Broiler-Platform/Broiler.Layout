@@ -1987,12 +1987,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         else if ((Position == CssConstants.Absolute || Position == CssConstants.Fixed)
             && Top != null && Top != CssConstants.Auto
             && Bottom != null && Bottom != CssConstants.Auto
-            && (Height == CssConstants.Auto || string.IsNullOrEmpty(Height)))
+            && (Height == CssConstants.Auto || string.IsNullOrEmpty(Height))
+            && !AlignsBetweenBlockInsets())
         {
             // CSS2.1 §10.6.4: For absolutely positioned, non-replaced
             // elements when height is auto and both top and bottom are
             // specified, compute height from the constraint equation:
             // top + margin-top + height + margin-bottom + bottom = CB height
+            //
+            // Unless CSS Box Alignment 3 §6.1 aligns the box between them: an `align-self` other
+            // than `normal` or `stretch` sizes it as fit-content, which in the block axis is its
+            // content height, as its lines left it, and PositionAbsoluteBox aligns it. It was
+            // stretched between the insets, and PositionAbsoluteBox measured it again from its
+            // children's bottom edges, which says nothing of its lines: "x" with `top: 0;
+            // bottom: 0; align-self: center` stayed 100px tall at the top of a 100px containing
+            // block, where browsers make it 20px tall, 40px down.
             double cbHeight;
 
             if (Position == CssConstants.Fixed && LayoutEnvironment != null)
@@ -2242,6 +2251,29 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         string js = JustifySelf?.Trim().ToLowerInvariant() ?? "auto";
         if (js is "auto" or "normal" or "stretch" or "anchor-center")
+            return false;
+
+        string cbWritingMode = FindPositionedContainingBlock().WritingMode;
+        return cbWritingMode != "vertical-rl" && cbWritingMode != "vertical-lr";
+    }
+
+    /// <summary>
+    /// Whether this box is absolutely or fixed positioned with both block insets in a horizontal
+    /// containing block, and aligned between them by an <c>align-self</c> other than
+    /// <c>normal</c> or <c>stretch</c> (CSS Box Alignment 3 §6.1), which PositionAbsoluteBox does.
+    /// <c>anchor-center</c> is left to anchor positioning.
+    /// </summary>
+    private bool AlignsBetweenBlockInsets()
+    {
+        if (Position is not (CssConstants.Absolute or CssConstants.Fixed)
+            || Top == null || Top == CssConstants.Auto
+            || Bottom == null || Bottom == CssConstants.Auto)
+        {
+            return false;
+        }
+
+        string alignSelf = AlignSelf?.Trim().ToLowerInvariant() ?? "auto";
+        if (alignSelf is "auto" or "normal" or "stretch" or "anchor-center")
             return false;
 
         string cbWritingMode = FindPositionedContainingBlock().WritingMode;
@@ -2588,7 +2620,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         double imcbTop = cbPadTop + cssTop;
                         double imcbHeight = cbPadHeight - cssTop - cssBottom;
 
-                        double boxHeight = GetShrinkToFitHeight();
+                        // ResolveUsedBlockHeight left a box with an auto height at its content
+                        // height already (AlignsBetweenBlockInsets); measuring it again from its
+                        // children's bottom edges would miss its lines, and count its positioned
+                        // children.
+                        double boxHeight = (Height == CssConstants.Auto || string.IsNullOrEmpty(Height)) && AlignsBetweenBlockInsets()
+                            ? ActualBottom - Location.Y
+                            : GetShrinkToFitHeight();
 
                         // Non-stretch align-self → the box is its content height,
                         // not the stretched top-to-bottom inset height.
@@ -2598,8 +2636,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         // alignment runs on the CB's block (vertical) axis but the
                         // item's PHYSICAL height is its logical WIDTH (the rotation
                         // swaps them); align with the physical extent.
-                        double alignHeight = WillBeVerticalTransposed()
-                            ? GetShrinkToFitWidth() : boxHeight;
+                        //
+                        // What is aligned is the margin box: with `margin-top: 20px`, a centred
+                        // 20px box was 60px down a 100px containing block, where browsers put it
+                        // 50px down.
+                        double alignHeight = (WillBeVerticalTransposed()
+                            ? GetShrinkToFitWidth() : boxHeight) + ActualMarginTop + ActualMarginBottom;
 
                         // Block-axis start is the top edge for horizontal-tb. self-start/
                         // self-end use the ITEM's start in this vertical axis: its block
