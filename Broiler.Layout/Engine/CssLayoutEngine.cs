@@ -407,8 +407,14 @@ internal static class CssLayoutEngine
         // where browsers make it 30, and one made it 19.
         bool linesHoldFlexItems = blockBox.Display is "flex" or "inline-flex";
 
+        // Where each line ends, which the line after it starts below (see the restack below).
+        var lineBottoms = new Dictionary<CssLineBox, double>();
+
         foreach (var linebox in blockBox.LineBoxes)
         {
+            double blockBottom = maxBottom;
+            maxBottom = double.MinValue;
+
             foreach (var rect in linebox.Rectangles)
             {
                 // CSS2.1 §9.6.1: Absolutely/fixed positioned elements are
@@ -572,6 +578,9 @@ internal static class CssLayoutEngine
             // it 60px.
             if (hasLineContent && !linesHoldFlexItems)
                 maxBottom = Math.Max(maxBottom, TallInlineBoxLineBottom(blockBox, linebox, Math.Min(lineTop, contentTop)));
+
+            lineBottoms[linebox] = maxBottom;
+            maxBottom = Math.Max(blockBottom, maxBottom);
         }
 
         // CSS2.1 §10.8.1: a line box reaches from the top of the highest box on it to the bottom of
@@ -591,10 +600,22 @@ internal static class CssLayoutEngine
         // started at the block's top, over the first line, where browsers start it 20px down and
         // make the second line 40px tall. A box aligned `top` starts where the rest of its line
         // does, and moves nothing that the rest does not.
+        //
+        // A line starts where the line above it ends, too, however much taller than the flow left
+        // room for vertical alignment made that one: the flow starts each line below the one before
+        // as it placed it, before the alignment. Text in a larger font, or a box lowered from the
+        // baseline, reached into the next line: in 16px/20px text, a 32px "B" made its line 26px
+        // tall in browsers, and the next line started 20px down, where browsers start it 26px down.
         double restack = 0;
+        double lineAboveBottom = double.MinValue;
+        double settledBottom = starty;
 
         foreach (var linebox in blockBox.LineBoxes)
         {
+            double flowTopBelow = (linebox.FlowTop ?? starty) + restack;
+            if (lineAboveBottom > flowTopBelow + 0.01)
+                restack += lineAboveBottom - flowTopBelow;
+
             if (restack > 0)
                 ShiftLineBox(linebox, restack);
 
@@ -613,9 +634,18 @@ internal static class CssLayoutEngine
             linebox.RestackTop = restack;
             linebox.RestackBottom = restack + raised;
             restack += raised;
+
+            if (lineBottoms[linebox] > double.MinValue)
+            {
+                lineAboveBottom = lineBottoms[linebox] + linebox.RestackBottom;
+                settledBottom = Math.Max(settledBottom, lineAboveBottom);
+            }
         }
 
-        maxBottom += restack;
+        // The block reaches the bottom of its lowest line where the lines now are. Each line moved by
+        // its own shift, not the last one's, so the lowest line before the restack moved by the
+        // whole of it only where it is the last.
+        maxBottom = settledBottom;
 
         // CSS2.1 §9.4.3: the lines are settled, so the boxes the flow placed on them whole take
         // their relative offsets now.
