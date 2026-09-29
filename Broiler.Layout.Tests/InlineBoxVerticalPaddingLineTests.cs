@@ -20,7 +20,9 @@ namespace Broiler.Layout.Tests;
 /// growing 10px taller. A table cell measured what it centres the same way.
 /// </para>
 /// <para>
-/// Words here are 8×16px, one to each inline box, in a 320px block; no line-height is set.
+/// Words here are 8×16px, one to each inline box, in a 320px block; no line-height is set. Each word
+/// is followed by a space, where a line may break (CSS Text 3 §5.1): the edge of a box inside a
+/// word is no such place.
 /// </para>
 /// </remarks>
 public sealed class InlineBoxVerticalPaddingLineTests
@@ -284,7 +286,7 @@ public sealed class InlineBoxVerticalPaddingLineTests
     /// <summary>An anonymous inline box in <paramref name="parent"/> holding one word, and the word.</summary>
     private static CssRect Word(CssBox parent)
     {
-        var text = new CssBox(parent, null, BaseUrl) { Display = "inline", Text = "X".AsMemory() };
+        var text = new CssBox(parent, null, BaseUrl) { Display = "inline", Text = "X ".AsMemory() };
         text.ParseToWords();
         return Assert.Single(text.Words);
     }
