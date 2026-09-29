@@ -109,6 +109,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         _marginTopCollapsesWithParent = false;
         _negativeMarginTopAbove = 0;
         ClearsFloats = false;
+        _placedBelowHandedOnSet = false;
+        _marginSeparation = null;
+        PrecedingFloatsBottom = double.PositiveInfinity;
+        FloatHeldDown = true;
+        FloatsBesideBottom = double.NegativeInfinity;
     }
 
     /// <summary>
@@ -171,18 +176,102 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>
     /// Moves the run of boxes that a first child's top margin collapses through, <see
     /// cref="FirstChildMarginRun"/> of <paramref name="parent"/>, by <paramref name="growth"/>: how
-    /// much the child changes what the set of margins above the run comes to. Each box of the run
-    /// gets the set's new <paramref name="positive"/> and <paramref name="negative"/> sides.
+    /// much <paramref name="child"/> changes what the set of margins above the run comes to. Each box
+    /// of the run gets the set's new <paramref name="positive"/> and <paramref name="negative"/>
+    /// sides.
     /// </summary>
-    private static void MoveFirstChildMarginRun(CssBox parent, double positive, double negative, double growth)
+    /// <remarks>
+    /// What the run holds before the child goes with it, but for the out-of-flow boxes whose place
+    /// does not follow the run's (CSS2.1 §9.5.1, §10.6.4). A float there is one the set places,
+    /// where it ends, at the top of the box it is in. The floats after an empty block whose margins
+    /// collapse with its parent's (see <see cref="_placedBelowHandedOnSet"/>), such as those
+    /// between it and the box after it, were placed below the part of the set it handed on, so they
+    /// are placed again where the set ends now, by the float rules (see <see
+    /// cref="PlaceFloatAtParentTop"/>), and so are the floats after them, which they may hold down
+    /// or aside. The floats before them were placed where the set ended, and the run's move takes
+    /// them where the float rules place them now, unless a float before the run, outside it,
+    /// reaches down to where the run is or goes: that one stays where it is and may hold them down
+    /// or aside, so then they are placed again, in document order, from the first that the move
+    /// takes out of the reach of a float that held it down or stood beside it, or all of them when
+    /// the run moves up or one of them has <c>clear</c>. A float on a line of inline content, or in
+    /// a box that <c>position: relative</c> has shifted already, goes with the run: the rules place
+    /// it from where the line or the box was before, which the float no longer knows. Placed again
+    /// from where the box was shifted to, after a 100 × 50px float, a float in
+    /// <c>&lt;div&gt;&lt;div style="position: relative; top:
+    /// 20px"&gt;&lt;div&gt;&lt;/div&gt;&lt;div style="float: left"&gt;&lt;/div&gt;&lt;/div&gt;&lt;p
+    /// style="margin-top: 30px"&gt;</c> went to the left edge, where browsers place it beside the
+    /// big float, 100px across, before they shift it 20px down. Moved with the run, a float after
+    /// an empty block kept the part of the set it had been placed below: after a 10px block, in
+    /// <c>&lt;div&gt;&lt;div&gt;&lt;div style="margin-bottom: 10px"&gt;&lt;/div&gt;&lt;div
+    /// style="float: left"&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;</c> it went 10px below the outer
+    /// <c>&lt;div&gt;</c>'s top, where browsers put it at the top, with the <c>&lt;p&gt;</c>. An
+    /// absolutely positioned box that its <c>top</c> or <c>bottom</c> place in a containing block
+    /// outside the run stays where they put it, and a fixed box at its static position goes with
+    /// the run (see <see cref="OffsetWithBoxesApart"/>). Moved with the run, a float that a float
+    /// outside it held below it went down by the margin as well, and so did a box with <c>top:
+    /// 5px</c> in the page: after a 300 × 40px float, in <c>&lt;div&gt;&lt;div style="float:
+    /// left"&gt;&lt;/div&gt;&lt;p style="margin-top: 30px"&gt;</c> the float went 30px below the
+    /// big one, and <c>&lt;div&gt;&lt;div style="position: absolute; top: 5px"&gt;&lt;/div&gt;&lt;p
+    /// style="margin-top: 30px"&gt;</c> put the box 35px down the page, where browsers put them
+    /// right below the big float and 5px down.
+    /// </remarks>
+    private static void MoveFirstChildMarginRun(CssBox parent, CssBox child, double positive, double negative,
+        double growth)
     {
-        var moved = parent;
+        List<CssBox> run = [];
 
         foreach (var box in FirstChildMarginRun(parent))
         {
             box.CollapsedMarginTop = positive;
             box._negativeMarginTopAbove = negative;
-            moved = box;
+            run.Add(box);
+        }
+
+        var moved = run[^1];
+        List<CssBox> floats = [];
+        List<CssBox> apart = [];
+
+        foreach (var box in BoxesBeforeInRun(run, child))
+        {
+            CssBoxHelper.CollectFloatsInSubtree(box, floats);
+            CollectBoxesApart(box, moved, apart);
+        }
+
+        // The first float the run holds, in document order: the floats before it are those before
+        // the run (see FloatBeforeReachesBelow).
+        var first = floats.Count > 0 ? floats[0] : null;
+
+        // The floats that go with the run in any case (see above).
+        floats.RemoveAll(box => IsPlacedByOffsets(box) || box.InlineFloatTopFloor is not null
+            || IsInShiftedBox(box, run));
+
+        // The first float placed below a part of the set that was handed on; it and the floats
+        // after it are placed again.
+        int again = floats.FindIndex(box => box._placedBelowHandedOnSet);
+
+        if (again < 0)
+            again = floats.Count;
+
+        // The highest the float rules may place a float in the run, where the run is and where it
+        // goes: at its top, less a negative top margin of the float's.
+        double lowestMargin = 0;
+
+        foreach (var box in floats)
+            lowestMargin = Math.Min(lowestMargin, box.ActualMarginTop);
+
+        double highest = Math.Min(moved.Location.Y, moved.Location.Y + growth) + lowestMargin;
+        bool clears = floats.FindIndex(0, again, box => box.Clear is not (null or CssConstants.None)) >= 0;
+
+        if (again > 0 && FloatBeforeReachesBelow(moved, highest, first!, clears))
+        {
+            // Moved down, the floats that keep their places among the floats around them go with
+            // the run (see KeepsItsPlaceMovedDown), up to the first that does not.
+            int held = growth >= 0 && !clears
+                ? floats.FindIndex(0, again, box => !box.KeepsItsPlaceMovedDown(growth))
+                : 0;
+
+            if (held >= 0)
+                again = held;
         }
 
         // Move what is already inside the parent with it. Only the parent's own origin used to
@@ -191,7 +280,194 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // content rendered outside its own border box. www.mediawiki.org's site notice did exactly
         // that: its border box moved down by the margin its first block child propagated, and the
         // notice text stayed above it.
-        moved.OffsetTop(growth);
+        moved.OffsetWithBoxesApart(0, growth, apart);
+
+        for (int i = again; i < floats.Count; i++)
+            floats[i].PlaceFloatAtParentTop();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is in a box that <c>position: relative</c> has shifted already
+    /// (CSS2.1 §9.4.3), inside the boxes of the <paramref name="run"/>, which are still being laid
+    /// out and are not shifted yet.
+    /// </summary>
+    private static bool IsInShiftedBox(CssBox box, List<CssBox> run)
+    {
+        for (var ancestor = box.ParentBox; ancestor != null && !run.Contains(ancestor);
+            ancestor = ancestor.ParentBox)
+        {
+            var (dx, dy) = ancestor.RelativePositionOffset();
+
+            if (dx != 0 || dy != 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a float before <paramref name="box"/> in its block formatting context, outside it,
+    /// reaches below <paramref name="top"/>, where it may hold a float in <paramref name="box"/>
+    /// placed below that down or aside (CSS2.1 §9.5.1): with its border box, which is what the float
+    /// rules keep floats off (see <see cref="PlaceFloat"/>), or with its margin box, below which a
+    /// float with <c>clear</c> goes (§9.5.2), when one of the floats in the box <paramref
+    /// name="clears"/>.
+    /// </summary>
+    /// <remarks>
+    /// The floats before <paramref name="first"/>, the first float in <paramref name="box"/>, are
+    /// those before the box, and they stay where they are while the box is laid out, so their border
+    /// boxes reach as far down as they did when <paramref name="first"/> was first placed, <see
+    /// cref="PrecedingFloatsBottom"/>. Walking them for every move of the box made a page of 2000
+    /// articles, each a floated thumbnail and a heading with a top margin, take 16.6s to lay out,
+    /// where it took 14.3s before; and as each thumbnail's bottom margin reached past the top of the
+    /// next article, each thumbnail after it was placed again.
+    /// </remarks>
+    private static bool FloatBeforeReachesBelow(CssBox box, double top, CssBox first, bool clears)
+    {
+        if (!clears && !double.IsPositiveInfinity(first.PrecedingFloatsBottom))
+            return first.PrecedingFloatsBottom > top + 0.01;
+
+        return CssBoxHelper.CollectPrecedingFloatsInBfc(box).Exists(floatBox =>
+            FloatBottom(floatBox, withMargin: clears) > top + 0.01);
+    }
+
+    /// <summary>
+    /// How far down <paramref name="floatBox"/> reaches: the bottom of its border box, as <see
+    /// cref="PlaceFloat"/> measures it, or <paramref name="withMargin"/> of its margin box, as <see
+    /// cref="CssBoxHelper.GetMaxFloatBottom"/> does.
+    /// </summary>
+    private static double FloatBottom(CssBox floatBox, bool withMargin) => withMargin
+        ? Math.Max(floatBox.ActualBottom, floatBox.Location.Y + floatBox.ActualHeight + floatBox.ActualPaddingTop
+            + floatBox.ActualPaddingBottom + floatBox.ActualBorderTopWidth + floatBox.ActualBorderBottomWidth)
+            + Math.Max(floatBox.ActualMarginBottom, 0)
+        : floatBox.ActualBottom;
+
+    /// <summary>
+    /// How far down the floats before this float in its block formatting context reached with their
+    /// border boxes when it was first placed on this layout pass (see <see cref="FloatBottom"/>):
+    /// nothing when there were none, and further than anything until it is placed.
+    /// </summary>
+    private double PrecedingFloatsBottom { get; set; } = double.PositiveInfinity;
+
+    /// <summary>
+    /// Whether the floats before this float held it lower than where it stood when <see
+    /// cref="PlaceFloat"/> last placed it, at its containing block's top, the top of the float
+    /// before it or the line the content before it reached (CSS2.1 §9.5.1).
+    /// </summary>
+    private bool FloatHeldDown { get; set; } = true;
+
+    /// <summary>
+    /// How far down the border boxes of the floats beside this float reached when <see
+    /// cref="PlaceFloat"/> last placed it, those before it whose band it overlapped: the nearest
+    /// bottom of them, further down than anything when there were none, and nothing until it is
+    /// placed.
+    /// </summary>
+    private double FloatsBesideBottom { get; set; } = double.NegativeInfinity;
+
+    /// <summary>
+    /// Whether the float rules would place this float, laid out already, <paramref name="down"/>
+    /// further down when the boxes it is in and the floats in them move so far, with the floats
+    /// before them staying where they are (CSS2.1 §9.5.1): when no float held it down, and every
+    /// float beside it reaches below where it goes. Moved down, a float's band can only lose the
+    /// floats before it that overlap it, since none of them begins below its top (rule 6), and with
+    /// the same ones beside it, it goes as far across and stands where its containing block's top,
+    /// or the float before it, puts it, as before.
+    /// </summary>
+    private bool KeepsItsPlaceMovedDown(double down) =>
+        !FloatHeldDown && FloatsBesideBottom > Location.Y - RelativePositionOffset().Y + down + 0.01;
+
+    /// <summary>
+    /// What the <paramref name="run"/> of boxes a first child's top margin collapses through (<see
+    /// cref="FirstChildMarginRun"/>) holds before <paramref name="child"/>, laid out already, in
+    /// document order: in each box of the run, from the topmost down, the boxes before the next box
+    /// of the run, or before the child.
+    /// </summary>
+    private static IEnumerable<CssBox> BoxesBeforeInRun(List<CssBox> run, CssBox child)
+    {
+        for (int i = run.Count - 1; i >= 0; i--)
+        {
+            var next = i > 0 ? run[i - 1] : child;
+
+            foreach (var box in run[i].Boxes)
+            {
+                if (box == next)
+                    break;
+
+                if (box.Display != CssConstants.None)
+                    yield return box;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds to <paramref name="apart"/> <paramref name="box"/>, or the out-of-flow boxes in it, whose
+    /// place does not simply follow <paramref name="moving"/>'s when it moves (see <see
+    /// cref="OffsetWithBoxesApart"/>): the absolutely positioned ones whose containing block is
+    /// outside it, and the fixed ones. What is in such a box goes with it, so it is not looked into.
+    /// </summary>
+    private static void CollectBoxesApart(CssBox box, CssBox moving, List<CssBox> apart)
+    {
+        if (box.Display == CssConstants.None)
+            return;
+
+        if (box.Position is CssConstants.Absolute or CssConstants.Fixed)
+        {
+            if (box.Position == CssConstants.Fixed || !IsWithin(box.FindPositionedContainingBlock(), moving))
+                apart.Add(box);
+
+            return;
+        }
+
+        foreach (var child in box.Boxes)
+            CollectBoxesApart(child, moving, apart);
+    }
+
+    /// <summary>
+    /// Moves this box <paramref name="across"/> and <paramref name="down"/> with what is in it, as
+    /// <see cref="OffsetLeft"/> and <see cref="OffsetTop"/> do, and puts the out-of-flow boxes in it
+    /// that <paramref name="apart"/> lists (see <see cref="CollectBoxesApart"/>) where they belong
+    /// then (CSS2.1 §10.3.7, §10.6.4): as far across or down in an axis in which they are at their
+    /// static position, and where they are in one in which their offsets place them in their
+    /// containing block, which does not move (see <see cref="KeepsItsPlaceDown"/>). OffsetLeft and
+    /// OffsetTop move an absolutely positioned box in both axes, and a fixed one in neither.
+    /// </summary>
+    private void OffsetWithBoxesApart(double across, double down, List<CssBox> apart)
+    {
+        var places = apart.ConvertAll(box => (
+            X: IsPlacedAcrossByOffsets(box) ? box.Location.X : box.Location.X + across,
+            Y: KeepsItsPlaceDown(box) ? box.Location.Y : box.Location.Y + down));
+
+        if (Math.Abs(across) > 0.01)
+            OffsetLeft(across);
+
+        if (Math.Abs(down) > 0.01)
+            OffsetTop(down);
+
+        for (int i = 0; i < apart.Count; i++)
+        {
+            double shiftX = places[i].X - apart[i].Location.X;
+            double shiftY = places[i].Y - apart[i].Location.Y;
+
+            if (Math.Abs(shiftX) > 0.01)
+                apart[i].OffsetLeft(shiftX);
+
+            if (Math.Abs(shiftY) > 0.01)
+                apart[i].OffsetTop(shiftY);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is <paramref name="ancestor"/> or a box in it.
+    /// </summary>
+    private static bool IsWithin(CssBox? box, CssBox ancestor)
+    {
+        for (var b = box; b != null; b = b.ParentBox)
+        {
+            if (b == ancestor)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -202,27 +478,258 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private bool ParentMovesWithItsMargin => _parentBox is { ParentBox.ParentBox: not null };
 
     /// <summary>
-    /// Whether this box follows <paramref name="sibling"/> among their parent's children with
-    /// nothing between them but boxes that generate nothing (<c>display: none</c>): no float and no
-    /// absolutely positioned box.
+    /// The floats and absolutely positioned boxes between <paramref name="sibling"/> and this box
+    /// among their parent's children, in document order, when nothing else stands between them but
+    /// boxes that generate nothing (<c>display: none</c>), or <c>null</c> when something in the flow
+    /// does.
     /// </summary>
-    private bool FollowsWithNothingBetween(CssBox sibling)
+    private List<CssBox>? OutOfFlowBoxesSince(CssBox sibling)
+    {
+        if (_parentBox == null)
+            return null;
+
+        var siblings = _parentBox.Boxes;
+        List<CssBox> between = [];
+
+        for (int i = siblings.IndexOf(this) - 1; i >= 0; i--)
+        {
+            var box = siblings[i];
+
+            if (box == sibling)
+                return between;
+
+            if (box.Display == CssConstants.None)
+                continue;
+
+            if (box.Float == CssConstants.None && box.Position is not (CssConstants.Absolute or CssConstants.Fixed))
+                return null;
+
+            between.Insert(0, box);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a box in the flow before this one among its parent's children has clearance (see
+    /// <see cref="ClearsFloats"/>).
+    /// </summary>
+    private bool FollowsBoxWithClearance()
     {
         if (_parentBox == null)
             return false;
 
-        var siblings = _parentBox.Boxes;
-
-        for (int i = siblings.IndexOf(this) - 1; i >= 0; i--)
+        foreach (var box in _parentBox.Boxes)
         {
-            if (siblings[i] == sibling)
-                return true;
-
-            if (siblings[i].Display != CssConstants.None)
+            if (box == this)
                 return false;
+
+            if (box.ClearsFloats && box.Float == CssConstants.None
+                && box.Position is not (CssConstants.Absolute or CssConstants.Fixed))
+            {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The floats placed where the set of margins above this box's parent ends: those the run of
+    /// boxes the set collapses through (<see cref="FirstChildMarginRun"/>) holds before this box, in
+    /// the boxes of the run or in the empty blocks there.
+    /// </summary>
+    private List<CssBox> FloatsAtSetEnd()
+    {
+        List<CssBox> floats = [];
+
+        if (_parentBox != null)
+        {
+            foreach (var box in BoxesBeforeInRun([.. FirstChildMarginRun(_parentBox)], this))
+                CssBoxHelper.CollectFloatsInSubtree(box, floats);
+        }
+
+        return floats;
+    }
+
+    /// <summary>
+    /// Whether this box's <c>clear</c> takes it past any of the floats in <paramref name="boxes"/>
+    /// (CSS2.1 §9.5.2).
+    /// </summary>
+    private bool ClearsAnyFloatOf(List<CssBox> boxes)
+    {
+        if (Clear is null or CssConstants.None)
+            return false;
+
+        return boxes.Exists(box => box.Float != CssConstants.None
+            && (Clear == "both" || string.Equals(box.Float, Clear, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// Whether this box's <c>clear</c> takes it past floats that reach below <paramref name="top"/>,
+    /// where its top border edge would be if it did not clear them (CSS2.1 §9.5.2).
+    /// </summary>
+    private bool ClearsFloatsBelow(double top)
+    {
+        if (Clear is null or CssConstants.None)
+            return false;
+
+        double floatsBottom = CssBoxHelper.GetMaxFloatBottom(this);
+
+        return floatsBottom > 0 && floatsBottom > top + 0.01;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/>, absolutely positioned or fixed, is placed by its <c>top</c>
+    /// or <c>bottom</c> rather than at its static position (CSS2.1 §10.6.4).
+    /// </summary>
+    private static bool IsPlacedByOffsets(CssBox box) =>
+        box.Position is CssConstants.Absolute or CssConstants.Fixed
+        && (box.Top is not (null or CssConstants.Auto) || box.Bottom is not (null or CssConstants.Auto));
+
+    /// <summary>
+    /// Whether <paramref name="box"/>, absolutely positioned or fixed, keeps the place down its
+    /// containing block that its offsets give it while the boxes around it move (CSS2.1 §10.6.4):
+    /// one that a <c>top</c> of a length places, or a <c>bottom</c> or a percentage <c>top</c> in a
+    /// containing block whose height is known.
+    /// </summary>
+    /// <remarks>
+    /// Placed against a containing block that its content has not finished sizing, a box is placed
+    /// against the height it has so far (a separate issue), and that height grows as the content in
+    /// it goes down, so the box goes down with it. Kept where it was, a box with <c>bottom: 5px</c> in
+    /// a <c>&lt;section style="position: relative"&gt;</c>, before a <c>&lt;p&gt;</c> with
+    /// <c>margin-top: 30px</c> that moved the <c>&lt;div&gt;</c> holding both, stayed 60px above
+    /// where browsers put it, 30px further than when it went down with the <c>&lt;div&gt;</c>.
+    /// </remarks>
+    private static bool KeepsItsPlaceDown(CssBox box)
+    {
+        if (!IsPlacedByOffsets(box))
+            return false;
+
+        if (box.Position == CssConstants.Fixed
+            || box.Top is { } top && top != CssConstants.Auto && !top.Contains('%'))
+        {
+            return true;
+        }
+
+        var containing = box.FindPositionedContainingBlock();
+
+        return containing.ParentBox == null
+            || containing.Height is { Length: > 0 } height && height != CssConstants.Auto
+                && !containing.HeightPercentageResolvesToAuto();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/>, absolutely positioned or fixed, is placed across by its
+    /// <c>left</c> or <c>right</c> rather than at its static position (CSS2.1 §10.3.7).
+    /// </summary>
+    private static bool IsPlacedAcrossByOffsets(CssBox box) =>
+        box.Position is CssConstants.Absolute or CssConstants.Fixed
+        && (box.Left is not (null or CssConstants.Auto) || box.Right is not (null or CssConstants.Auto));
+
+    /// <summary>
+    /// Moves the run of boxes a first child's top margin collapses through, as <see
+    /// cref="MoveFirstChildMarginRun"/> does, for a box that joins the set of margins an empty
+    /// sibling handed on across the floats and absolutely positioned boxes <paramref
+    /// name="between"/> them, and puts those boxes where the set ends.
+    /// </summary>
+    /// <remarks>
+    /// The boxes between were placed below the set the empty sibling hands on, where it ends if
+    /// nothing joins it. It ends <paramref name="growth"/> below where the run began instead, at the
+    /// parent's new content top. An absolutely positioned or fixed box at its static position (auto
+    /// <c>top</c> and <c>bottom</c>, CSS2.1 §10.6.4) goes there, with its own top margin below it,
+    /// which does not collapse with the set (§8.3.1); the run's move places the floats again, and
+    /// leaves a box placed by its offsets in a containing block outside the run where they put it
+    /// (see <see cref="MoveFirstChildMarginRun"/>).
+    /// </remarks>
+    private static void MoveFirstChildMarginRunOver(List<CssBox> between, CssBox parent, CssBox child,
+        double positive, double negative, double growth)
+    {
+        MoveFirstChildMarginRun(parent, child, positive, negative, growth);
+
+        // The run's move took it along, but it kept the place where its own margin had collapsed
+        // with the set: with margin-top: 20px, 20px below where the outer <div> began, 4px down it
+        // once the <div> had moved 16px, where browsers put it 20px down.
+        foreach (var box in between)
+        {
+            if (box.Float != CssConstants.None || IsPlacedByOffsets(box))
+                continue;
+
+            double shift = parent.ClientTop + box.ActualMarginTop - box.Location.Y;
+
+            if (Math.Abs(shift) > 0.01)
+                box.OffsetTop(shift);
+        }
+    }
+
+    /// <summary>
+    /// Whether this float was placed on this layout pass below the part of a set of margins that an
+    /// empty block before it hands on (CSS2.1 §8.3.1), whose margins collapse with its parent's top
+    /// margin: where the set ends while nothing after the empty block joins it, and not where it ends
+    /// once something does and the parent moves by it (see <see cref="MoveFirstChildMarginRun"/>).
+    /// </summary>
+    private bool _placedBelowHandedOnSet;
+
+    /// <summary>
+    /// How this box's top margin comes back out of the set of margins above its parent if the
+    /// floats leave the box no room where the margin put it (see <see cref="SeparateMarginFromSet"/>):
+    /// set when <see cref="MarginTopCollapse"/> collapses the margin with the parent's on this layout
+    /// pass and moves the parent by it, and kept until the box is placed.
+    /// </summary>
+    private MarginSeparation? _marginSeparation;
+
+    /// <summary>
+    /// A move of the run of boxes a margin collapses through (see <see
+    /// cref="MoveFirstChildMarginRun"/>), from <paramref name="Parent"/> up, by <paramref
+    /// name="Shift"/>, which leaves the set of margins above it the <paramref name="Positive"/> and
+    /// <paramref name="Negative"/> sides it has without the margin.
+    /// </summary>
+    private sealed record MarginSeparation(CssBox Parent, double Positive, double Negative, double Shift);
+
+    /// <summary>
+    /// Whether this box is one in the flow that goes beside floats where they leave it room, or below
+    /// them, and not over them (CSS2.1 §9.5; see <see cref="PlaceBesideFloats"/>), with no
+    /// <c>clear</c> of its own. A <c>clear</c> takes a box below the floats it clears from where its
+    /// margin put it (§9.5.2), and placed from where the set ends without the margin, it could go
+    /// beside one of them.
+    /// </summary>
+    private bool AvoidsFloats =>
+        Float == CssConstants.None
+        && Position is not (CssConstants.Absolute or CssConstants.Fixed)
+        && Clear is (null or CssConstants.None)
+        && CssBoxHelper.EstablishesBfc(this);
+
+    /// <summary>
+    /// CSS2.1 §9.5: the border box of a table or of a block that establishes a block formatting
+    /// context may not overlap the margin box of a float, and "if necessary, implementations should
+    /// clear the said element by placing it below any preceding floats". Where the floats leave this
+    /// box no room at the place its top margin gave it, collapsed with its parent's, the margin
+    /// leaves the set of margins above the parent, as a margin with clearance does (§8.3.1): the run
+    /// of boxes it moved goes back to where the set ends without it, with the out-of-flow boxes the
+    /// set places, and the box goes on from there to where the floats leave it room. Returns how far
+    /// the run went, and the box's place with it, or <c>null</c> when its margin moved no run.
+    /// </summary>
+    /// <remarks>
+    /// Browsers place such a box with its margin in the set, and again without it once the floats
+    /// push it down. Kept in the set, the margin moved the parent, the floats it places and the box
+    /// below them further down: after a 10px block, <c>&lt;div&gt;&lt;div style="margin-bottom:
+    /// 16px"&gt;&lt;/div&gt;&lt;div style="float: left; height: 12px"&gt;&lt;/div&gt;&lt;div
+    /// style="display: flow-root; width: 300px; margin-top: 20px"&gt;</c> began the outer
+    /// <c>&lt;div&gt;</c> and the float 20px below it and the flow root 32px below, where browsers
+    /// begin them 16px and 28px below; and after an empty <c>&lt;div&gt;</c> and a right float, a
+    /// <c>&lt;table style="width: 100%; margin: 16px 0"&gt;</c> put the float and everything after
+    /// it 16px lower than browsers do.
+    /// </remarks>
+    private double? SeparateMarginFromSet()
+    {
+        if (_marginSeparation is not { } separation)
+            return null;
+
+        _marginSeparation = null;
+        MoveFirstChildMarginRun(separation.Parent, this, separation.Positive, separation.Negative,
+            separation.Shift);
+
+        return separation.Shift;
     }
 
     /// <summary>
@@ -242,6 +749,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     protected double MarginTopCollapse(CssBoxProperties prevSibling)
     {
         double value;
+
+        // Whether this box's top margin went into the set above its parent, across floats or
+        // absolutely positioned boxes, and moved the parent by it (below).
+        bool movedParentAcross = false;
 
         if (prevSibling != null)
         {
@@ -284,6 +795,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 CollapsedMarginTop = maxPos;
                 _negativeMarginTopAbove = maxNeg;
 
+                // A float goes below the part of the set the empty box hands on, which is not where
+                // the set ends once a block after it joins the set and moves the parent (below).
+                _placedBelowHandedOnSet = Float != CssConstants.None && prevBox._marginTopCollapsesWithParent;
+
                 // When the empty box's margins collapse with its parent's top margin, as the first
                 // child's or after empty ones that do, so do this box's: the set is the one above
                 // the parent, which moves by the rest, with this box at its top, as for a first
@@ -292,22 +807,73 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // place and held the <p> 16px down, where browsers begin the outer <div> 16px lower
                 // with the <p> at its top.
                 //
-                // Only an in-flow block that follows the empty box directly joins: a float's or an
-                // absolutely positioned box's margins do not collapse (CSS2.1 §8.3.1), and one that
-                // stands between the two is placed below the margins handed on already, where
-                // browsers place it too, so moving the parent under it as well would move it twice.
+                // Only an in-flow block joins: a float's or an absolutely positioned box's margins
+                // do not collapse (CSS2.1 §8.3.1). But one between the two keeps nothing apart,
+                // being out of flow (§9.5, §9.6), and it goes where the set ends, at the parent's
+                // top, where browsers put it once the block after it has joined the set. It was
+                // placed below the margins handed on, and the block after it kept the parent in
+                // its place: after a 10px block, <div><div style="margin-bottom: 16px"></div><div
+                // style="float: left"></div><p>Text</p></div> began right below it, 36px tall,
+                // where browsers begin it 16px lower, 20px tall, with the float and the <p> at its
+                // top.
+                //
+                // Not past an empty box with clearance, though, whose margins do not collapse with
+                // the parent's (§8.3.1): after a float reaching into the outer <div>, a first child
+                // with clear: both, a float and a <p> with margin-top: 20px moved the outer <div>
+                // and the float 20px down, where browsers keep them in place. (With nothing between,
+                // the <p> still joins, a separate issue.)
                 if (prevBox._marginTopCollapsesWithParent
                     && Float == CssConstants.None
                     && Position is not (CssConstants.Absolute or CssConstants.Fixed)
-                    && FollowsWithNothingBetween(prevBox))
+                    && OutOfFlowBoxesSince(prevBox) is { } between
+                    && (between.Count == 0 || !FollowsBoxWithClearance()))
                 {
-                    _marginTopCollapsesWithParent = true;
+                    // §9.5.2: a block whose clear takes it past a float the set places has
+                    // clearance, and a margin with clearance does not collapse with the ones above
+                    // it (§8.3.1), so the set ends where the empty box hands it on, and this box's
+                    // top margin does not collapse with its parent's. With clear: both and
+                    // margin-top: 20px on the <p> above, browsers begin the outer <div> 16px lower,
+                    // not 20px, with the float at its top and the <p> below the float; and the
+                    // margins of what is in the <p> or after it do not move the outer <div> again.
+                    // The set places the floats before the empty box too, in the outer <div> or in
+                    // what the set collapses through: clear: left past a left float before the
+                    // empty box, with a right float between, moved the outer <div> 20px down. So
+                    // does a clear that takes the block past a float outside the set reaching below
+                    // the parent's top as far down as the block would move it: after a 100 x 50px
+                    // float, clear: both and margin-top: 30px on the <p> moved the outer <div> and
+                    // an absolutely positioned box between 30px down, where browsers move them 16px
+                    // down and put the <p> below the float.
+                    bool clearance = between.Count > 0 && Clear is not (null or CssConstants.None)
+                        && (ClearsAnyFloatOf(FloatsAtSetEnd())
+                            || (_parentBox is { } parentBox && ClearsFloatsBelow(parentBox.ClientTop + value)));
+                    _marginTopCollapsesWithParent = !clearance;
 
                     if (ParentMovesWithItsMargin)
                     {
-                        if (Math.Abs(value) > 0.1)
-                            MoveFirstChildMarginRun(_parentBox, maxPos, maxNeg, value);
+                        // What the set the empty box hands on comes to below it, where the boxes
+                        // between were placed.
+                        double handedPos = prevBox.CollapsedMarginTop, handedNeg = prevBox._negativeMarginTopAbove;
+                        CssBoxHelper.CollectEmptyBoxMargins(prevBox, ref handedPos, ref handedNeg);
+                        double handedOn = handedPos + handedNeg - prevBox.MarginSpentAboveTop;
+                        double growth = clearance ? handedOn : value;
 
+                        // The boxes between go where the set ends even when the parent does not
+                        // move, the set coming to nothing: with margin-top: -16px on the <p>, the
+                        // float stayed 16px down the outer <div>, where browsers put it at the top.
+                        if (Math.Abs(growth) > 0.1 || (between.Count > 0 && Math.Abs(handedOn) > 0.1))
+                        {
+                            MoveFirstChildMarginRunOver(between, _parentBox, this,
+                                clearance ? handedPos : maxPos, clearance ? handedNeg : maxNeg, growth);
+                        }
+
+                        // Unless the floats leave no room for this box there (see
+                        // SeparateMarginFromSet).
+                        if (!clearance && AvoidsFloats && Math.Abs(handedOn - growth) > 0.1)
+                        {
+                            _marginSeparation = new(_parentBox, handedPos, handedNeg, handedOn - growth);
+                        }
+
+                        movedParentAcross = between.Count > 0 && Math.Abs(growth) > 0.1;
                         value = 0;
                     }
                 }
@@ -406,7 +972,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // its top. A negative margin moves the run up the same way: after a 10 px block,
             // <div><p style="margin-top: -4px">Text</p></div> begins 4 px higher, over the block.
             if (parentMoves && Math.Abs(growth) > 0.1)
-                MoveFirstChildMarginRun(_parentBox, positive, negative, growth);
+            {
+                MoveFirstChildMarginRun(_parentBox, this, positive, negative, growth);
+
+                // Unless the floats leave no room for this box there (see SeparateMarginFromSet).
+                if (AvoidsFloats)
+                    _marginSeparation = new(_parentBox, parentPositive, parentNegative, -growth);
+            }
 
             value = parentMoves ? 0 : growth;
 
@@ -433,7 +1005,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
 
         // fix for hr tag
-        if (value < 0.1 && HtmlTag != null && HtmlTag.Name == "hr")
+        //
+        // Not for an <hr> whose margin moved its parent past an out-of-flow box (above): the space
+        // above it is there. After a 10px block, <div><div style="margin-bottom: 16px"></div><div
+        // style="position: absolute"></div><hr></div> put the <hr> 17.6px down the outer <div>,
+        // where browsers put it at the top. (One right after the empty box still gets the 1.1em, a
+        // separate issue.)
+        if (value < 0.1 && !movedParentAcross && HtmlTag != null && HtmlTag.Name == "hr")
             value = GetEmHeight() * 1.1f;
 
         return value;

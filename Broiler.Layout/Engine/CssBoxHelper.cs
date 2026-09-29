@@ -904,7 +904,11 @@ internal static class CssBoxHelper
         && box.Display != CssConstants.None
         && box.Position is not (CssConstants.Absolute or CssConstants.Fixed);
 
-    private static void CollectFloatsInSubtree(CssBox root, List<CssBox> result)
+    /// <summary>
+    /// Adds to <paramref name="result"/>, in document order, <paramref name="root"/> if it is a
+    /// float, or the floats in it that are in the block formatting context it is in.
+    /// </summary>
+    internal static void CollectFloatsInSubtree(CssBox root, List<CssBox> result)
     {
         if (root.Float != CssConstants.None && root.Display != CssConstants.None)
         {
