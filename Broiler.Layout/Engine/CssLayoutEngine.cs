@@ -3735,21 +3735,9 @@ internal static class CssLayoutEngine
 
         double right = line.OwnerBox.ActualRight - line.OwnerBox.ActualPaddingRight - line.OwnerBox.ActualBorderRightWidth;
 
-        // Find the rightmost content edge from both words and inline-block rectangles.
         // Lines may contain only inline-block elements (e.g. form controls inside
         // <center>) with no direct text words.
-        double contentRight = 0;
-        if (line.Words.Count > 0)
-        {
-            CssRect lastWord = line.Words[^1];
-            contentRight = lastWord.Right + lastWord.OwnerBox.ActualBorderRightWidth + lastWord.OwnerBox.ActualPaddingRight;
-        }
-
-        foreach (var kvp in line.Rectangles)
-        {
-            if (kvp.Value.Right > contentRight)
-                contentRight = kvp.Value.Right;
-        }
+        double contentRight = AlignedContentRight(line);
 
         double diff = (right - contentRight) / 2;
 
@@ -3773,20 +3761,7 @@ internal static class CssLayoutEngine
             return;
 
         double right = line.OwnerBox.ActualRight - line.OwnerBox.ActualPaddingRight - line.OwnerBox.ActualBorderRightWidth;
-
-        // Find the rightmost content edge from both words and inline-block rectangles.
-        double contentRight = 0;
-        if (line.Words.Count > 0)
-        {
-            CssRect lastWord = line.Words[^1];
-            contentRight = lastWord.Right + lastWord.OwnerBox.ActualBorderRightWidth + lastWord.OwnerBox.ActualPaddingRight;
-        }
-
-        foreach (var kvp in line.Rectangles)
-        {
-            if (kvp.Value.Right > contentRight)
-                contentRight = kvp.Value.Right;
-        }
+        double contentRight = AlignedContentRight(line);
 
         double diff = right - contentRight;
 
@@ -3803,6 +3778,56 @@ internal static class CssLayoutEngine
             ShiftInlineBlockBox(b, diff);
         }
     }
+
+    /// <summary>
+    /// Where what is on <paramref name="line"/> ends, for aligning it: the rightmost of its last word
+    /// with the right padding, border and margin of each box it ends, and the right margin edge of
+    /// each box placed on the line whole.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §16.2 aligns the line's inline-level boxes within the line box, each with its margins,
+    /// as the flow placed them; a line they overflow is not aligned (CSS Text 3 §7.1). The right
+    /// margin of what ends the line was left out, so a centred line stood half that margin too far to
+    /// the right and a right-aligned one the whole of it: an image with <c>margin-right: 20px</c>
+    /// ended at the right of a right-aligned line, where browsers end it 20px from it, and an image
+    /// whose margin box is 2px wider than its centred line was moved 0.5px along it, where browsers
+    /// start it at the line's start.
+    /// </remarks>
+    private static double AlignedContentRight(CssLineBox line)
+    {
+        double contentRight = 0;
+        if (line.Words.Count > 0)
+        {
+            CssRect lastWord = line.Words[^1];
+            contentRight = lastWord.Right;
+
+            // The box the word is in, an image's own box or the text's, and each inline box around
+            // it that ends with it, close after it as the flow closed them.
+            for (var box = lastWord.OwnerBox; box != null && box != line.OwnerBox; box = box.ParentBox)
+            {
+                bool endsHere = box.Words.Count > 0
+                    ? ReferenceEquals(box.Words[^1], lastWord)
+                    : ReferenceEquals(box.LastHostingLineBox, line);
+
+                if (!endsHere || !(box.IsImage || box.Display == CssConstants.Inline))
+                    break;
+
+                contentRight += box.ActualPaddingRight + box.ActualBorderRightWidth + RightMargin(box);
+            }
+        }
+
+        foreach (var (box, rect) in line.Rectangles)
+        {
+            double margin = !box.IsInlineNonReplaced || box.LastHostingLineBox == line ? RightMargin(box) : 0;
+            contentRight = Math.Max(contentRight, rect.Right + margin);
+        }
+
+        return contentRight;
+    }
+
+    /// <summary>The box's right margin, 0 where it has none to speak of.</summary>
+    private static double RightMargin(CssBox box) =>
+        double.IsNaN(box.ActualMarginRight) ? 0 : box.ActualMarginRight;
 
     /// <summary>
     /// Shifts an atomic inline-level box — inline-block, inline-flex, inline-grid or inline-table —
