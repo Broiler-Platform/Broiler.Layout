@@ -3093,6 +3093,42 @@ internal static class CssLayoutEngine
     /// <summary>The font size, in CSS pixels, of the box's parent, or of the box if it has none.</summary>
     private static double ParentEmHeight(CssBox box) => (box.ParentBox ?? box).GetEmHeight();
 
+    /// <summary>
+    /// How far a <c>&lt;length&gt;</c> or <c>&lt;percentage&gt;</c> value of
+    /// <c>vertical-align</c> raises the box, a percentage being of the box's own line height
+    /// (CSS 2.1 §10.8.1); 0 for any other value.
+    /// </summary>
+    private static double LengthRaise(CssBox box)
+    {
+        if (string.IsNullOrEmpty(box.VerticalAlign) || box.VerticalAlign == CssConstants.Baseline)
+            return 0;
+
+        double lineHeight = box.ActualLineHeight > 0 ? box.ActualLineHeight : box.ActualFont.Height;
+        double offset = CssLengthParser.ParseLength(box.VerticalAlign, lineHeight, box.GetEmHeight());
+        return double.IsNaN(offset) ? 0 : offset;
+    }
+
+    /// <summary>
+    /// How far below the line's baseline the baseline of the box's parent lies: each inline box
+    /// around the box, up to the block, that <c>sub</c>, <c>super</c> or a length lowers or raises
+    /// from its own parent's baseline moves it by as much.
+    /// </summary>
+    private static double ParentBaselineShift(CssBox box)
+    {
+        double shift = 0;
+        for (var parent = box.ParentBox; parent is { Display: CssConstants.Inline }; parent = parent.ParentBox)
+        {
+            shift += parent.VerticalAlign switch
+            {
+                CssConstants.Sub => SubscriptShift(parent),
+                CssConstants.Super => -SuperscriptShift(parent),
+                _ => -LengthRaise(parent),
+            };
+        }
+
+        return shift;
+    }
+
     private static void ApplyVerticalAlignment(CssLineBox lineBox)
     {
         // CSS 2.1 §10.8: The baseline is where text sits, approximated as
@@ -3214,12 +3250,19 @@ internal static class CssLayoutEngine
             if (topBottomBoxes.Contains(box))
                 continue;
 
+            // CSS 2.1 §10.8.1: a box is aligned against its parent's baseline, and an inline box
+            // raised or lowered from its own parent's carries that baseline, and what stands on it,
+            // with it. The text of an element is in an inline box of its own, aligned to the
+            // baseline, so aligning the element's box alone moved nothing: the text of every <sup>
+            // and <sub> stayed on the line's baseline.
+            double parentBaseline = baseline + ParentBaselineShift(box);
+
             if (IsBaselineAligned(box)
                 && box.UsesBottomMarginEdgeBaseline
                 && baseline > float.MinValue)
             {
                 lineBox.SetBaseLine(box,
-                    baseline - box.ActualMarginBottom - lineBox.Rectangles[box].Height);
+                    parentBaseline - box.ActualMarginBottom - lineBox.Rectangles[box].Height);
                 continue;
             }
 
@@ -3239,11 +3282,11 @@ internal static class CssLayoutEngine
             switch (box.VerticalAlign)
             {
                 case CssConstants.Sub:
-                    lineBox.SetBaseLine(box, baseline - boxAscent + SubscriptShift(box));
+                    lineBox.SetBaseLine(box, parentBaseline - boxAscent + SubscriptShift(box));
                     break;
 
                 case CssConstants.Super:
-                    lineBox.SetBaseLine(box, baseline - boxAscent - SuperscriptShift(box));
+                    lineBox.SetBaseLine(box, parentBaseline - boxAscent - SuperscriptShift(box));
                     break;
 
                 case CssConstants.TextTop:
@@ -3251,7 +3294,7 @@ internal static class CssLayoutEngine
                     // top of the parent element's content area (font top).
                     if (baseline > float.MinValue)
                     {
-                        double parentContentTop = baseline - parentFontHeight * TypicalAscentRatio;
+                        double parentContentTop = parentBaseline - parentFontHeight * TypicalAscentRatio;
                         lineBox.SetBaseLine(box, parentContentTop);
                     }
                     break;
@@ -3262,7 +3305,7 @@ internal static class CssLayoutEngine
                     if (baseline > float.MinValue && lineBox.Rectangles.TryGetValue(box, out RectangleF value))
                     {
                         double boxHeight = value.Height;
-                        double parentContentBottom = baseline + parentFontHeight * (1.0 - TypicalAscentRatio);
+                        double parentContentBottom = parentBaseline + parentFontHeight * (1.0 - TypicalAscentRatio);
                         lineBox.SetBaseLine(box, parentContentBottom - boxHeight);
                     }
                     break;
@@ -3282,7 +3325,7 @@ internal static class CssLayoutEngine
                         double boxHeight = value1.Height;
                         double parentFont = box.ParentBox?.ActualFont.Height ?? 0;
                         double halfXHeight = parentFont * 0.25;
-                        lineBox.SetBaseLine(box, baseline - halfXHeight - boxHeight / 2);
+                        lineBox.SetBaseLine(box, parentBaseline - halfXHeight - boxHeight / 2);
                     }
                     break;
 
@@ -3292,25 +3335,16 @@ internal static class CssLayoutEngine
                     // the given distance relative to the baseline.
                     // A percentage is calculated against the line-height
                     // of the element itself.
-                    if (box.VerticalAlign != CssConstants.Baseline
-                        && !string.IsNullOrEmpty(box.VerticalAlign))
+                    double offset = LengthRaise(box);
+                    if (offset != 0)
                     {
-                        double lineHeight = box.ActualLineHeight > 0
-                            ? box.ActualLineHeight
-                            : box.ActualFont.Height;
-                        double offset = CssLengthParser.ParseLength(
-                            box.VerticalAlign, lineHeight, box.GetEmHeight());
-
-                        if (!double.IsNaN(offset) && offset != 0)
-                        {
-                            // Positive values move the box UP (raise).
-                            lineBox.SetBaseLine(box, baseline - boxAscent - offset);
-                            break;
-                        }
+                        // Positive values move the box UP (raise).
+                        lineBox.SetBaseLine(box, parentBaseline - boxAscent - offset);
+                        break;
                     }
 
                     //case: baseline
-                    lineBox.SetBaseLine(box, baseline - boxAscent);
+                    lineBox.SetBaseLine(box, parentBaseline - boxAscent);
                     break;
             }
         }
