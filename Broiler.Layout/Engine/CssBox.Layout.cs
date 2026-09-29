@@ -123,6 +123,55 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     private const string ParserEmptyLineHeight = ".95em";
 
+    /// <summary>
+    /// Gives a <c>&lt;br&gt;</c> the height of the empty line it makes, or none where it ends a
+    /// line of content instead of making one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CI fallback for the Broiler.HTML submodule <c>&lt;br&gt;</c> patch
+    /// (patches/0002-broiler-html-br-after-inline-block.patch): DomParser gives a <c>&lt;br&gt;</c>
+    /// a ".95em" empty-line height when it "follows a block". An atomic inline-block carries no
+    /// text words, so it is misclassified as block-level and a <c>&lt;br&gt;</c> after it
+    /// spuriously inserts a full empty line, pushing every following block sibling ~1em down.
+    /// Such a <c>&lt;br&gt;</c> merely ends the inline-block's line, so its empty-line height is
+    /// dropped. The previous in-flow sibling (an anonymous block wrapping the inline-block, or the
+    /// inline-block itself) is already laid out by the time this runs. Harmless once the submodule
+    /// patch lands (the <c>&lt;br&gt;</c> then carries no .95em height to drop).
+    /// </para>
+    /// <para>
+    /// An inline element holding the line's text is misclassified the same way: the text is in
+    /// the element's children, not in the element, so <c>&lt;a&gt;one&lt;/a&gt;&lt;br&gt;two</c>
+    /// was three lines, the middle one empty and 15.2px tall, where browsers make it two. The
+    /// <c>&lt;br&gt;</c> ends the line of any inline content that holds text or an image (see
+    /// <see cref="CssLayoutEngine.BrEndsLineOf"/>), so its height is dropped there too.
+    /// </para>
+    /// <para>
+    /// The empty line a <c>&lt;br&gt;</c> does make, after a block, at the start of one or after
+    /// another <c>&lt;br&gt;</c>, is a line box holding nothing but the <c>&lt;br&gt;</c>, as tall
+    /// as the line height (CSS2.1 §10.8). The parser's .95em is shorter than that: 15.2px against
+    /// a 20px line height, where browsers make the line 20px, and against the 19px of a 16px
+    /// font's own.
+    /// </para>
+    /// <para>
+    /// A block lays a <c>&lt;br&gt;</c> out through <see cref="PerformLayoutImp"/>, which calls
+    /// this; the lines a box lays out in one pass, an inline-block's or a flex or grid item's, flow
+    /// it in <c>CssLayoutEngine.FlowBox</c>, which calls this too.
+    /// </para>
+    /// </remarks>
+    internal void ResolveBrLineHeight()
+    {
+        if (!IsBrElement)
+            return;
+
+        var previous = LayoutBoxUtils.GetPreviousSibling(this);
+
+        if (!string.IsNullOrEmpty(Height) && Height != CssConstants.Auto && CssLayoutEngine.BrEndsLineOf(previous))
+            Height = CssConstants.Auto;
+        else if (Height == ParserEmptyLineHeight && ActualLineHeight > 0)
+            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
+    }
+
     protected virtual void PerformLayoutImp(ILayoutEnvironment g)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.BoxesLaidOut);
@@ -137,38 +186,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             MeasureWordsSize(g);
         }
 
-        // CI fallback for the Broiler.HTML submodule <br> patch
-        // (patches/0002-broiler-html-br-after-inline-block.patch): DomParser
-        // gives a <br> a ".95em" empty-line height when it "follows a block".
-        // An atomic inline-block carries no text words, so it is misclassified
-        // as block-level and a <br> after it spuriously inserts a full empty
-        // line, pushing every following block sibling ~1em down.  Such a <br>
-        // merely ends the inline-block's line, so drop its empty-line height.
-        // The previous in-flow sibling (an anonymous block wrapping the
-        // inline-block, or the inline-block itself) is already laid out by the
-        // time this block runs.  Harmless once the submodule patch lands (the
-        // <br> then carries no .95em height to drop).
-        //
-        // An inline element holding the line's text is misclassified the same way: the text is in
-        // the element's children, not in the element, so <a>one</a><br>two was three lines, the
-        // middle one empty and 15.2px tall, where browsers make it two. The <br> ends the line of
-        // any inline content that holds text or an image, so its height is dropped there too.
-        var previous = LayoutBoxUtils.GetPreviousSibling(this);
-
-        if (IsBrElement && !string.IsNullOrEmpty(Height) && Height != CssConstants.Auto
-            && (CssLayoutEngine.EndsWithAtomicInlineBlock(previous) || CssLayoutEngine.HoldsInlineContent(previous)))
-        {
-            Height = CssConstants.Auto;
-        }
-
-        // The empty line a <br> does make, after a block, at the start of one or after another
-        // <br>, is a line box holding nothing but the <br>, as tall as the line height (CSS2.1
-        // §10.8). The parser's .95em is shorter than that: 15.2px against a 20px line height,
-        // where browsers make the line 20px, and against the 19px of a 16px font's own.
-        else if (IsBrElement && Height == ParserEmptyLineHeight && ActualLineHeight > 0)
-        {
-            Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
-        }
+        ResolveBrLineHeight();
 
         // CSS Box Model 4 §6.2: margin-trim zeroes the block-axis margins of
         // this container's first/last in-flow block-level children before they
@@ -275,6 +293,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // Use the viewport width for percentage/auto resolution.
         double width;
 
+        // Whether the width is the border box's, found from the insets (CSS2.1 §10.3.7), with the
+        // margins already off it.
+        bool widthFromInsets = false;
+
         if (Position == CssConstants.Fixed && LayoutEnvironment != null)
         {
             width = FixedPositioningViewport().Width;
@@ -366,10 +388,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             width = cbContentWidth - cssLeft - cssRight - ActualMarginLeft - ActualMarginRight;
 
-            if (width < 0)
-                width = 0;
-
-            width = ResolveSpecifiedWidthToBorderBox(width);
+            // That is the border box's width, the padding and the border being in the equation
+            // too, and the content box is never narrower than nothing. It was taken for the content
+            // box's, and under `box-sizing: content-box` the padding and the border were added to
+            // it again; the margins were then taken off it again below, as for a box whose width is
+            // its containing block's. In a 500px containing block, `left: 0; right: 0;
+            // padding: 0 10px` made a box 520px wide, where browsers make it 500px wide, and 5px
+            // margins took 10px more off it.
+            width = Math.Max(width, ActualPaddingLeft + ActualPaddingRight + ActualBorderLeftWidth + ActualBorderRightWidth);
+            widthFromInsets = true;
         }
 
         // CSS2.1 §10.4: Apply max-width constraint even when
@@ -427,6 +454,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 - ContainingBlock.ActualPaddingLeft - ContainingBlock.ActualPaddingRight
                 - ContainingBlock.ActualBorderLeftWidth - ContainingBlock.ActualBorderRightWidth;
             double remainingSpace = containingContentWidth - Size.Width;
+
+            _usedMarginLeftWasAuto |= MarginLeft == CssConstants.Auto;
+            _usedMarginRightWasAuto |= MarginRight == CssConstants.Auto;
 
             if (MarginLeft == CssConstants.Auto && MarginRight == CssConstants.Auto)
             {
@@ -558,6 +588,46 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                       + ActualPaddingLeft + ActualPaddingRight;
 
             Size = new SizeF((float)stfWidth, Size.Height);
+        }
+        else if (!replacedSizeSettled
+            && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
+            && AlignsBetweenInlineInsets())
+        {
+            // CSS Box Alignment 3 §6.1: with both inline insets, a `justify-self` other than
+            // `normal` or `stretch` sizes the box as fit-content in the space between them, and
+            // PositionAbsoluteBox aligns it there. It was stretched across that space, and
+            // PositionAbsoluteBox then shrank it to the right edge of its widest child, which says
+            // nothing of the text in it: "x" with `left: 0; right: 0; justify-self: center` stayed
+            // 500px wide at the left of a 500px containing block, where browsers make it 8px wide,
+            // 246px in. Same framing as the legend branch below: ComputeShrinkToFitWidth is a
+            // content-box width and GetMinMaxWidth a border-box one.
+            EnsureDescendantWordsMeasured(g);
+
+            double ownPadBorder = ActualBorderLeftWidth + ActualBorderRightWidth
+                                + ActualPaddingLeft + ActualPaddingRight;
+            double maxContent = ComputeShrinkToFitWidth();
+
+            GetMinMaxWidth(out double minBorderBox, out _);
+
+            if (double.IsNaN(minBorderBox))
+                minBorderBox = 0;
+
+            if (double.IsNaN(maxContent))
+                maxContent = 0;
+
+            double cbWidth = PositionedContainingBlockWidth();
+            // AlignsBetweenInlineInsets has both insets set.
+            double available = Math.Max(0, cbWidth - ParseUsedLength(Left!, cbWidth) - ParseUsedLength(Right!, cbWidth)
+                - ActualMarginLeft - ActualMarginRight - ownPadBorder);
+            double fitWidth = Math.Min(Math.Max(Math.Max(0, minBorderBox - ownPadBorder), available), maxContent);
+
+            if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
+                fitWidth = Math.Min(fitWidth, ResolveMaxWidthLength(cbWidth));
+
+            if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
+                fitWidth = Math.Max(fitWidth, ResolveMinWidthLength(cbWidth));
+
+            Size = new SizeF((float)(fitWidth + ownPadBorder), Size.Height);
         }
         else if (!replacedSizeSettled
             && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
@@ -775,7 +845,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             resolved += ownPadBorder;
             Size = new SizeF((float)resolved, Size.Height);
         }
-        else if (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
+        else if ((Width == CssConstants.Auto || string.IsNullOrEmpty(Width)) && !widthFromInsets)
         {
             // Margins reduce the box width only for auto-width elements.
             // For explicit widths, margins affect position only (CSS1 box model).
@@ -827,11 +897,22 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double contentWidth = containing.Size.Width
             - containing.ActualBorderLeftWidth - containing.ActualBorderRightWidth
             - containing.ActualPaddingLeft - containing.ActualPaddingRight;
+        double marginRight = ActualMarginRight;
+
+        // Beside floats, the margins take what the floats leave of that space, whose edges
+        // PlaceBesideFloats found with the margins that are not auto already inside them.
+        if (LeftBesideFloats is double spaceLeft && WidthBesideFloats is double spaceWidth)
+        {
+            contentLeft = spaceLeft;
+            contentWidth = spaceWidth;
+            marginRight = 0;
+        }
+
         double free = contentWidth - Size.Width;
         if (free <= 0)
             return;
 
-        double marginLeft = IsSpecifiedMarginRightAuto ? free / 2 : Math.Max(0, free - ActualMarginRight);
+        double marginLeft = IsSpecifiedMarginRightAuto ? free / 2 : Math.Max(0, free - marginRight);
         double shift = contentLeft + marginLeft - Location.X;
         if (Math.Abs(shift) > 0.01)
             OffsetLeft(shift);
@@ -983,6 +1064,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // those nested inside non-BFC siblings (CSS2.1 §9.5.1).
                 var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
 
+                // CSS2.1 §9.5.1 rule 7: among inline content, the float goes no higher than the
+                // line the content before it reached, at that line's top when it fits beside what
+                // is on the line and below the line when it does not (see InlineFloats). It went to
+                // the top of its block, beside lines its content had not reached. The line is inside
+                // the containing block, which keeps rule 4; and the float's parent, which may be an
+                // inline box with no place of its own, is not asked.
+                InlineFloatTopFloor = InlineFloats.TopFloor(this, precedingFloats, containerLeft, containerRight);
+
+                if (InlineFloatTopFloor is double lineFloor)
+                {
+                    top = lineFloor + ActualMarginTop;
+                }
+
                 // CSS2.1 §9.5.1 rule 4: A floating box's outer top
                 // (margin edge) may not be higher than the top of its
                 // containing block.  `top` already includes the margin
@@ -992,8 +1086,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 //   top >= ClientTop + ActualMarginTop
                 // This allows negative margins to pull the float above
                 // the content-area edge while still honoring the rule.
-                if (ParentBox != null)
+                else if (ParentBox != null)
+                {
                     top = Math.Max(top, ParentBox.ClientTop + ActualMarginTop);
+                }
 
                 // CSS2.1 §9.5.1 rule 6: The outer top of a floating
                 // box may not be higher than the outer top of any
@@ -1105,6 +1201,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
                 if (maxFloatBottom > 0)
                 {
+                    ClearsFloats = ParentBox == null || maxFloatBottom > ParentBox.ClientTop;
                     double hypotheticalTop = top;
 
                     // Compute uncollapsed position: margins are NOT
@@ -1158,6 +1255,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // right floats.  If it cannot fit beside the floats,
             // clear below them.
             WidthBesideFloats = null;
+            LeftBesideFloats = null;
 
             if (Float == CssConstants.None && Position != CssConstants.Absolute && Position != CssConstants.Fixed
                 && CssBoxHelper.EstablishesBfc(this))
@@ -1334,6 +1432,23 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     internal double? WidthBesideFloats { get; private set; }
 
     /// <summary>
+    /// The left edge of the space <see cref="WidthBesideFloats"/> measures, or <c>null</c> when no
+    /// float is beside this box.
+    /// </summary>
+    internal double? LeftBesideFloats { get; private set; }
+
+    /// <summary>
+    /// Whether this box's left margin was <c>auto</c> when <see cref="ResolveBlockUsedWidth"/>
+    /// resolved it against the containing block, which rewrites it to the length it came to.
+    /// </summary>
+    private bool _usedMarginLeftWasAuto;
+
+    /// <summary>
+    /// Whether this box's right margin was <c>auto</c>; see <see cref="_usedMarginLeftWasAuto"/>.
+    /// </summary>
+    private bool _usedMarginRightWasAuto;
+
+    /// <summary>
     /// CSS2.1 §9.5: the border box of a box in normal flow that establishes a new block formatting
     /// context must not overlap the margin box of any floats in the same one, and if necessary it
     /// is placed below them. From <paramref name="top"/> down, places the border box,
@@ -1344,6 +1459,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private void PlaceBesideFloats(double boxWidth, double boxHeight, bool autoWidth, ref double left, ref double top)
     {
         WidthBesideFloats = null;
+        LeftBesideFloats = null;
 
         var precedingFloats = CssBoxHelper.CollectPrecedingFloatsInBfc(this);
 
@@ -1353,14 +1469,25 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double containerLeft = ContainingBlock.Location.X + ContainingBlock.ActualPaddingLeft + ContainingBlock.ActualBorderLeftWidth;
         double containerRight = ContainingBlock.ClientLeft + ContainingBlock.AvailableWidth;
 
+        // CSS2.1 §10.3.3: auto margins take the space left over, and beside floats that is what
+        // the floats leave of the line (§9.5), not the whole containing block. The box is placed
+        // in that space with its auto margins as nothing, and they take what it leaves after:
+        // after a 100px left float, a 300px wide box with `margin: 0 auto` was centred in the
+        // page, 362px in, where browsers centre it in the 924px beside the float, 412px in. A
+        // table has no width yet; ResolveTableAutoMargins centres it once it has one.
+        bool autoLeft = IsSpecifiedMarginLeftAuto || _usedMarginLeftWasAuto;
+        bool autoRight = IsSpecifiedMarginRightAuto || _usedMarginRightWasAuto;
+        double marginLeft = autoLeft ? 0 : ActualMarginLeft;
+        double marginRight = autoRight ? 0 : ActualMarginRight;
+
         // Try to fit beside floats; if not possible, clear
         // below them.  100 iterations is a safe upper bound
         // since each iteration advances past at least one
         // float's bottom edge.
         for (int bfcIter = 0; bfcIter < 100; bfcIter++)
         {
-            double leftEdge = containerLeft + ActualMarginLeft;
-            double rightEdge = containerRight - ActualMarginRight;
+            double leftEdge = containerLeft + marginLeft;
+            double rightEdge = containerRight - marginRight;
             bool besideFloat = false;
 
             foreach (var fb in precedingFloats)
@@ -1398,8 +1525,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 if (availableWidth < Size.Width && autoWidth)
                     Size = new SizeF((float)availableWidth, Size.Height);
 
+                if ((autoLeft || autoRight) && Display != CssConstants.Table && availableWidth > boxWidth)
+                    left = PlaceInSpaceByAutoMargins(leftEdge, availableWidth - boxWidth, autoLeft, autoRight, containerLeft, containerRight, boxWidth);
+
                 if (besideFloat)
+                {
                     WidthBesideFloats = availableWidth;
+                    LeftBesideFloats = leftEdge;
+                }
 
                 break;
             }
@@ -1429,6 +1562,24 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             top = nextTop;
         }
+    }
+
+    /// <summary>
+    /// Where a box <paramref name="free"/> narrower than the space from <paramref name="spaceLeft"/>
+    /// goes in it by its auto margins: in the middle where both are auto, and against the right
+    /// where the left one alone is. The margins are rewritten to what they come to between the box
+    /// and its containing block's content edges.
+    /// </summary>
+    private double PlaceInSpaceByAutoMargins(double spaceLeft, double free, bool autoLeft, bool autoRight,
+        double containerLeft, double containerRight, double boxWidth)
+    {
+        double left = spaceLeft + (autoLeft && autoRight ? free / 2 : autoLeft ? free : 0);
+
+        MarginLeft = (left - containerLeft).ToString("F4", CultureInfo.InvariantCulture) + "px";
+        MarginRight = (containerRight - left - boxWidth).ToString("F4", CultureInfo.InvariantCulture) + "px";
+        InvalidateActualMargins();
+
+        return left;
     }
 
     /// <summary>
@@ -1466,43 +1617,80 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     /// <summary>
-    /// CSS2.1 §9.5: lays out the floated children of this box, whose content
+    /// CSS2.1 §9.5: lays out the floats among this box's inline content, which
     /// <c>CssLayoutEngine.CreateLineBoxes</c> has just flowed, skipping them as out of flow, so
     /// they are positioned and painted; and flows the lines again beside them.
     /// </summary>
+    /// <remarks>
+    /// The floats inside the inline boxes this box holds are among them: they were never laid out,
+    /// and a float in a <c>&lt;span&gt;</c> was left 0 × 0 where it was built.
+    /// </remarks>
     internal void LayOutFloatedChildren(ILayoutEnvironment g)
     {
-        bool laidOutOwnFloat = false;
+        var floats = InlineFloats.Of(this);
 
-        foreach (var childBox in Boxes)
-        {
-            if (childBox.Float != CssConstants.None)
-            {
-                childBox.PerformLayout(g);
-                laidOutOwnFloat |= childBox.Display != CssConstants.None
-                    && childBox.Size is { Width: > 0, Height: > 0 };
-
-                // CSS2.1 §13.3.1: When page-break-inside:avoid is
-                // set on a float's containing block, move the float
-                // to the next page if it would otherwise cross a
-                // page boundary.
-                if (PageBreakInside == CssConstants.Avoid)
-                    childBox.BreakPage();
-            }
-        }
+        if (floats.Count == 0)
+            return;
 
         // A float's own vertical position is decided by the content before it, so it can
         // only be placed after that content has flowed — which leaves the lines that
         // should have been shortened beside it already flowed at full width. Re-flow them
-        // now that the geometry exists; the float's position does not depend on the
-        // narrower lines (its top is where the flow had already reached), so one extra
-        // pass settles it rather than oscillating. Blocks with no float of their own —
-        // nearly all of them — never pay for this.
-        if (laidOutOwnFloat)
+        // now that the geometry exists. Blocks with no float of their own — nearly all of
+        // them — never pay for this.
+        //
+        // The float goes on the line its content reached (see InlineFloats), and the lines laid
+        // out beside the floats can move that content to another line: past the first float,
+        // the text before a second one runs over more, narrower lines. So the floats whose line
+        // has moved are placed again from the lines just laid out, and the lines laid out again
+        // beside them, until none moves: a float after text that no float before it narrows is
+        // placed right the first time. The passes are bounded, a pass for each float and no more
+        // than MaxInlineFloatPasses, for floats that would go on moving each other.
+        if (!PlaceInlineFloats(g, floats))
+            return;
+
+        int passes = Math.Min(floats.Count, MaxInlineFloatPasses);
+
+        for (int pass = 0; pass <= passes; pass++)
         {
             ActualBottom = Location.Y;
             CssLayoutEngine.CreateLineBoxes(g, this);
+
+            if (pass == passes || !InlineFloats.AnyMoved(floats))
+                break;
+
+            PlaceInlineFloats(g, floats);
         }
+    }
+
+    /// <summary>
+    /// The most times a block places its inline floats again after laying its lines out beside
+    /// them (see <see cref="LayOutFloatedChildren"/>).
+    /// </summary>
+    private const int MaxInlineFloatPasses = 8;
+
+    /// <summary>
+    /// Lays out <paramref name="floats"/> in document order, each placed from the lines this box
+    /// has just laid out, and returns whether any of them takes room.
+    /// </summary>
+    private bool PlaceInlineFloats(ILayoutEnvironment g, IReadOnlyList<CssBox> floats)
+    {
+        bool laidOutOwnFloat = false;
+
+        foreach (var childBox in floats)
+        {
+            childBox.PerformLayout(g);
+            laidOutOwnFloat |= childBox.Display != CssConstants.None
+                && childBox.Size is { Width: > 0, Height: > 0 };
+
+            // CSS2.1 §13.3.1: When page-break-inside:avoid is
+            // set on a float's containing block, move the float
+            // to the next page if it would otherwise cross a
+            // page boundary.
+            if (PageBreakInside == CssConstants.Avoid)
+                childBox.BreakPage();
+        }
+
+        return laidOutOwnFloat;
     }
 
     /// <summary>
@@ -1817,12 +2005,21 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         else if ((Position == CssConstants.Absolute || Position == CssConstants.Fixed)
             && Top != null && Top != CssConstants.Auto
             && Bottom != null && Bottom != CssConstants.Auto
-            && (Height == CssConstants.Auto || string.IsNullOrEmpty(Height)))
+            && (Height == CssConstants.Auto || string.IsNullOrEmpty(Height))
+            && !AlignsBetweenBlockInsets())
         {
             // CSS2.1 §10.6.4: For absolutely positioned, non-replaced
             // elements when height is auto and both top and bottom are
             // specified, compute height from the constraint equation:
             // top + margin-top + height + margin-bottom + bottom = CB height
+            //
+            // Unless CSS Box Alignment 3 §6.1 aligns the box between them: an `align-self` other
+            // than `normal` or `stretch` sizes it as fit-content, which in the block axis is its
+            // content height, as its lines left it, and PositionAbsoluteBox aligns it. It was
+            // stretched between the insets, and PositionAbsoluteBox measured it again from its
+            // children's bottom edges, which says nothing of its lines: "x" with `top: 0;
+            // bottom: 0; align-self: center` stayed 100px tall at the top of a 100px containing
+            // block, where browsers make it 20px tall, 40px down.
             double cbHeight;
 
             if (Position == CssConstants.Fixed && LayoutEnvironment != null)
@@ -2055,6 +2252,65 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             InvalidateActualMargins();
     }
 
+    /// <summary>
+    /// Whether this box is absolutely or fixed positioned with both inline insets in a horizontal
+    /// containing block, and aligned between them by a <c>justify-self</c> other than
+    /// <c>normal</c> or <c>stretch</c> (CSS Box Alignment 3 §6.1), which PositionAbsoluteBox does.
+    /// <c>anchor-center</c> is left to anchor positioning.
+    /// </summary>
+    private bool AlignsBetweenInlineInsets()
+    {
+        if (Position is not (CssConstants.Absolute or CssConstants.Fixed)
+            || Left == null || Left == CssConstants.Auto
+            || Right == null || Right == CssConstants.Auto)
+        {
+            return false;
+        }
+
+        string js = JustifySelf?.Trim().ToLowerInvariant() ?? "auto";
+        if (js is "auto" or "normal" or "stretch" or "anchor-center")
+            return false;
+
+        string cbWritingMode = FindPositionedContainingBlock().WritingMode;
+        return cbWritingMode != "vertical-rl" && cbWritingMode != "vertical-lr";
+    }
+
+    /// <summary>
+    /// Whether this box is absolutely or fixed positioned with both block insets in a horizontal
+    /// containing block, and aligned between them by an <c>align-self</c> other than
+    /// <c>normal</c> or <c>stretch</c> (CSS Box Alignment 3 §6.1), which PositionAbsoluteBox does.
+    /// <c>anchor-center</c> is left to anchor positioning.
+    /// </summary>
+    private bool AlignsBetweenBlockInsets()
+    {
+        if (Position is not (CssConstants.Absolute or CssConstants.Fixed)
+            || Top == null || Top == CssConstants.Auto
+            || Bottom == null || Bottom == CssConstants.Auto)
+        {
+            return false;
+        }
+
+        string alignSelf = AlignSelf?.Trim().ToLowerInvariant() ?? "auto";
+        if (alignSelf is "auto" or "normal" or "stretch" or "anchor-center")
+            return false;
+
+        string cbWritingMode = FindPositionedContainingBlock().WritingMode;
+        return cbWritingMode != "vertical-rl" && cbWritingMode != "vertical-lr";
+    }
+
+    /// <summary>
+    /// The width of the containing block an absolutely or fixed positioned box's insets resolve
+    /// against: the viewport's, or the padding box's of its positioned containing block.
+    /// </summary>
+    private double PositionedContainingBlockWidth()
+    {
+        if (Position == CssConstants.Fixed && LayoutEnvironment != null)
+            return FixedPositioningViewport().Width;
+
+        GetAbsoluteContainingBlockPaddingBox(FindPositionedContainingBlock(), out _, out _, out double width, out _);
+        return width;
+    }
+
     // The used border-box inline size is known (Size.Width has been resolved by positioning time) —
     // the case §10.3.7 centring needs — for an explicit length/percentage width AND for an
     // intrinsic-keyword (min-/max-/fit-content) width, which ResolveBlockUsedWidth now shrink-wraps
@@ -2174,7 +2430,20 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (jsPostNonDefault || asPostNonDefault)
             {
                 var cb = FindPositionedContainingBlock();
-                GetAbsoluteContainingBlockPaddingBox(cb, out double cbPadLeft, out double cbPadTop, out double cbPadWidth, out double cbPadHeight);
+                double cbPadLeft, cbPadTop, cbPadWidth, cbPadHeight;
+
+                // A fixed box is aligned in the viewport, its containing block, as it is placed
+                // above: it was aligned in its nearest positioned ancestor's padding box.
+                if (Position == CssConstants.Fixed)
+                {
+                    var viewport = FixedPositioningViewport();
+                    (cbPadLeft, cbPadTop) = (viewport.X, viewport.Y);
+                    (cbPadWidth, cbPadHeight) = (viewport.Width, viewport.Height);
+                }
+                else
+                {
+                    GetAbsoluteContainingBlockPaddingBox(cb, out cbPadLeft, out cbPadTop, out cbPadWidth, out cbPadHeight);
+                }
 
                 bool hasL = Left != null && Left != CssConstants.Auto;
                 bool hasR = Right != null && Right != CssConstants.Auto;
@@ -2207,7 +2476,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         double imcbLeft = cbPadLeft + cssLeft;
                         double imcbWidth = cbPadWidth - cssLeft - cssRight;
 
-                        double boxWidth = GetShrinkToFitWidth();
+                        // ResolveBlockUsedWidth sized a box with an auto width as fit-content between
+                        // the insets already (AlignsBetweenInlineInsets); measuring it again from its
+                        // children's right edges would miss its text, and count its positioned children.
+                        double boxWidth = (Width == CssConstants.Auto || string.IsNullOrEmpty(Width)) && AlignsBetweenInlineInsets()
+                            ? Size.Width
+                            : GetShrinkToFitWidth();
                         Size = new SizeF((float)boxWidth, Size.Height);
 
                         // For a box the vertical-flow rotation will transpose, the
@@ -2216,8 +2490,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         // rotation swaps them). Align with the physical extent so
                         // an overflowing vrl item (laid out with a small logical
                         // width) is centered/clamped by its true width.
-                        double alignWidth = WillBeVerticalTransposed()
-                            ? GetShrinkToFitHeight() : boxWidth;
+                        //
+                        // What is aligned is the margin box: with `margin-left: 40px`, a centred 8px
+                        // box was 286px in, where browsers put it 266px in.
+                        double alignWidth = (WillBeVerticalTransposed()
+                            ? GetShrinkToFitHeight() : boxWidth) + ActualMarginLeft + ActualMarginRight;
 
                         // Inline-axis start edge follows the CB's direction (start/end);
                         // self-start/self-end follow the ITEM's start in this horizontal
@@ -2361,7 +2638,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         double imcbTop = cbPadTop + cssTop;
                         double imcbHeight = cbPadHeight - cssTop - cssBottom;
 
-                        double boxHeight = GetShrinkToFitHeight();
+                        // ResolveUsedBlockHeight left a box with an auto height at its content
+                        // height already (AlignsBetweenBlockInsets); measuring it again from its
+                        // children's bottom edges would miss its lines, and count its positioned
+                        // children.
+                        double boxHeight = (Height == CssConstants.Auto || string.IsNullOrEmpty(Height)) && AlignsBetweenBlockInsets()
+                            ? ActualBottom - Location.Y
+                            : GetShrinkToFitHeight();
 
                         // Non-stretch align-self → the box is its content height,
                         // not the stretched top-to-bottom inset height.
@@ -2371,8 +2654,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         // alignment runs on the CB's block (vertical) axis but the
                         // item's PHYSICAL height is its logical WIDTH (the rotation
                         // swaps them); align with the physical extent.
-                        double alignHeight = WillBeVerticalTransposed()
-                            ? GetShrinkToFitWidth() : boxHeight;
+                        //
+                        // What is aligned is the margin box: with `margin-top: 20px`, a centred
+                        // 20px box was 60px down a 100px containing block, where browsers put it
+                        // 50px down.
+                        double alignHeight = (WillBeVerticalTransposed()
+                            ? GetShrinkToFitWidth() : boxHeight) + ActualMarginTop + ActualMarginBottom;
 
                         // Block-axis start is the top edge for horizontal-tb. self-start/
                         // self-end use the ITEM's start in this vertical axis: its block
@@ -2522,6 +2809,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // The definite-track grid pass distributes align-content across its
             // row tracks itself; this block-level shift would double it.
             && !_gridTrackLayoutApplied
+            // So does a flex container across its lines (CSS Flexbox §8.4), and a single-line one
+            // has nothing for it to move: its line is as tall as the container.
+            && Display != "flex"
             && (IsBlock || Display == CssConstants.ListItem || Display == CssConstants.InlineBlock
                 || Display == CssConstants.TableCell)
             && Boxes.Count > 0
