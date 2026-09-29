@@ -464,9 +464,9 @@ internal static class CssLayoutEngine
                 if (blockBox.Kind == BoxKind.Anonymous
                     && IsBaselineAligned(rect.Key)
                     && ((rect.Key.Display == CssConstants.InlineBlock && LastLineBaseline(rect.Key) == null)
-                        || rect.Key.Display is "inline-flex" or "inline-grid"))
+                        || rect.Key.Display is "inline-flex" or "inline-grid" or CssConstants.InlineTable))
                 {
-                    double boxBaseline = FlexOrGridBaseline(rect.Key)
+                    double boxBaseline = AtomicInlineFirstBaseline(rect.Key)
                         ?? rect.Value.Bottom + rect.Key.ActualMarginBottom;
 
                     maxBottom = Math.Max(maxBottom, boxBaseline + StrutDescent(blockBox));
@@ -1875,7 +1875,7 @@ internal static class CssLayoutEngine
             // css-grid/table-grid-item-dynamic-002.)
             CssLayoutEngineTable.PerformLayout(g, b, b.BaseUrl);
         }
-        else if (LayoutBoxUtils.ContainsInlinesOnly(b) || InlineContentWithBrsOnly(b))
+        else if (LayoutBoxUtils.LaysOutOnLines(b) || InlineContentWithBrsOnly(b))
         {
             // Inline-block content that is inline runs interrupted only by <br>
             // line breaks is an inline formatting context: lay it out with line
@@ -2074,6 +2074,11 @@ internal static class CssLayoutEngine
         // box's *physical* border-box width (Size.Width after the swap), which
         // differs from the logical ibBoxWidth for non-square boxes.
         double physicalBoxWidth = ibBoxWidth;
+
+        // A table sizes itself (CssLayoutEngineTable), whatever width was measured for it above.
+        if (b.Display is CssConstants.Table or CssConstants.InlineTable)
+            physicalBoxWidth = b.Size.Width;
+
         if (VerticalFlowPrototype.Enabled
             && CssBoxProperties.IsVerticalWritingMode(b.WritingMode)
             && (b.ParentBox == null || !CssBoxProperties.IsVerticalWritingMode(b.ParentBox.WritingMode)))
@@ -2102,9 +2107,9 @@ internal static class CssLayoutEngine
         // (FlexOrGridBaseline).
         if (IsBaselineAligned(b)
             && ((b.Display == CssConstants.InlineBlock && LastLineBaseline(b) == null)
-                || b.Display is "inline-flex" or "inline-grid"))
+                || b.Display is "inline-flex" or "inline-grid" or CssConstants.InlineTable))
         {
-            double boxBaseline = FlexOrGridBaseline(b) ?? b.ActualBottom + b.ActualMarginBottom;
+            double boxBaseline = AtomicInlineFirstBaseline(b) ?? b.ActualBottom + b.ActualMarginBottom;
             maxbottom = Math.Max(maxbottom, boxBaseline + StrutDescent(blockbox));
         }
 
@@ -2174,12 +2179,12 @@ internal static class CssLayoutEngine
     /// <summary>
     /// Whether <see cref="FlowBox"/> places <paramref name="box"/>, a child of
     /// <paramref name="parent"/> with no words of its own, on a line whole, through
-    /// <see cref="FlowInlineBlock"/>: an inline-block, an inline flex or grid container, or an item
-    /// of a flex or grid container, which this engine lays out as one.
+    /// <see cref="FlowInlineBlock"/>: an inline-block, an inline flex, grid or table container, or an
+    /// item of a flex or grid container, which this engine lays out as one.
     /// </summary>
     private static bool FlowsAsInlineBlock(CssBox box, CssBox parent) =>
         box.Display == CssConstants.InlineBlock
-        || box.Display is "inline-flex" or "inline-grid"
+        || box.Display is "inline-flex" or "inline-grid" or CssConstants.InlineTable
         || parent.Display is "flex" or "inline-flex" or "grid" or "inline-grid";
 
     /// <summary>
@@ -3133,8 +3138,8 @@ internal static class CssLayoutEngine
         if (box.Display == CssConstants.InlineBlock && LastLineBaseline(box) is double baseline)
             return baseline - rect.Top;
 
-        // An inline flex or grid container has its first item's.
-        if (FlexOrGridBaseline(box) is double itemBaseline)
+        // An inline flex or grid container has its first item's, an inline table its first row's.
+        if (AtomicInlineFirstBaseline(box) is double itemBaseline)
             return itemBaseline - rect.Top;
 
         return rect.Height;
@@ -3193,6 +3198,82 @@ internal static class CssLayoutEngine
 
         return FirstLineBaseline(item) ?? item.ActualBottom;
     }
+
+    /// <summary>
+    /// Where the baseline of an inline flex, grid or table container lies: its first item's (see
+    /// <see cref="FlexOrGridBaseline"/>) or its first row's (see <see cref="InlineTableBaseline"/>).
+    /// Null for any other box, and for one with no item or row.
+    /// </summary>
+    internal static double? AtomicInlineFirstBaseline(CssBox box) =>
+        FlexOrGridBaseline(box) ?? InlineTableBaseline(box);
+
+    /// <summary>
+    /// Where the baseline of an inline table lies: its first row's. Null for any other box, and for
+    /// a table with no row.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.8.1: the baseline of an <c>inline-table</c> is the baseline of its first row,
+    /// which is that of its cells aligned <c>baseline</c>, each at its first line's, or at the bottom
+    /// of its content where it has none (§17.5.3). A row with no such cell has its bottom edge for
+    /// one, as browsers give it: a <c>&lt;td&gt;</c> is aligned <c>middle</c> unless told otherwise,
+    /// so text beside an inline table stands on its first row's bottom. The first row is the header
+    /// group's first, wherever the header group is, and the footer group's last of all.
+    /// </remarks>
+    internal static double? InlineTableBaseline(CssBox box)
+    {
+        if (box.Display != CssConstants.InlineTable || FirstTableRow(box) is not { } row)
+            return null;
+
+        double? baseline = null;
+        double? bottom = null;
+
+        foreach (var cell in row.Boxes)
+        {
+            if (cell.Display != CssConstants.TableCell)
+                continue;
+
+            // A cell spanning rows reaches below this one.
+            if (!int.TryParse(cell.GetAttribute("rowspan"), out int rowspan) || rowspan <= 1)
+                bottom = Math.Max(bottom ?? double.MinValue, cell.ActualBottom);
+
+            if (string.IsNullOrEmpty(cell.VerticalAlign) || cell.VerticalAlign == CssConstants.Baseline)
+            {
+                double cellBaseline = FirstLineBaseline(cell)
+                    ?? cell.ActualBottom - cell.ActualPaddingBottom - cell.ActualBorderBottomWidth;
+                baseline = Math.Max(baseline ?? double.MinValue, cellBaseline);
+            }
+        }
+
+        return baseline ?? bottom;
+    }
+
+    /// <summary>The first row a table lays out, or null when it has none.</summary>
+    private static CssBox? FirstTableRow(CssBox table)
+    {
+        CssBox? footerRow = null;
+
+        foreach (var child in table.Boxes)
+        {
+            if (child.Display == "table-header-group" && FirstRowIn(child) is { } headerRow)
+                return headerRow;
+        }
+
+        foreach (var child in table.Boxes)
+        {
+            if (child.Display == CssConstants.TableRow)
+                return child;
+
+            if (child.Display == "table-footer-group")
+                footerRow ??= FirstRowIn(child);
+            else if (child.Display == CssConstants.TableRowGroup && FirstRowIn(child) is { } row)
+                return row;
+        }
+
+        return footerRow;
+    }
+
+    private static CssBox? FirstRowIn(CssBox group) =>
+        group.Boxes.Find(child => child.Display == CssConstants.TableRow);
 
     /// <summary>
     /// Where the baseline of the first in-flow line box in <paramref name="box"/> lies, where its
@@ -3424,7 +3505,7 @@ internal static class CssLayoutEngine
     /// reaches a line box as a word of its own).
     /// </summary>
     private static bool IsAtomicInline(CssBox box) =>
-        box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" || box.IsImage;
+        box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or CssConstants.InlineTable || box.IsImage;
 
     /// <summary>
     /// Whether a <c>vertical-align</c> value positions the box against the <em>parent's font
@@ -3856,7 +3937,7 @@ internal static class CssLayoutEngine
 
             // An inline flex or grid container counts as an inline-block does, with its first
             // item's baseline (FlexOrGridBaseline) or its bottom margin edge.
-            if (box.Display is "inline-flex" or "inline-grid" && !IsBaselineAligned(box))
+            if (box.Display is "inline-flex" or "inline-grid" or CssConstants.InlineTable && !IsBaselineAligned(box))
                 continue;
 
             // An inline box's text stands half its own leading below the line's top too, where

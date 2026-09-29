@@ -186,9 +186,9 @@ internal sealed class CssLineBox
         // the position of the entire atomic box.  Move the box's rectangle
         // and its Location/ActualBottom directly.
         //
-        // An inline flex or grid container is an atomic box too, moved here as a whole. It was
-        // left where the flow put it, at the top of the line, whatever its alignment.
-        if (b.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
+        // An inline flex, grid or table container is an atomic box too, moved here as a whole. It
+        // was left where the flow put it, at the top of the line, whatever its alignment.
+        if (b.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or CssConstants.InlineTable)
         {
             bool usesDefaultBaseline = string.IsNullOrEmpty(b.VerticalAlign)
                 || b.VerticalAlign == CssConstants.Baseline;

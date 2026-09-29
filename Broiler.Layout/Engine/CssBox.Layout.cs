@@ -1755,7 +1755,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // inside one or inside an inline-level box. There the block path below took each run of
             // text for a block and gave it no line box: `Hello<br>World` in a flex item was not
             // painted at all.
-            else if (LayoutBoxUtils.ContainsInlinesOnly(this) || HoldsInlineContentBrokenByBrs())
+            else if (LayoutBoxUtils.LaysOutOnLines(this) || HoldsInlineContentBrokenByBrs())
             {
                 ActualBottom = Location.Y;
                 CssLayoutEngine.CreateLineBoxes(g, this); //This will automatically set the bottom of this block

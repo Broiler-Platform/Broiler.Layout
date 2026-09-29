@@ -269,8 +269,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public bool IsBrElement => HtmlTag != null && HtmlTag.Name.Equals("br", StringComparison.InvariantCultureIgnoreCase);
 
+    // An inline table is inline-level too (CSS 2.1 §17.2): it was left out, so a block holding one
+    // took the block path, which wrapped the text around it in anonymous blocks and put the table
+    // on a line of its own.
     public bool IsInline => (Display == CssConstants.Inline || Display == CssConstants.InlineBlock
-        || Display == "inline-flex" || Display == "inline-grid") && !IsBrElement;
+        || Display == "inline-flex" || Display == "inline-grid" || Display == CssConstants.InlineTable) && !IsBrElement;
     
     // CSS Display 3 §2.5: `flow-root` is block-level (its <display-outside> is
     // `block`); the keyword only changes the <display-inside> to "block container
