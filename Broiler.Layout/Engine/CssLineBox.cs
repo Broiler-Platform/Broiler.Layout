@@ -270,14 +270,17 @@ internal sealed class CssLineBox
         // top coordinate) already computed by ApplyVerticalAlignment.
         double newtop = baseline;
 
-        if (b.ParentBox != null && b.ParentBox.Rectangles.ContainsKey(this) && r.Height < b.ParentBox.Rectangles[this].Height)
+        // An inline box's rectangle on this line goes where its words go. It was moved only for a
+        // box inside a taller inline box, so one in the block itself stayed at the top of the line
+        // when the baseline brought its words down, and getBoundingClientRect, which unions these
+        // rectangles, reported the line's top: beside an empty 30px inline-block, a span holding
+        // "a" was 0px down its line, where its "a" was drawn 15.15px down and browsers report 15.
+        // An atomic box has no words on this line to go with, and its place is not set here.
+        if (b.Display == CssConstants.Inline
+            || (b.ParentBox != null && b.ParentBox.Rectangles.ContainsKey(this) && r.Height < b.ParentBox.Rectangles[this].Height))
         {
-            //Do this only if rectangle is shorter than parent's
             double recttop = newtop - gap;
-            RectangleF newr = new(r.X, (float)recttop, r.Width, r.Height);
-            
-            Rectangles[b] = newr;
-            b.OffsetRectangle(this, gap);
+            Rectangles[b] = new RectangleF(r.X, (float)recttop, r.Width, r.Height);
         }
 
         foreach (var word in ws)

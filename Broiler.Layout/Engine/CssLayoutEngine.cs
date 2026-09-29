@@ -378,6 +378,7 @@ internal static class CssLayoutEngine
             ApplyRightToLeft(linebox, lineRtl);
             BubbleRectangles(blockBox, linebox);
             ApplyVerticalAlignment(linebox);
+            FitWordlessInlineBoxes(linebox);
 
             linebox.AssignRectanglesToBoxes();
         }
@@ -3221,6 +3222,63 @@ internal static class CssLayoutEngine
         box != root
         && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table"
         && !IsInAbsposSubtree(box, root);
+
+    /// <summary>
+    /// Fits the rectangle of each inline box on <paramref name="line"/> that holds no words of its
+    /// own around what the boxes in it hold, where vertical alignment has put it.
+    /// </summary>
+    /// <remarks>
+    /// Such a box's rectangle is what the flow found around its contents before the line's baseline
+    /// moved them, and CssLineBox.SetBaseLine cannot place it from words it does not hold: it
+    /// measured its offset from its first word, which the pass had already moved. A span around
+    /// "a" beside an empty 30px inline-block stayed at the top of the line, and getBoundingClientRect,
+    /// which unions these rectangles, reported the line's top, where the "a" was drawn 15.15px down
+    /// and browsers report 15.
+    /// </remarks>
+    private static void FitWordlessInlineBoxes(CssLineBox line)
+    {
+        foreach (var box in new List<CssBox>(line.Rectangles.Keys))
+            FitToContent(box, line);
+    }
+
+    /// <summary>
+    /// The top and bottom of what <paramref name="box"/> holds on <paramref name="line"/>, fitting
+    /// its rectangle around them first where it holds no words of its own; null when it has no
+    /// rectangle on the line.
+    /// </summary>
+    private static (double Top, double Bottom)? FitToContent(CssBox box, CssLineBox line)
+    {
+        if (!line.Rectangles.TryGetValue(box, out RectangleF r))
+            return null;
+
+        // What a box's vertical padding and border enclose is its own; the box around it reaches
+        // only as far as its content (see CssLineBox.UpdateRectangle). An atomic box counts whole.
+        if (box.IsImage || box.Display != CssConstants.Inline)
+            return (r.Top, r.Bottom);
+
+        double topSpacing = box.ActualBorderTopWidth + box.ActualPaddingTop;
+        double bottomSpacing = box.ActualBorderBottomWidth + box.ActualPaddingBottom;
+
+        if (box.Words.Count > 0)
+            return (r.Top + topSpacing, r.Bottom - bottomSpacing);
+
+        double top = double.MaxValue, bottom = double.MinValue;
+
+        foreach (var child in box.Boxes)
+        {
+            if (FitToContent(child, line) is not var (childTop, childBottom))
+                continue;
+
+            top = Math.Min(top, childTop);
+            bottom = Math.Max(bottom, childBottom);
+        }
+
+        if (top > bottom)
+            return (r.Top + topSpacing, r.Bottom - bottomSpacing);
+
+        line.Rectangles[box] = RectangleF.FromLTRB(r.Left, (float)(top - topSpacing), r.Right, (float)(bottom + bottomSpacing));
+        return (top, bottom);
+    }
 
     /// <summary>
     /// Whether the box is an atomic inline-level box whose baseline is its bottom margin edge: an
