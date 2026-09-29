@@ -39,6 +39,7 @@ internal static partial class CssUtils
             "border-top-color" => cssBox.BorderTopColor,
             "border-spacing" => cssBox.BorderSpacing,
             "border-collapse" => cssBox.BorderCollapse,
+            "table-layout" => cssBox.TableLayout,
             "corner-radius" => cssBox.CornerRadius,
             "border-radius" => cssBox.CornerRadius,
             "opacity" => cssBox.Opacity,
@@ -341,6 +342,9 @@ internal static partial class CssUtils
                 break;
             case "border-collapse":
                 cssBox.BorderCollapse = value;
+                break;
+            case "table-layout":
+                cssBox.TableLayout = value;
                 break;
             case "corner-radius":
                 cssBox.CornerRadius = value;

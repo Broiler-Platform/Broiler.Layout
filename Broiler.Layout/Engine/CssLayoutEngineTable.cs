@@ -139,13 +139,24 @@ internal sealed class CssLayoutEngineTable
         // Determine Row and Column Count, and ColumnWidths
         var availCellSpace = CalculateCountAndWidth();
 
-        DetermineMissingColumnWidths(availCellSpace);
+        // CSS 2.1 §17.5.2.1: the fixed table layout algorithm sizes the columns from their own
+        // widths and the first row's alone, and a cell's content that is wider overflows it. There
+        // was no such algorithm: a table with `table-layout: fixed; width: 100px` holding a 400px
+        // block was 400px wide, where browsers keep it 100px.
+        if (IsFixedLayout)
+        {
+            DetermineFixedColumnWidths(availCellSpace);
+        }
+        else
+        {
+            DetermineMissingColumnWidths(availCellSpace);
 
-        // Check for minimum sizes (increment widths if necessary)
-        EnforceMinimumSize();
+            // Check for minimum sizes (increment widths if necessary)
+            EnforceMinimumSize();
 
-        // While table width is larger than it should, and width is reducible
-        EnforceMaximumSize();
+            // While table width is larger than it should, and width is reducible
+            EnforceMaximumSize();
+        }
 
         // However wide that makes it, the table is as wide as its captions need.
         WidenToCaptions();
@@ -611,6 +622,101 @@ internal sealed class CssLayoutEngineTable
             count += GetColSpan(cell);
         
         return count;
+    }
+
+    /// <summary>
+    /// Whether the table is laid out by the fixed table layout algorithm (CSS 2.1 §17.5.2.1): its
+    /// <c>table-layout</c> is <c>fixed</c> and it has a width of its own. Browsers lay a table with
+    /// an <c>auto</c> width out by the automatic algorithm, whatever its <c>table-layout</c>.
+    /// </summary>
+    private bool IsFixedLayout =>
+        string.Equals(_tableBox.TableLayout, "fixed", StringComparison.OrdinalIgnoreCase)
+        && new CssLength(_tableBox.Width).Number > 0;
+
+    /// <summary>
+    /// CSS 2.1 §17.5.2.1, the fixed table layout algorithm: a column whose column element has a
+    /// width has that width; any other takes its width from the cell in the first row that starts
+    /// in it, divided over the columns the cell spans; and the columns left share the room the
+    /// table has left equally. When every column has a width and together they fall short of the
+    /// table's, each is widened in proportion to its width. The rows after the first and the
+    /// content of the cells take no part: content wider than its column overflows it.
+    /// </summary>
+    /// <remarks>
+    /// A cell's width is its content box's unless its <c>box-sizing</c> says otherwise, and its
+    /// padding and borders are added to it for its column, which holds its border box.
+    /// </remarks>
+    private void DetermineFixedColumnWidths(double availCellSpace)
+    {
+        for (int i = 0; i < _columnWidths.Length; i++)
+            _columnWidths[i] = double.NaN;
+
+        for (int i = 0; i < _columns.Count && i < _columnWidths.Length; i++)
+        {
+            double width = SpecifiedWidth(_columns[i], availCellSpace);
+
+            if (width > 0)
+                _columnWidths[i] = width;
+        }
+
+        if (_allRows.Count > 0)
+        {
+            int column = 0;
+
+            foreach (var cell in _allRows[0].Boxes)
+            {
+                int span = GetColSpan(cell);
+                double width = cell.Display == CssConstants.TableCell ? SpecifiedWidth(cell, availCellSpace) : 0;
+
+                if (width > 0)
+                {
+                    width = cell.ResolveSpecifiedWidthToBorderBox(width);
+
+                    for (int j = column; j < Math.Min(_columnWidths.Length, column + span); j++)
+                    {
+                        if (double.IsNaN(_columnWidths[j]))
+                            _columnWidths[j] = width / span;
+                    }
+                }
+
+                column += span;
+            }
+        }
+
+        double used = 0;
+        int unsized = 0;
+
+        foreach (double width in _columnWidths)
+        {
+            if (double.IsNaN(width))
+                unsized++;
+            else
+                used += width;
+        }
+
+        double room = Math.Max(0, availCellSpace - used);
+
+        for (int i = 0; i < _columnWidths.Length; i++)
+        {
+            if (unsized > 0)
+            {
+                if (double.IsNaN(_columnWidths[i]))
+                    _columnWidths[i] = room / unsized;
+            }
+            else if (used > 0)
+            {
+                _columnWidths[i] += room * _columnWidths[i] / used;
+            }
+        }
+    }
+
+    /// <summary>The width <paramref name="box"/> has of its own, a percentage of the table's room; 0 for <c>auto</c>.</summary>
+    private static double SpecifiedWidth(CssBox box, double availCellSpace)
+    {
+        if (string.IsNullOrEmpty(box.Width) || box.Width == CssConstants.Auto)
+            return 0;
+
+        double width = CssLengthParser.ParseLength(box.Width, availCellSpace, box.GetEmHeight());
+        return double.IsNaN(width) ? 0 : width;
     }
 
     private void DetermineMissingColumnWidths(double availCellSpace)
