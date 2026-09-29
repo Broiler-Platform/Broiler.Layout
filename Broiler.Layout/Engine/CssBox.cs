@@ -269,8 +269,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public bool IsBrElement => HtmlTag != null && HtmlTag.Name.Equals("br", StringComparison.InvariantCultureIgnoreCase);
 
+    // An inline table is inline-level too (CSS 2.1 §17.2): it was left out, so a block holding one
+    // took the block path, which wrapped the text around it in anonymous blocks and put the table
+    // on a line of its own.
     public bool IsInline => (Display == CssConstants.Inline || Display == CssConstants.InlineBlock
-        || Display == "inline-flex" || Display == "inline-grid") && !IsBrElement;
+        || Display == "inline-flex" || Display == "inline-grid" || Display == CssConstants.InlineTable) && !IsBrElement;
     
     // CSS Display 3 §2.5: `flow-root` is block-level (its <display-outside> is
     // `block`); the keyword only changes the <display-inside> to "block container
@@ -367,11 +370,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// An <c>inline-block</c> that does have line boxes and clips nothing is not covered: its
     /// baseline is its last line's, which <see cref="CssLayoutEngine.LastLineBaseline"/> finds.
     /// </para>
+    /// <para>
+    /// An inline flex or grid container takes its baseline from its first item (<see
+    /// cref="CssLayoutEngine.FlexOrGridBaseline"/>), whatever its <c>overflow</c>, and has none
+    /// when it has no item; its bottom margin edge stands in for it then, as for an inline-block.
+    /// </para>
     /// </remarks>
     internal bool UsesBottomMarginEdgeBaseline =>
-        Display == CssConstants.InlineBlock
-        && ((!string.IsNullOrEmpty(Overflow) && Overflow != CssConstants.Visible)
-            || !HasInFlowLineContent(this));
+        (Display == CssConstants.InlineBlock
+            && ((!string.IsNullOrEmpty(Overflow) && Overflow != CssConstants.Visible)
+                || !HasInFlowLineContent(this)))
+        || (Display is "inline-flex" or "inline-grid" && CssLayoutEngine.FirstFlexOrGridItem(this) == null);
 
     /// <summary>
     /// Whether <paramref name="box"/> lays any text out in a line box of its own or of an in-flow
@@ -761,7 +770,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
 
         _listItemBox.Words[0].Left = Location.X - _listItemBox.Size.Width - 5;
-        _listItemBox.Words[0].Top = Location.Y + ActualPaddingTop; // +FontAscent;
+        // Half the item's leading down, where the first line's text stands (CSS 2.1 §10.8.1).
+        _listItemBox.Words[0].Top = Location.Y + ActualPaddingTop + CssLayoutEngine.HalfLeading(this);
     }
 
     internal string GetAttribute(string attribute) => GetAttribute(attribute, string.Empty);

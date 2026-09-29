@@ -88,7 +88,7 @@ internal partial class CssBox
 
             return display switch
             {
-                CssConstants.Inline => IsReplacedForContainment,
+                CssConstants.Inline => IsReplaced,
                 CssConstants.TableRow or CssConstants.TableRowGroup or CssConstants.TableCell
                     or CssConstants.TableColumn or CssConstants.TableColumnGroup
                     or CssConstants.TableHeaderGroup or CssConstants.TableFooterGroup
@@ -147,7 +147,9 @@ internal partial class CssBox
 
     /// <summary>
     /// Whether this box is replaced, and so generates an <em>atomic</em> inline-level box when its
-    /// <c>display</c> is <c>inline</c> — the distinction <see cref="CanContainSize"/> turns on.
+    /// <c>display</c> is <c>inline</c>, one that takes its <c>width</c> and <c>height</c> as an
+    /// inline, non-replaced box does not (CSS 2.1 §10.3.2, §10.6.2) — the distinction
+    /// <see cref="CanContainSize"/> and the flow (<c>CssLayoutEngine.FlowBox</c>) turn on.
     /// </summary>
     /// <remarks>
     /// Read from the element rather than from a single engine flag because no one flag covers it:
@@ -155,7 +157,7 @@ internal partial class CssBox
     /// renderer's <c>&lt;canvas&gt;</c> fix-up records. An <c>&lt;svg&gt;</c>, an
     /// <c>&lt;iframe&gt;</c> and a <c>&lt;video&gt;</c> are replaced too and carry neither.
     /// </remarks>
-    private bool IsReplacedForContainment
+    internal bool IsReplaced
     {
         get
         {

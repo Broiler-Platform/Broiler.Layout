@@ -24,6 +24,10 @@ internal sealed class CssLayoutEngineTable
     // never rendered; collect them here to lay out in LayoutCells.
     private readonly List<CssBox> _captions = [];
 
+    // The widest of the captions' min-content contributions, which the table is at least as wide
+    // as (see WidenToCaptions).
+    private double _captionMinWidth;
+
     private int _columnCount;
 
     private bool _widthSpecified;
@@ -71,6 +75,25 @@ internal sealed class CssLayoutEngineTable
 
         // +1 columns because padding is between the cell and table borders
         return (columns + 1) * GetHorizontalSpacing(tableBox);
+    }
+
+    /// <summary>
+    /// Resolves the collapsed borders of a table in the collapsing border model that has not been
+    /// laid out yet, so that its intrinsic widths count the halves of the borders its cells and it
+    /// take (see <see cref="ResolveCollapsedBorders"/>), not their own borders whole.
+    /// </summary>
+    internal static void EnsureCollapsedBorders(CssBox tableBox)
+    {
+        if (tableBox.CollapsedBorders != null
+            || !string.Equals(tableBox.BorderCollapse, CssConstants.Collapse, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var table = new CssLayoutEngineTable(tableBox);
+        table.AssignBoxKinds(tableBox.BaseUrl);
+        table.InsertEmptyBoxes(tableBox.BaseUrl);
+        table.ResolveCollapsedBorders();
     }
 
     public static void PerformLayout(ILayoutEnvironment g, CssBox tableBox, Uri baseUrl)
@@ -123,6 +146,9 @@ internal sealed class CssLayoutEngineTable
 
         // While table width is larger than it should, and width is reducible
         EnforceMaximumSize();
+
+        // However wide that makes it, the table is as wide as its captions need.
+        WidenToCaptions();
 
         //Actually layout cells!
         LayoutCells(g);
@@ -591,84 +617,24 @@ internal sealed class CssLayoutEngineTable
     {
         double occupedSpace = 0f;
 
-        if (_widthSpecified) //If a width was specified,
+        // CSS Tables 3: a table with a width of its own shares it out over its columns as it shares
+        // out a spanning cell's (see ShareOut), from their minimums: the columns with a width of
+        // their own up to it, then the others up to their maximums, then past those, the others in
+        // proportion to their maximums. What some columns left once they reached their maximums was
+        // split evenly over the columns without a width instead. In a 1024px page, a table with
+        // `width: 100%` gave "Some longer text here" and "short" 572.93px and 451.07px, where
+        // browsers give them 835.22px and 188.78px, and an empty column beside a y took 96px of
+        // 200px, where browsers give it none. A table narrower than its columns' widths took
+        // theirs: with `width: 60px`, two 50px columns made it 100px wide, where browsers keep it
+        // 60px wide, with 30px columns.
+        if (_widthSpecified)
         {
-            //Assign NaNs equally with space left after gathering not-NaNs
-            int numOfNans = 0;
+            var widths = (double[])GetColumnMinWidths().Clone();
 
-            //Calculate number of NaNs and occupied space
-            foreach (double colWidth in _columnWidths)
-            {
-                if (double.IsNaN(colWidth))
-                    numOfNans++;
-                else
-                    occupedSpace += colWidth;
-            }
+            if (widths.Length > 0)
+                ShareOut(availCellSpace, 0, widths.Length - 1, widths, _columnMaxWidths);
 
-            var orgNumOfNans = numOfNans;
-            double[] orgColWidths = null;
-
-            if (numOfNans < _columnWidths.Length)
-            {
-                orgColWidths = new double[_columnWidths.Length];
-                
-                for (int i = 0; i < _columnWidths.Length; i++)
-                    orgColWidths[i] = _columnWidths[i];
-            }
-
-            if (numOfNans > 0)
-            {
-                // Determine the max width for each column
-                GetColumnsMinMaxWidthByContent(true, out _, out double[] maxFullWidths);
-
-                // set the columns that can fulfill by the max width in a loop because it changes the nanWidth
-                int oldNumOfNans;
-                do
-                {
-                    oldNumOfNans = numOfNans;
-
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                    {
-                        var nanWidth = (availCellSpace - occupedSpace) / numOfNans;
-                        if (double.IsNaN(_columnWidths[i]) && nanWidth > maxFullWidths[i])
-                        {
-                            _columnWidths[i] = maxFullWidths[i];
-                            numOfNans--;
-                            occupedSpace += maxFullWidths[i];
-                        }
-                    }
-                } while (oldNumOfNans != numOfNans);
-
-                if (numOfNans > 0)
-                {
-                    // Determine width that will be assigned to un assigned widths
-                    double nanWidth = (availCellSpace - occupedSpace) / numOfNans;
-
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                    {
-                        if (double.IsNaN(_columnWidths[i]))
-                            _columnWidths[i] = nanWidth;
-                    }
-                }
-            }
-
-            if (numOfNans == 0 && occupedSpace < availCellSpace)
-            {
-                if (orgNumOfNans > 0)
-                {
-                    // spread extra width between all non width specified columns
-                    double extWidth = (availCellSpace - occupedSpace) / orgNumOfNans;
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                        if (orgColWidths == null || double.IsNaN(orgColWidths[i]))
-                            _columnWidths[i] += extWidth;
-                }
-                else
-                {
-                    // spread extra width between all columns with respect to relative sizes
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                        _columnWidths[i] += (availCellSpace - occupedSpace) * (_columnWidths[i] / occupedSpace);
-                }
-            }
+            _columnWidths = widths;
         }
         else
         {
@@ -848,6 +814,52 @@ internal sealed class CssLayoutEngineTable
         return Math.Max(0, needed - spare);
     }
 
+    /// <summary>
+    /// CSS Tables 3: a table is at least as wide as the widest of its captions' min-content
+    /// contributions, whatever its <c>width</c> and <c>max-width</c>. The columns share that width
+    /// out as they share any width the table is given (see <see cref="ShareOut"/>): from their
+    /// minimums up to their maximums, then past them in proportion to them.
+    /// </summary>
+    /// <remarks>
+    /// The columns were sized from the cells alone, and the captions laid out across them, so
+    /// "Caption" over a cell holding an x made the table 8px wide and the word ran out of it, where
+    /// browsers make the table 55.16px wide, as wide as the word. A table holding only a caption was
+    /// 0px wide.
+    /// </remarks>
+    private void WidenToCaptions()
+    {
+        foreach (var caption in _captions)
+            _captionMinWidth = Math.Max(_captionMinWidth, GetCaptionMinContribution(caption));
+
+        // A table with no columns is widened in LayoutCells.
+        if (_columnWidths.Length == 0)
+            return;
+
+        double columns = 0;
+        foreach (double width in _columnWidths)
+            columns += width;
+
+        double needed = _captionMinWidth - (GetWidthSum() - columns);
+        if (needed <= columns + 0.01)
+            return;
+
+        // From the columns' minimums: their widths may lie past their maximums already, shared
+        // out evenly over a table's own width, and the share-out would add to that.
+        var widths = (double[])GetColumnMinWidths().Clone();
+        ShareOut(needed, 0, widths.Length - 1, widths, _columnMaxWidths);
+        _columnWidths = widths;
+    }
+
+    /// <summary>
+    /// A caption's min-content contribution: its min-content width, or its own width where it has
+    /// one, with its padding and border (see <see cref="CssBox.GetMinMaxWidth"/>), and its margins.
+    /// </summary>
+    private static double GetCaptionMinContribution(CssBox caption)
+    {
+        caption.GetMinMaxWidth(out double min, out _);
+        return (double.IsNaN(min) ? 0 : min) + caption.ActualMarginLeft + caption.ActualMarginRight;
+    }
+
     private void LayoutCells(ILayoutEnvironment g)
     {
         // CSS2.1 §17.4.1: lay out top-side captions above the cell grid. They
@@ -858,7 +870,14 @@ internal sealed class CssLayoutEngineTable
         // CSS 2.1 §17.4: a caption is as wide as the table's border box, which GetWidthSum is, the
         // spacing and the borders counted. The spacing was added again, so a caption ran past the
         // table's right edge by it: with `border-spacing: 4px` and one column, 8px.
-        double captionWidth = GetWidthSum();
+        //
+        // A table with no columns has no spacing either, and is as wide as its border and padding,
+        // its own width, or its captions need, whichever is the widest.
+        double captionWidth = _columnCount > 0
+            ? GetWidthSum()
+            : Math.Max(Math.Max(
+                _tableBox.ActualBorderLeftWidth + _tableBox.ActualPaddingLeft + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
+                _tableBox.ActualWidth), _captionMinWidth);
         double topCaptionHeight = LayoutTopCaptions(g, captionWidth);
 
         // CSS2.1 §17.6.1: border spacing lies between the cells, and between them and the
@@ -1015,6 +1034,10 @@ internal sealed class CssLayoutEngineTable
         _tableBox.ActualRight = Math.Max(
             maxRight + horizontalSpacing + _tableBox.ActualPaddingRight + _tableBox.ActualBorderRightWidth,
             _tableBox.Location.X + Math.Min(_tableBox.ActualWidth, GetMaxTableWidth()));
+
+        if (_columnCount == 0)
+            _tableBox.ActualRight = Math.Max(_tableBox.ActualRight, _tableBox.Location.X + captionWidth);
+
         _tableBox.ActualBottom = Math.Max(maxBottom, starty) + verticalSpacing + _tableBox.ActualPaddingBottom + _tableBox.ActualBorderBottomWidth;
 
         // CSS2.1 §17.4.1: lay out bottom-side captions below the table box and
@@ -1302,27 +1325,23 @@ internal sealed class CssLayoutEngineTable
         ["ridge"] = 4, ["outset"] = 3, ["groove"] = 2, ["inset"] = 1, ["none"] = 0,
     };
 
-    private readonly record struct EdgeBorder(string Style, double Width, string Color);
-
     /// <summary>
-    /// CSS2.1 §17.6.2.1: resolves the single border that the
-    /// <c>border-collapse:collapse</c> model paints at a shared edge between two
-    /// cells. <c>hidden</c> suppresses the edge entirely; otherwise the wider
-    /// border wins, then the higher-priority style, then (for an exact tie) the
-    /// first operand — the spec's earlier-in-tree-order cell. <c>none</c> / zero
-    /// width always loses.
+    /// CSS2.1 §17.6.2.1: resolves the single border that the collapsing border model paints at an
+    /// edge two borders meet at. <c>hidden</c> suppresses the edge entirely; otherwise the wider
+    /// border wins, then the higher-priority style, then (for an exact tie) the first operand, the
+    /// spec's earlier-in-tree-order cell. <c>none</c> and zero width always lose.
     /// </summary>
-    private static EdgeBorder ResolveCollapsedEdge(EdgeBorder a, EdgeBorder b)
+    private static CollapsedBorder ResolveCollapsedEdge(CollapsedBorder a, CollapsedBorder b)
     {
         bool aHidden = string.Equals(a.Style, CssConstants.Hidden, StringComparison.OrdinalIgnoreCase);
         bool bHidden = string.Equals(b.Style, CssConstants.Hidden, StringComparison.OrdinalIgnoreCase);
         if (aHidden || bHidden)
-            return new EdgeBorder(CssConstants.Hidden, 0, string.Empty);
+            return CollapsedBorder.None;
 
         bool aNone = a.Width <= 0.01 || string.IsNullOrEmpty(a.Style) || string.Equals(a.Style, CssConstants.None, StringComparison.OrdinalIgnoreCase);
         bool bNone = b.Width <= 0.01 || string.IsNullOrEmpty(b.Style) || string.Equals(b.Style, CssConstants.None, StringComparison.OrdinalIgnoreCase);
         if (aNone && bNone)
-            return new EdgeBorder(CssConstants.None, 0, string.Empty);
+            return CollapsedBorder.None;
 
         if (aNone) return b;
         if (bNone) return a;
@@ -1339,24 +1358,48 @@ internal sealed class CssLayoutEngineTable
         return a; // exact tie → the earlier (left/top) cell, per tree order.
     }
 
+    private const int Top = 0, Right = 1, Bottom = 2, Left = 3;
+
+    /// <summary>The border <paramref name="box"/> has of its own on the given side.</summary>
+    private static CollapsedBorder AuthoredBorder(CssBox box, int side) => side switch
+    {
+        Top => new(box.AuthoredBorderTopStyle, box.AuthoredBorderTopWidth, box.BorderTopColor),
+        Right => new(box.AuthoredBorderRightStyle, box.AuthoredBorderRightWidth, box.BorderRightColor),
+        Bottom => new(box.AuthoredBorderBottomStyle, box.AuthoredBorderBottomWidth, box.BorderBottomColor),
+        _ => new(box.AuthoredBorderLeftStyle, box.AuthoredBorderLeftWidth, box.BorderLeftColor),
+    };
+
     /// <summary>
-    /// CSS2.1 §17.6.2.1: in the collapsing-borders model adjacent cells share a
-    /// single border. Broiler paints each cell's own borders, so resolve every
-    /// internal shared edge to one winner: assign it to the left/top cell and
-    /// suppress the right/bottom cell's matching edge, so the edge is painted
-    /// once with the winning style/width/colour (and not at all when a
-    /// <c>hidden</c> border wins). Perimeter cell edges additionally collapse
-    /// with the table element's own border (cell wins ties, per origin
-    /// priority). Cells spanning rows/columns (EmptyBox placeholders) are
-    /// skipped — a conservative no-op for now.
+    /// CSS 2.1 §17.6.2: in the collapsing border model, the borders that meet at an edge between two
+    /// cells, or between a cell and the table, resolve to one border (§17.6.2.1), centred on the grid
+    /// line. Each cell takes half of each of its collapsed borders into its border box, and the table
+    /// half of those on its perimeter: its left and right halves from the first row's first and last
+    /// cells, its top and bottom from the widest on the first and the last row. There is no spacing
+    /// between the cells.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The resolved border was written into the cells' own border properties, whole: the left or
+    /// top cell of a shared edge got it and the other none, a cell on the perimeter got its border
+    /// collapsed with the table's, and the table kept its own too, while the cells overlapped by a
+    /// pixel of spacing. So a cell of a table with a 10px border started 9px in, inside the whole
+    /// border, where browsers put it 5px in, and a table of cells with 1px borders was a pixel
+    /// narrower than browsers make it for each column after the first.
+    /// </para>
+    /// <para>
+    /// The borders are set in <see cref="CssBoxProperties.CollapsedBorders"/>, which the used border
+    /// widths, styles and colours read, and resolved each time from the borders the table and its
+    /// cells have of their own, so a second layout resolves the same ones. A cell spanning rows is
+    /// resolved against the cells beside it in its first row only.
+    /// </para>
+    /// </remarks>
     private void ResolveCollapsedBorders()
     {
         if (!string.Equals(_tableBox.BorderCollapse, CssConstants.Collapse, StringComparison.OrdinalIgnoreCase))
+        {
+            ClearCollapsedBorders();
             return;
-
-        if (_allRows.Count == 0)
-            return;
+        }
 
         // CSS2.1 §17.6.2.1: an exact tie (same width and style) favours the cell
         // furthest to the top-left in a left-to-right table, but the top-RIGHT
@@ -1383,14 +1426,30 @@ internal sealed class CssLayoutEngineTable
                     cols[col + k] = cell;
             }
 
-            grid.Add(cols);
+            if (cols.Count > 0)
+                grid.Add(cols);
         }
 
-        // Horizontal internal edges: left cell's right border vs right cell's left.
+        if (grid.Count == 0)
+        {
+            ClearCollapsedBorders();
+            return;
+        }
+
+        // The border each cell has on each side once collapsed with what is across the edge; where
+        // a side meets several, as a spanning cell's does, the widest.
+        var met = new Dictionary<CssBox, CollapsedBorder?[]>();
+        void Meet(CssBox cell, int side, CollapsedBorder border)
+        {
+            if (!met.TryGetValue(cell, out var sides))
+                met[cell] = sides = new CollapsedBorder?[4];
+
+            sides[side] = sides[side] is { } current && current.Width >= border.Width ? current : border;
+        }
+
+        // Edges between a cell and the one to its right.
         foreach (var cols in grid)
         {
-            if (cols.Count == 0) continue;
-
             int maxCol = 0;
             foreach (var c in cols.Keys) if (c > maxCol) maxCol = c;
 
@@ -1399,18 +1458,16 @@ internal sealed class CssLayoutEngineTable
                 if (!cols.TryGetValue(c, out var left) || !cols.TryGetValue(c + 1, out var right) || ReferenceEquals(left, right))
                     continue;
 
-                var leftEdge = new EdgeBorder(left.BorderRightStyle, left.ActualBorderRightWidth, left.BorderRightColor);
-                var rightEdge = new EdgeBorder(right.BorderLeftStyle, right.ActualBorderLeftWidth, right.BorderLeftColor);
                 var winner = rtl
-                    ? ResolveCollapsedEdge(rightEdge, leftEdge)
-                    : ResolveCollapsedEdge(leftEdge, rightEdge);
+                    ? ResolveCollapsedEdge(AuthoredBorder(right, Left), AuthoredBorder(left, Right))
+                    : ResolveCollapsedEdge(AuthoredBorder(left, Right), AuthoredBorder(right, Left));
 
-                ApplyEdge(left, "right", winner);
-                SuppressEdge(right, "left");
+                Meet(left, Right, winner);
+                Meet(right, Left, winner);
             }
         }
 
-        // Vertical internal edges: top cell's bottom border vs bottom cell's top.
+        // Edges between a cell and the one below it.
         for (int r = 0; r + 1 < grid.Count; r++)
         {
             foreach (var (col, top) in grid[r])
@@ -1418,93 +1475,104 @@ internal sealed class CssLayoutEngineTable
                 if (!grid[r + 1].TryGetValue(col, out var bottom) || ReferenceEquals(top, bottom))
                     continue;
 
-                var winner = ResolveCollapsedEdge(
-                    new EdgeBorder(top.BorderBottomStyle, top.ActualBorderBottomWidth, top.BorderBottomColor),
-                    new EdgeBorder(bottom.BorderTopStyle, bottom.ActualBorderTopWidth, bottom.BorderTopColor));
-
-                ApplyEdge(top, "bottom", winner);
-                SuppressEdge(bottom, "top");
+                var winner = ResolveCollapsedEdge(AuthoredBorder(top, Bottom), AuthoredBorder(bottom, Top));
+                Meet(top, Bottom, winner);
+                Meet(bottom, Top, winner);
             }
         }
 
-        // Outer (perimeter) edges: each border-box cell edge on the table
-        // perimeter collapses with the table element's own border. §17.6.2.1
-        // origin priority puts the cell above the table, so on an exact tie the
-        // cell wins — pass the cell edge first. A no-op for the common
-        // borderless table (the table edge is `none`, which always loses).
-        var tableTop = new EdgeBorder(_tableBox.BorderTopStyle, _tableBox.ActualBorderTopWidth, _tableBox.BorderTopColor);
-        var tableBottom = new EdgeBorder(_tableBox.BorderBottomStyle, _tableBox.ActualBorderBottomWidth, _tableBox.BorderBottomColor);
-        var tableLeft = new EdgeBorder(_tableBox.BorderLeftStyle, _tableBox.ActualBorderLeftWidth, _tableBox.BorderLeftColor);
-        var tableRight = new EdgeBorder(_tableBox.BorderRightStyle, _tableBox.ActualBorderRightWidth, _tableBox.BorderRightColor);
-
+        // The perimeter: a cell's border there collapses with the table's own. §17.6.2.1 origin
+        // priority puts the cell above the table, so on an exact tie the cell wins.
         int lastRow = grid.Count - 1;
         int globalMaxCol = 0;
         foreach (var cols in grid)
             foreach (var c in cols.Keys)
                 if (c > globalMaxCol) globalMaxCol = c;
 
-        var resolvedOuter = new HashSet<(CssBox, string)>();
         for (int r = 0; r < grid.Count; r++)
         {
             foreach (var (col, cell) in grid[r])
             {
-                if (r == 0) ResolveOuterEdge(cell, "top", tableTop, resolvedOuter);
-                if (r == lastRow) ResolveOuterEdge(cell, "bottom", tableBottom, resolvedOuter);
-                if (col == 0) ResolveOuterEdge(cell, "left", tableLeft, resolvedOuter);
-                if (col == globalMaxCol) ResolveOuterEdge(cell, "right", tableRight, resolvedOuter);
+                if (r == 0) Meet(cell, Top, ResolveCollapsedEdge(AuthoredBorder(cell, Top), AuthoredBorder(_tableBox, Top)));
+                if (r == lastRow) Meet(cell, Bottom, ResolveCollapsedEdge(AuthoredBorder(cell, Bottom), AuthoredBorder(_tableBox, Bottom)));
+                if (col == 0) Meet(cell, Left, ResolveCollapsedEdge(AuthoredBorder(cell, Left), AuthoredBorder(_tableBox, Left)));
+                if (col == globalMaxCol) Meet(cell, Right, ResolveCollapsedEdge(AuthoredBorder(cell, Right), AuthoredBorder(_tableBox, Right)));
             }
         }
-    }
 
-    private static void ResolveOuterEdge(CssBox cell, string side, EdgeBorder tableEdge, HashSet<(CssBox, string)> done)
-    {
-        if (!done.Add((cell, side)))
-            return;
-
-        EdgeBorder cellEdge = side switch
+        // Each cell takes half of each of its borders; a side that met nothing keeps its own.
+        var collapsed = new Dictionary<CssBox, CollapsedBorder[]>();
+        foreach (var cols in grid)
         {
-            "top" => new EdgeBorder(cell.BorderTopStyle, cell.ActualBorderTopWidth, cell.BorderTopColor),
-            "bottom" => new EdgeBorder(cell.BorderBottomStyle, cell.ActualBorderBottomWidth, cell.BorderBottomColor),
-            "left" => new EdgeBorder(cell.BorderLeftStyle, cell.ActualBorderLeftWidth, cell.BorderLeftColor),
-            _ => new EdgeBorder(cell.BorderRightStyle, cell.ActualBorderRightWidth, cell.BorderRightColor),
-        };
+            foreach (var cell in cols.Values)
+            {
+                if (collapsed.ContainsKey(cell))
+                    continue;
 
-        // Cell first: §17.6.2.1 origin priority favours the cell over the table
-        // on an exact width/style tie.
-        ApplyEdge(cell, side, ResolveCollapsedEdge(cellEdge, tableEdge));
-    }
+                met.TryGetValue(cell, out var sides);
+                var whole = new CollapsedBorder[4];
+                for (int side = 0; side < 4; side++)
+                    whole[side] = sides?[side] ?? ResolveCollapsedEdge(AuthoredBorder(cell, side), CollapsedBorder.None);
 
-    private static void ApplyEdge(CssBox cell, string side, EdgeBorder b)
-    {
-        // A hidden/none winner paints nothing at this edge.
-        bool paints = b.Width > 0.01
-            && !string.Equals(b.Style, CssConstants.Hidden, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(b.Style, CssConstants.None, StringComparison.OrdinalIgnoreCase);
-
-        if (!paints)
-        {
-            SuppressEdge(cell, side);
-            return;
+                collapsed[cell] = whole;
+                cell.CollapsedBorders = new CollapsedBorderSides(Half(whole[Top]), Half(whole[Right]), Half(whole[Bottom]), Half(whole[Left]));
+            }
         }
 
-        string w = b.Width.ToString(System.Globalization.CultureInfo.InvariantCulture) + "px";
-        switch (side)
+        // The table: half of the first row's first and last cells' outer borders, and of the
+        // widest on its first and last rows.
+        var first = grid[0];
+        var last = grid[lastRow];
+        var tableTop = Widest(first.Values, Top);
+        var tableBottom = Widest(last.Values, Bottom);
+        var tableLeft = collapsed[first[MinKey(first)]][Left];
+        var tableRight = collapsed[first[MaxKey(first)]][Right];
+
+        _tableBox.CollapsedBorders = new CollapsedBorderSides(Half(tableTop), Half(tableRight), Half(tableBottom), Half(tableLeft));
+
+        CollapsedBorder Widest(IEnumerable<CssBox> cells, int side)
         {
-            case "right": cell.BorderRightStyle = b.Style; cell.BorderRightWidth = w; cell.BorderRightColor = b.Color; break;
-            case "left": cell.BorderLeftStyle = b.Style; cell.BorderLeftWidth = w; cell.BorderLeftColor = b.Color; break;
-            case "bottom": cell.BorderBottomStyle = b.Style; cell.BorderBottomWidth = w; cell.BorderBottomColor = b.Color; break;
-            case "top": cell.BorderTopStyle = b.Style; cell.BorderTopWidth = w; cell.BorderTopColor = b.Color; break;
+            var widest = CollapsedBorder.None;
+            foreach (var cell in cells)
+            {
+                var border = collapsed[cell][side];
+                if (border.Width > widest.Width)
+                    widest = border;
+            }
+
+            return widest;
         }
     }
 
-    private static void SuppressEdge(CssBox cell, string side)
+    private static CollapsedBorder Half(CollapsedBorder border) =>
+        border.Width > 0.01 ? border with { Width = border.Width / 2 } : CollapsedBorder.None;
+
+    private static int MinKey(Dictionary<int, CssBox> cols)
     {
-        switch (side)
+        int min = int.MaxValue;
+        foreach (var c in cols.Keys) if (c < min) min = c;
+        return min;
+    }
+
+    private static int MaxKey(Dictionary<int, CssBox> cols)
+    {
+        int max = int.MinValue;
+        foreach (var c in cols.Keys) if (c > max) max = c;
+        return max;
+    }
+
+    /// <summary>
+    /// Gives the table and its cells their own borders back: outside the collapsing border model,
+    /// or with no cells to collapse them with.
+    /// </summary>
+    private void ClearCollapsedBorders()
+    {
+        _tableBox.CollapsedBorders = null;
+
+        foreach (var row in _allRows)
         {
-            case "right": cell.BorderRightStyle = CssConstants.None; cell.BorderRightWidth = "0"; break;
-            case "left": cell.BorderLeftStyle = CssConstants.None; cell.BorderLeftWidth = "0"; break;
-            case "bottom": cell.BorderBottomStyle = CssConstants.None; cell.BorderBottomWidth = "0"; break;
-            case "top": cell.BorderTopStyle = CssConstants.None; cell.BorderTopWidth = "0"; break;
+            foreach (var cell in row.Boxes)
+                cell.CollapsedBorders = null;
         }
     }
 
@@ -1929,7 +1997,10 @@ internal sealed class CssLayoutEngineTable
 
     private bool IsSpecified(int column) => !double.IsNaN(_specifiedColumnWidths[column]);
 
-    private double GetHorizontalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? -1f : _tableBox.ActualBorderSpacingHorizontal;
-    private static double GetHorizontalSpacing(CssBox box) => box.BorderCollapse == CssConstants.Collapse ? -1f : box.ActualBorderSpacingHorizontal;
-    private double GetVerticalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? -1f : _tableBox.ActualBorderSpacingVertical;
+    // CSS 2.1 §17.6.2: the collapsing border model has no spacing between the cells, which share
+    // their borders instead (see ResolveCollapsedBorders). It had -1px, which overlapped cells with
+    // 1px borders, and each column after the first took a pixel from the table's width.
+    private double GetHorizontalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? 0 : _tableBox.ActualBorderSpacingHorizontal;
+    private static double GetHorizontalSpacing(CssBox box) => box.BorderCollapse == CssConstants.Collapse ? 0 : box.ActualBorderSpacingHorizontal;
+    private double GetVerticalSpacing() => _tableBox.BorderCollapse == CssConstants.Collapse ? 0 : _tableBox.ActualBorderSpacingVertical;
 }
