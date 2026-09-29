@@ -1200,6 +1200,358 @@ public sealed class EmptyInlineBoxRectangleTests
         Assert.Equal(34, ScriptRectangle(link, block).Width, 1);
     }
 
+    /// <summary>
+    /// "abc ", then a link with <c>padding-right: 10px</c> holding "def" and an empty span with
+    /// <c>padding: 0 8px</c>, right-aligned: the link closes after the span, and its padding ends the
+    /// line, so "def" starts 150px in, the span stands against it, 16 × 16 from 174px in, and the
+    /// link reaches from "def" to the end of the line, 50px wide. "def" stood 166px in, and the
+    /// span was 0 × 0 at the top of the line, 60px in; then, the link taken to close after "def",
+    /// the line was aligned as though the span ended it, "def" 160px in, and the link was drawn to
+    /// 210px, past the end of the line.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Box_Closing_After_A_Word_And_An_Empty_Span_Ends_A_Right_Aligned_Line()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        Text(block, "abc ");
+        var link = Span(block, tag: "a");
+        link.PaddingRight = "10px";
+        Text(link, "def");
+        var span = Span(link);
+        span.PaddingLeft = span.PaddingRight = "8px";
+        Layout(block);
+
+        Assert.Equal(150, Word(block, "def").Left - block.Location.X, 1);
+        AssertRectangle(174, 2, 16, 16, ScriptRectangle(span, block));
+        AssertRectangle(150, 2, 50, 16, ScriptRectangle(link, block));
+    }
+
+    /// <summary>
+    /// "aa bb cc ", a link with <c>padding-right: 10px</c> holding "def" and an empty span with
+    /// <c>padding: 0 8px</c>, then a word too long for the line, justified in 200px: the span and the
+    /// link's padding after it end the line, so "def" ends 26px before it, 174px in, the span stands
+    /// from there, and the link ends where the line does. "def" ended the line, the span was 0 × 0
+    /// at the top of the line, 92px in, and the link's padding was drawn past the line's end, to
+    /// 210px; then, the link taken to close after "def", the span ended the line, from 184px in,
+    /// and the link's padding still reached 210px.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Box_Closing_After_A_Word_And_An_Empty_Span_Ends_A_Justified_Line()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa bb cc ");
+        var link = Span(block, tag: "a");
+        link.PaddingRight = "10px";
+        Text(link, "def");
+        var span = Span(link);
+        span.PaddingLeft = span.PaddingRight = "8px";
+        Text(block, " eeeeeeeeeeeeeeeeeeeeeeeee");
+        Layout(block);
+
+        Assert.Equal(174, Word(block, "def").Right - block.Location.X, 1);
+        AssertRectangle(174, 2, 16, 16, ScriptRectangle(span, block));
+        Assert.Equal(200, ScriptRectangle(link, block).Right, 1);
+    }
+
+    /// <summary>
+    /// "aa ", an empty span with <c>padding: 0 3px</c>, then " bb cc dd ee ff gg hh ii jj", justified
+    /// in 200px: the space after the span follows the one before it and collapses (CSS Text 3
+    /// §4.1.1), so the span stands against "bb", 6px wide from 21.56px in, "bb" 27.56px in, and the
+    /// gap before the span is as wide as the gaps between the words, 5.56px. The span was 0 × 0 at
+    /// the top of the line, 23px in, with "bb" 22.22px in; then, kept a space from "bb", the span
+    /// took that space for room of its own, and "bb" stood 31.11px in, 4px after the span.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Between_Spaces_On_A_Justified_Line_Stands_Against_The_Word_After_It()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa ");
+        var span = Span(block);
+        span.PaddingLeft = span.PaddingRight = "3px";
+        Text(block, " bb cc dd ee ff gg hh ii jj");
+        Layout(block);
+
+        var rectangle = ScriptRectangle(span, block);
+        AssertRectangle(21.56, 2, 6, 16, rectangle);
+        Assert.Equal(27.56, Word(block, "bb").Left - block.Location.X, 1);
+        Assert.Equal(
+            Word(block, "cc").Left - Word(block, "bb").Right,
+            rectangle.Left - (Word(block, "aa").Right - block.Location.X), 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: "aa ", an empty named anchor, then
+    /// " bb cc dd ee ff gg hh ii jj kk", justified in 200px: the space after the anchor collapses
+    /// into the one before it, and the gap before "bb" is as wide as the one after it.
+    /// </summary>
+    [Fact]
+    public void Control_An_Empty_Anchor_Between_Spaces_Leaves_A_Justified_Lines_Gaps_Even()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa ");
+        Span(block, tag: "a");
+        Text(block, " bb cc dd ee ff gg hh ii jj kk");
+        Layout(block);
+
+        Assert.Equal(
+            Word(block, "cc").Left - Word(block, "bb").Right,
+            Word(block, "bb").Left - Word(block, "aa").Right, 1);
+    }
+
+    /// <summary>
+    /// A 300px flex row: an item growing to take the room left, then an item holding an empty span,
+    /// a space and "abc". The space starts the item's line, and is removed there (CSS Text 3 §4.1.3),
+    /// so the item is as wide as "abc", 24px, and ends the row, "abc" with it, 276px in. It was
+    /// measured with the space, 28px wide, from 272px in.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Starting_With_An_Empty_Span_And_A_Space_Is_As_Wide_As_Its_Text()
+    {
+        var row = Row();
+        var item = Item(row);
+        Span(item);
+        Text(item, " ");
+        Text(Span(item, tag: "b"), "abc");
+        Layout(row);
+
+        Assert.Equal(24, item.Size.Width, 1);
+        Assert.Equal(276, item.Location.X - row.Location.X, 1);
+        Assert.Equal(276, Word(row, "abc").Left - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// A 300px flex row: an item growing to take the room left, then an item holding an absolutely
+    /// positioned 10px inline-block, a space and an inline-block with "abc" (the language button of
+    /// Wikipedia's article pages). The space starts the item's line, the positioned box being out of
+    /// the flow, so the item is as wide as the inline-block, 24px, and puts it at the end of the row,
+    /// 276px in. The item was 28px wide.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Starting_With_A_Positioned_Box_And_A_Space_Is_As_Wide_As_Its_Label()
+    {
+        var row = Row();
+        var item = Item(row);
+        item.Position = CssConstants.Relative;
+        var checkbox = Span(item, tag: "i");
+        checkbox.Display = "inline-block";
+        checkbox.Position = CssConstants.Absolute;
+        checkbox.Width = checkbox.Height = "10px";
+        Text(item, " ");
+        var label = Span(item, tag: "label");
+        label.Display = "inline-block";
+        Text(label, "abc");
+        Layout(row);
+
+        Assert.Equal(24, item.Size.Width, 1);
+        Assert.Equal(276, label.Location.X - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// An inline-block holding an absolutely positioned span with "tip", then " abc", right-aligned
+    /// in 200px: the space starts the inline-block's line and is removed there, so the inline-block
+    /// is as wide as "abc", 24px, and "abc" ends the line, 176px in. The inline-block was 28px wide.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Block_Starting_With_A_Positioned_Span_And_A_Space_Is_As_Wide_As_Its_Text()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        var inlineBlock = Span(block);
+        inlineBlock.Display = "inline-block";
+        Positioned(inlineBlock, "tip");
+        Text(inlineBlock, " abc");
+        Layout(block);
+
+        Assert.Equal(24, inlineBlock.Size.Width, 1);
+        Assert.Equal(176, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// A 300px flex row: an item holding an empty span with <c>padding-left: 16px</c>, a space and
+    /// "abc", then an item with "next". The space starts the first item's line and is removed there,
+    /// so "abc" follows the span, 16px in, the item is 40px wide, and "next" follows it, 40px in.
+    /// "abc" stood 20px in, and the item was 44px wide.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Starting_With_A_Padded_Empty_Span_And_A_Space_Ends_At_Its_Text()
+    {
+        var row = Block("300px");
+        row.Display = "flex";
+        var item = Item(row);
+        Span(item).PaddingLeft = "16px";
+        Text(item, " ");
+        Text(Span(item, tag: "b"), "abc");
+        Text(Item(row), "next");
+        Layout(row);
+
+        Assert.Equal(16, Word(row, "abc").Left - row.Location.X, 1);
+        Assert.Equal(40, item.Size.Width, 1);
+        Assert.Equal(40, Word(row, "next").Left - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// An inline-block holding "xy", a line break, an empty span, a space and "abc", right-aligned
+    /// in 200px: the space starts the inline-block's second line and is removed there, so the
+    /// inline-block is as wide as that line, "abc", 24px, and "abc" ends the line, 176px in. The
+    /// inline-block was measured with the space, 28px wide.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Block_With_A_Line_Starting_With_An_Empty_Span_And_A_Space_Is_As_Wide_As_Its_Text()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        var inlineBlock = Span(block);
+        inlineBlock.Display = "inline-block";
+        Text(inlineBlock, "xy");
+        _ = new CssBox(inlineBlock, new HtmlTag("br", false, null), BaseUrl) { Display = "block" };
+        Span(inlineBlock);
+        Text(inlineBlock, " ");
+        Text(Span(inlineBlock, tag: "b"), "abc");
+        Layout(block);
+
+        Assert.Equal(24, inlineBlock.Size.Width, 1);
+        Assert.Equal(176, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: an inline-block holding " abc def ", right-aligned
+    /// in 200px: the spaces at the start and the end of its line are removed, so it is as wide as
+    /// "abc def", 52px, and holds it on one line, "abc" 148px in and "def" 176px in.
+    /// </summary>
+    [Fact]
+    public void Control_An_Inline_Block_Holding_Words_Between_Spaces_Is_As_Wide_As_The_Words()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        var inlineBlock = Span(block);
+        inlineBlock.Display = "inline-block";
+        Text(inlineBlock, " abc def ");
+        Layout(block);
+
+        Assert.Equal(52, inlineBlock.Size.Width, 1);
+        Assert.Equal(148, Word(block, "abc").Left - block.Location.X, 1);
+        Assert.Equal(176, Word(block, "def").Left - block.Location.X, 1);
+        Assert.Equal(Word(block, "abc").Top, Word(block, "def").Top, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a 300px flex row: an item growing to take the room
+    /// left, then an item holding a 10px inline-block, a space and "abc". The space follows the
+    /// inline-block on the item's line and takes room there, so the item is 38px wide, and "abc"
+    /// ends the row, 276px in.
+    /// </summary>
+    [Fact]
+    public void Control_A_Space_After_An_Inline_Block_Starting_A_Flex_Item_Takes_Room()
+    {
+        var row = Row();
+        var item = Item(row);
+        var inlineBlock = Span(item);
+        inlineBlock.Display = "inline-block";
+        inlineBlock.Width = "10px";
+        Text(item, " ");
+        Text(Span(item, tag: "b"), "abc");
+        Layout(row);
+
+        Assert.Equal(38, item.Size.Width, 1);
+        Assert.Equal(276, Word(row, "abc").Left - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a 300px flex row: an item growing to take the room
+    /// left, then an item holding "abc" in a <c>&lt;b&gt;</c>, a space and "def" in another. The space
+    /// is between the words on the item's line and takes room there, so the item is 52px wide, and
+    /// "def" ends the row, 276px in.
+    /// </summary>
+    [Fact]
+    public void Control_A_Space_Between_Words_Of_Two_Boxes_In_A_Flex_Item_Takes_Room()
+    {
+        var row = Row();
+        var item = Item(row);
+        Text(Span(item, tag: "b"), "abc");
+        Text(item, " ");
+        Text(Span(item, tag: "b"), "def");
+        Layout(row);
+
+        Assert.Equal(52, item.Size.Width, 1);
+        Assert.Equal(276, Word(row, "def").Left - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// "x ", a link holding an empty span with <c>margin-left: 5px</c> and <c>padding-left: 20px</c>,
+    /// and "lll", then " y": the link holds the span's margin, so it starts where the span's margin
+    /// does, 12px in, and is 49px wide, to the end of "lll"; the span is 20px wide from 17px in. The
+    /// link started at "lll", 37px in, 24px wide, and the span was 0 × 0 at the top of the line;
+    /// then, around the span, the link started at the span's border, 17px in.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Box_Starting_With_An_Empty_Span_Holds_Its_Margin()
+    {
+        var block = Block();
+        Text(block, "x ");
+        var link = Span(block, tag: "a");
+        var span = Span(link);
+        span.MarginLeft = "5px";
+        span.PaddingLeft = "20px";
+        Text(link, "lll");
+        Text(block, " y");
+        Layout(block);
+
+        AssertRectangle(17, 2, 20, 16, ScriptRectangle(span, block));
+        AssertRectangle(12, 2, 49, 16, ScriptRectangle(link, block));
+    }
+
+    /// <summary>
+    /// "aaaa bbbb ", a link holding an empty span with <c>margin-left: 5px</c> and
+    /// <c>padding-left: 20px</c>, and "lll", then " y", in a 100px block: the link wraps whole, and
+    /// starts the second line with the span's margin, 49px wide from its start, and "lll" 25px in.
+    /// The span stayed at the end of the first line, and the link was "lll" alone, 24px wide; then,
+    /// wrapped with the span, the link started at the span's border, 5px in.
+    /// </summary>
+    [Fact]
+    public void A_Link_Starting_With_A_Margined_Empty_Span_Wraps_Whole_With_The_Margin()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb ");
+        var link = Span(block, tag: "a");
+        var span = Span(link);
+        span.MarginLeft = "5px";
+        span.PaddingLeft = "20px";
+        Text(link, "lll");
+        Text(block, " y");
+        Layout(block);
+
+        AssertRectangle(5, 22, 20, 16, ScriptRectangle(span, block));
+        AssertRectangle(0, 22, 49, 16, ScriptRectangle(link, block));
+        Assert.Equal(25, Word(block, "lll").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// "aaaa ", then a link with <c>padding-left: 5px</c> holding a <c>&lt;b&gt;</c> with an empty
+    /// span and "bbbb", in a 34px block: "bbbb" wraps, and the span stays on the first line, which
+    /// "aaaa" and the space after it fill. The link starts there, its padding after "aaaa", 5px wide
+    /// from 32px in, and has a rectangle on each line, as browsers give it. It had none on the
+    /// first line, and its padding was not painted.
+    /// </summary>
+    [Fact]
+    public void An_Inline_Box_Starting_On_A_Full_Line_Keeps_Its_Padding_There()
+    {
+        var block = Block("34px");
+        Text(block, "aaaa ");
+        var link = Span(block, tag: "a");
+        link.PaddingLeft = "5px";
+        var bold = Span(link, tag: "b");
+        Span(bold);
+        Text(bold, "bbbb");
+        Layout(block);
+
+        Assert.Equal(2, link.Rectangles.Count);
+        AssertRectangle(32, 2, 5, 16, Relative(link.Rectangles.Values.OrderBy(r => r.Top).First(), block));
+    }
+
     /// <summary>A 200px block (or as wide as given) with 20px lines of a 16px font, in a block in the root.</summary>
     private static CssBox Block(string width = "200px")
     {
@@ -1225,6 +1577,29 @@ public sealed class EmptyInlineBoxRectangleTests
     {
         var root = block.ParentBox!.ParentBox!;
         root.PerformLayout(root.LayoutEnvironment);
+    }
+
+    /// <summary>
+    /// A 300px flex row with 20px lines of a 16px font, in a block in the root, holding an item with
+    /// "T" that grows to take the room the items after it leave.
+    /// </summary>
+    private static CssBox Row()
+    {
+        var row = Block("300px");
+        row.Display = "flex";
+        var title = Item(row);
+        title.FlexGrow = "1";
+        Text(title, "T");
+        return row;
+    }
+
+    /// <summary>A block in <paramref name="parent"/>, inheriting its style, as a flex item is.</summary>
+    private static CssBox Item(CssBox parent)
+    {
+        var item = new CssBox(parent, new HtmlTag("div", false, null), BaseUrl);
+        item.InheritStyle();
+        item.Display = "block";
+        return item;
     }
 
     /// <summary>An element's inline box in <paramref name="parent"/>, inheriting its style, in the font size given.</summary>

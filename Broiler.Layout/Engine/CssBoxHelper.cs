@@ -252,6 +252,27 @@ internal static class CssBoxHelper
     /// </remarks>
     public static void GetMinMaxSumWords(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, CssBox suppressExplicitWidthFor = null)
     {
+        // The box lays out lines of its own, and the first starts with nothing on it.
+        bool lineHoldsContent = false;
+        GetMinMaxSumWordsOnLine(box, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, suppressExplicitWidthFor);
+    }
+
+    /// <summary>
+    /// <see cref="GetMinMaxSumWords"/>, on a line that holds content in the flow before
+    /// <paramref name="box"/> if <paramref name="lineHoldsContent"/>, which is left saying whether it
+    /// does after the box.
+    /// </summary>
+    /// <remarks>
+    /// CSS Text 3 §4.1.3: collapsible white space at the start of a line is removed, before the
+    /// line's first word or box placed whole, whatever empty inline boxes and boxes out of the flow
+    /// come first, and the flow takes it away there (CssLayoutEngine.FlowBox). Measured with that
+    /// space all the same, a box laying out lines of its own came out a space wider than what the
+    /// flow puts in it: a flex item holding an empty span, a space and "abc" was 28px wide around
+    /// 24px of text, where browsers make it 24px wide, and at the end of its row, with the space
+    /// gone from its line, it ended "abc" a space short of the row's end.
+    /// </remarks>
+    private static void GetMinMaxSumWordsOnLine(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, ref bool lineHoldsContent, CssBox? suppressExplicitWidthFor)
+    {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicVisits);
 
         // See GetMinimumWidth_LongestWord: a display:none box generates no boxes, so it adds
@@ -371,14 +392,18 @@ internal static class CssBoxHelper
 
             maxSum += replacedContentWidth;
             min = Math.Max(min, paddingSum + replacedContentWidth);
+            lineHoldsContent = true;
         }
         else if (box.Words.Count > 0)
         {
-            // calculate the min and max sum for all the words in the box
+            // calculate the min and max sum for all the words in the box; the space before the
+            // first is left out at the start of a line (see above), and a forced break starts a
+            // line with nothing on it
             foreach (CssRect word in box.Words)
             {
-                maxSum += word.FullWidth + (word.HasSpaceBefore ? word.OwnerBox.ActualWordSpacing : 0);
+                maxSum += word.FullWidth + (word.HasSpaceBefore && lineHoldsContent ? word.OwnerBox.ActualWordSpacing : 0);
                 min = Math.Max(min, paddingSum + word.Width);
+                lineHoldsContent = !word.IsLineBreak;
             }
         }
         else if (box.TryGetFlexRowIntrinsicContentWidths(out double flexMin, out double flexMax))
@@ -419,6 +444,7 @@ internal static class CssBoxHelper
                 {
                     oldSum = oldSum.HasValue ? Math.Max(oldSum.Value, maxSum) : maxSum;
                     maxSum = marginSum + paddingSum;
+                    lineHoldsContent = false;
                     continue;
                 }
 
@@ -430,13 +456,14 @@ internal static class CssBoxHelper
                 // measured it as zero. The shrink-to-fit container then came out exactly one space
                 // too narrow and the last item wrapped — two 10px inline-blocks measured 20px and
                 // stacked, where they need 24px to sit side by side. Layout itself lays the space
-                // out; only the intrinsic measurement was missing it.
+                // out; only the intrinsic measurement was missing it. One that starts a line is
+                // removed there (see above), and takes no room.
                 if (IsCollapsedWhitespaceSeparator(childBox))
                 {
                     double space = childBox.ActualWordSpacing;
                     if (double.IsNaN(space))
                         space = box.ActualWordSpacing;
-                    if (!double.IsNaN(space))
+                    if (!double.IsNaN(space) && lineHoldsContent)
                         maxSum += space;
                     continue;
                 }
@@ -455,18 +482,33 @@ internal static class CssBoxHelper
                 if (!StartsNewMaxContentLine(childBox) && childBox.Display != CssConstants.None)
                     maxSum += childBox.ActualMarginLeft + childBox.ActualMarginRight;
 
+                // A box laying out lines of its own starts them with nothing on them. After it, the
+                // line it sits on holds it if it sits there whole, as an inline-block does, holds
+                // what it did before if it floats (or is a table cell), and starts again after a
+                // block.
+                bool floatsOrCell = childBox.Float != CssConstants.None || childBox.Display == CssConstants.TableCell;
+                bool ownLines = childBox.Display != CssConstants.None
+                    && (floatsOrCell || IsAtomicInlineLevel(childBox.Display) || StartsNewMaxContentLine(childBox));
+                bool contentBefore = lineHoldsContent;
+
+                if (ownLines)
+                    lineHoldsContent = false;
+
                 if (sumsChildMinimums)
                 {
                     // The cell's minimum is measured with this row's path; what the cell adds to it
                     // is its share of the row.
                     double childMin = 0;
-                    GetMinMaxSumWords(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum);
+                    GetMinMaxSumWordsOnLine(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null);
                     rowMin += Math.Max(0, childMin - paddingSum);
                 }
                 else
                 {
-                    GetMinMaxSumWords(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum);
+                    GetMinMaxSumWordsOnLine(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null);
                 }
+
+                if (ownLines)
+                    lineHoldsContent = floatsOrCell ? contentBefore : IsAtomicInlineLevel(childBox.Display);
 
                 marginSum -= childBox.ActualMarginLeft + childBox.ActualMarginRight;
             }
@@ -483,52 +525,25 @@ internal static class CssBoxHelper
     }
 
     /// <summary>
-    /// CSS Text 3 §4.1.1: collapsible white space at the very start of a
-    /// formatting context's first line and the very end of its last line is
-    /// removed.  Broiler carries a collapsed space as word-spacing on the
-    /// neighbouring word (<c>HasSpaceBefore</c>/<c>HasSpaceAfter</c>), so the
-    /// preferred-width sum in <see cref="GetMinMaxSumWords"/> double-counts the
-    /// leading space-before of <paramref name="box"/>'s first content word and
-    /// the trailing space-after of its last word.  Returns the total of those
-    /// two edge spacings (in CSS px) so the caller can subtract them from the
-    /// shrink-to-fit width; a box that begins/ends on a real word (no edge
-    /// space) contributes nothing.
+    /// CSS Text 3 §4.1.1: collapsible white space at the very end of a
+    /// formatting context's last line is removed.  Broiler carries a collapsed
+    /// space as word-spacing on the neighbouring word (<c>HasSpaceAfter</c>),
+    /// so the preferred-width sum in <see cref="GetMinMaxSumWords"/> counts
+    /// the trailing space-after of <paramref name="box"/>'s last word.  Returns
+    /// that spacing (in CSS px) so the caller can subtract it from the
+    /// shrink-to-fit width; a box that ends on a real word (no edge space)
+    /// contributes nothing.  The walk itself leaves out the white space that
+    /// starts a line, the space before the first word among it.
     /// </summary>
     internal static double EdgeWhitespaceSpacing(CssBox box)
     {
         double sum = 0;
-
-        var first = FirstContentWord(box);
-        if (first != null && first.HasSpaceBefore && !first.IsImage && first.OwnerBox != null)
-            sum += first.OwnerBox.ActualWordSpacing;
 
         var last = LastContentWord(box);
         if (last != null && last.HasSpaceAfter && !last.IsImage && last.OwnerBox != null)
             sum += last.OwnerBox.ActualWordSpacing;
 
         return sum > 0 ? sum : 0;
-    }
-
-    /// <summary>
-    /// Returns the first word in document order within <paramref name="box"/>'s
-    /// in-flow inline content, or <c>null</c> if it has none.  Out-of-flow
-    /// children (<c>display:none</c>) do not form the inline edge.
-    /// </summary>
-    private static CssRect FirstContentWord(CssBox box)
-    {
-        if (box.Words.Count > 0)
-            return box.Words[0];
-
-        foreach (CssBox child in box.Boxes)
-        {
-            if (child.Display == CssConstants.None)
-                continue;
-            var w = FirstContentWord(child);
-            if (w != null)
-                return w;
-        }
-
-        return null;
     }
 
     /// <summary>
