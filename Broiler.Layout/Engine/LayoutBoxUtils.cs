@@ -137,10 +137,12 @@ internal static class LayoutBoxUtils
             int diff = 1;
             CssBox sib = conBlock.Boxes[index - diff];
 
-            while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed) && index - diff - 1 >= 0)
+            // A float is out of the flow too (CSS2.1 §9.5): the space after one is the space after
+            // the text before it, and was dropped, so "a<i style=float:left></i> b" read "ab".
+            while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed || sib.Float != CssConstants.None) && index - diff - 1 >= 0)
                 sib = conBlock.Boxes[index - ++diff];
 
-            return sib.Display == CssConstants.None ? null : sib;
+            return sib.Display == CssConstants.None || sib.Float != CssConstants.None ? null : sib;
         }
 
         return null;

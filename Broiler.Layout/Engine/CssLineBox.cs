@@ -22,6 +22,48 @@ internal sealed class CssLineBox
     public CssBox OwnerBox { get; }
     public Dictionary<CssBox, RectangleF> Rectangles { get; }
 
+    /// <summary>
+    /// The top of the line, where the flow put it, before vertical alignment moved what is on it;
+    /// null for a line made outside the flow.
+    /// </summary>
+    /// <remarks>
+    /// What is on a line does not say where the line starts once it is aligned: an image stands
+    /// on the strut's baseline from the start, and an inline-block moves down to it, below the
+    /// line's top, when no text on the line starts there.
+    /// </remarks>
+    internal double? FlowTop { get; set; }
+
+    /// <summary>
+    /// Where <c>ApplyVerticalAlignment</c> put the line's baseline, and where moving the line or
+    /// the box it belongs to has taken it since; null before the alignment has put it, or for a
+    /// line with nothing on it.
+    /// </summary>
+    internal double? Baseline { get; set; }
+
+    /// <summary>
+    /// The bottom of the line, where the flow ended it, before vertical alignment moved what is on
+    /// it: the lowest the flow had reached when it began the next line, or when it ended. Null for a
+    /// line made outside the flow.
+    /// </summary>
+    /// <remarks>
+    /// A float that does not fit beside what is on its line goes below the line (CSS 2.1 §9.5.1),
+    /// which is here, not at the next line's top: that line may be moved further down, past floats
+    /// it does not fit beside.
+    /// </remarks>
+    internal double? FlowBottom { get; set; }
+
+    /// <summary>
+    /// How far the line's top has moved down since the flow put it at <see cref="FlowTop"/>: by as
+    /// much as content raised above the lines before it moved them (CSS2.1 §10.8.1).
+    /// </summary>
+    internal double RestackTop { get; set; }
+
+    /// <summary>
+    /// How far the line's bottom has moved down since the flow ended it at <see cref="FlowBottom"/>:
+    /// <see cref="RestackTop"/>, and as much again as content raised above the line's own top.
+    /// </summary>
+    internal double RestackBottom { get; set; }
+
     public double LineBottom
     {
         get
@@ -199,11 +241,19 @@ internal sealed class CssLineBox
             if (Math.Abs(shift) > 0.01)
             {
                 Rectangles[b] = new RectangleF(r.X, (float)baseline, r.Width, r.Height);
-                b.Location = new PointF(b.Location.X, (float)baseline);
-                b.ActualBottom = baseline + r.Height;
                 foreach (var word in ws)
                     word.Top += shift;
             }
+
+            // The box stands where its rectangle does, moved or not, and is as wide and as tall.
+            // It was put there only when the alignment moved it, so an image the flow had already
+            // stood on the baseline, one beside text or alone on its line, kept the place the box
+            // had before its line was laid out, the page's top-left corner. Only its top and
+            // height were set: script, which reads the box in preference to the line's rectangle
+            // once the box has a size, found an image beside text at the left edge of the page,
+            // 0px wide.
+            b.Location = new PointF(r.X, (float)baseline);
+            b.Size = new SizeF(r.Width, r.Height);
             return;
         }
 
@@ -226,14 +276,17 @@ internal sealed class CssLineBox
         // top coordinate) already computed by ApplyVerticalAlignment.
         double newtop = baseline;
 
-        if (b.ParentBox != null && b.ParentBox.Rectangles.ContainsKey(this) && r.Height < b.ParentBox.Rectangles[this].Height)
+        // An inline box's rectangle on this line goes where its words go. It was moved only for a
+        // box inside a taller inline box, so one in the block itself stayed at the top of the line
+        // when the baseline brought its words down, and getBoundingClientRect, which unions these
+        // rectangles, reported the line's top: beside an empty 30px inline-block, a span holding
+        // "a" was 0px down its line, where its "a" was drawn 15.15px down and browsers report 15.
+        // An atomic box has no words on this line to go with, and its place is not set here.
+        if (b.Display == CssConstants.Inline
+            || (b.ParentBox != null && b.ParentBox.Rectangles.ContainsKey(this) && r.Height < b.ParentBox.Rectangles[this].Height))
         {
-            //Do this only if rectangle is shorter than parent's
             double recttop = newtop - gap;
-            RectangleF newr = new(r.X, (float)recttop, r.Width, r.Height);
-            
-            Rectangles[b] = newr;
-            b.OffsetRectangle(this, gap);
+            Rectangles[b] = new RectangleF(r.X, (float)recttop, r.Width, r.Height);
         }
 
         foreach (var word in ws)

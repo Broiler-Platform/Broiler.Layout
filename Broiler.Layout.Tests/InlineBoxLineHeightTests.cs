@@ -20,8 +20,8 @@ namespace Broiler.Layout.Tests;
 /// </para>
 /// <para>
 /// Words here are 8×16px, each in an anonymous inline box that inherits its parent's style, in a
-/// 320px block; the glyphs stand at the top of their line, where this engine puts them for the
-/// block's own line height too.
+/// 320px block of normal line height, 16px. A word stands half its box's leading down: 22px in a
+/// box with <c>line-height: 60px</c>.
 /// </para>
 /// </remarks>
 public sealed class InlineBoxLineHeightTests
@@ -30,7 +30,8 @@ public sealed class InlineBoxLineHeightTests
 
     /// <summary>
     /// A link with <c>line-height: 60px</c> holding a word, alone or after a word of the block's,
-    /// makes the block 60px tall, with the words at its top. The block was 16px tall.
+    /// makes the block 60px tall, with the words half the link's leading down it, 22px, on the
+    /// baseline the link sets. The block was 16px tall.
     /// </summary>
     [Theory(Timeout = 600000)]
     [InlineData(false)]
@@ -45,14 +46,15 @@ public sealed class InlineBoxLineHeightTests
         root.PerformLayout(root.LayoutEnvironment);
 
         Assert.Equal(60, block.Size.Height, 1);
-        Assert.Equal(block.Location.Y, word.Top, 1);
+        Assert.Equal(block.Location.Y + 22, word.Top, 1);
         if (first != null)
-            Assert.Equal(block.Location.Y, first.Top, 1);
+            Assert.Equal(block.Location.Y + 22, first.Top, 1);
     }
 
     /// <summary>
     /// In an 8px block, a link with <c>line-height: 60px</c> holding three words puts them on three
-    /// lines 60px apart, and the block is 180px tall. It was 136px: the last line was 16px.
+    /// lines 60px apart, 22px down each, and the block is 180px tall. It was 136px: the last line
+    /// was 16px.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void Every_Line_Of_A_Wrapped_Link_Is_That_Tall()
@@ -63,15 +65,15 @@ public sealed class InlineBoxLineHeightTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(block.Location.Y + 120, words[2].Top, 1);
+        Assert.Equal(block.Location.Y + 120 + 22, words[2].Top, 1);
         Assert.Equal(180, block.Size.Height, 1);
     }
 
     /// <summary>
     /// In an 8px block, one word to a line, a word of the block's and then a link with
-    /// <c>line-height: 60px</c>: the link's word goes to the second line, 16px down, below a first
-    /// line as tall as the block's word, and the block is 76px tall. The first line was 60px, as
-    /// tall as the link, and the link's word 60px down.
+    /// <c>line-height: 60px</c>: the link's word goes to the second line, 16px down and 22px into
+    /// it, below a first line as tall as the block's word, and the block is 76px tall. The first
+    /// line was 60px, as tall as the link, and the link's word 60px down.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void A_Wrapped_Link_Leaves_The_Line_Before_It_Alone()
@@ -84,7 +86,7 @@ public sealed class InlineBoxLineHeightTests
         root.PerformLayout(root.LayoutEnvironment);
 
         Assert.Equal(block.Location.Y, first.Top, 1);
-        Assert.Equal(block.Location.Y + 16, word.Top, 1);
+        Assert.Equal(block.Location.Y + 16 + 22, word.Top, 1);
         Assert.Equal(76, block.Size.Height, 1);
     }
 
@@ -107,9 +109,9 @@ public sealed class InlineBoxLineHeightTests
 
     /// <summary>
     /// In an 8px block, one word to a line, a span with <c>line-height: 60px</c> that holds its word
-    /// itself, between two words of the block's: the span's line is 60px tall, the word after it
-    /// 76px down, and the block 92px tall. The span's line was 16px, and the block 48px: the flow
-    /// counted the line height of the box the span is in, not the span's.
+    /// itself, between two words of the block's: the span's line is 60px tall, with its word 22px
+    /// into it, the word after it 76px down, and the block 92px tall. The span's line was 16px, and
+    /// the block 48px: the flow counted the line height of the box the span is in, not the span's.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void A_Span_Holding_Its_Word_Itself_Makes_Its_Line_That_Tall()
@@ -128,15 +130,16 @@ public sealed class InlineBoxLineHeightTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(block.Location.Y + 16, spanWord.Top, 1);
+        Assert.Equal(block.Location.Y + 16 + 22, spanWord.Top, 1);
         Assert.Equal(block.Location.Y + 76, after.Top, 1);
         Assert.Equal(92, block.Size.Height, 1);
     }
 
     /// <summary>
     /// An 8px block clamped to two lines, one word to a line, with a link with
-    /// <c>line-height: 60px</c> on the second: the block keeps that line at 60px, 76px tall. The
-    /// clamp measured the line by its word, and the block was 32px.
+    /// <c>line-height: 60px</c> on the second: the block keeps that line at 60px, 76px tall, with
+    /// the link's word 22px into it. The clamp measured the line by its word, and the block was
+    /// 32px.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void A_Clamped_Block_Keeps_Its_Last_Line_That_Tall()
@@ -150,7 +153,7 @@ public sealed class InlineBoxLineHeightTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(block.Location.Y + 16, second.Top, 1);
+        Assert.Equal(block.Location.Y + 16 + 22, second.Top, 1);
         Assert.Equal(76, block.Size.Height, 1);
     }
 
@@ -175,9 +178,11 @@ public sealed class InlineBoxLineHeightTests
     }
 
     /// <summary>
-    /// Control, which passes before and after: a block with <c>line-height: 24px</c> holding an
-    /// 8×40px inline-block and a word, which stands on the inline-block's baseline, keeps the
-    /// 44.8px it had. The word's line height is the block's, so the line is measured as before.
+    /// A block with <c>line-height: 24px</c> holding an 8×40px inline-block and a word, which stands
+    /// on the inline-block's baseline, is 47.2px tall: the box's 40px and the strut below the
+    /// baseline, the font's 3.2px descent and half its 8px of leading. The strut's descent was a
+    /// fifth of the line height, and the block 44.8px. The word's line height is the block's, so the
+    /// line is not measured as a taller inline box's.
     /// </summary>
     [Fact(Timeout = 600000)]
     public void Control_A_Word_Beside_A_Taller_Inline_Block()
@@ -194,7 +199,7 @@ public sealed class InlineBoxLineHeightTests
 
         root.PerformLayout(root.LayoutEnvironment);
 
-        Assert.Equal(44.8, block.Size.Height, 1);
+        Assert.Equal(47.2, block.Size.Height, 1);
     }
 
     private static CssBox Root() => new(null, new HtmlTag("div", false, null), BaseUrl)

@@ -50,18 +50,33 @@ public sealed class InlineBlockSharedBaselineTests
 
     /// <summary>
     /// Controls, which pass before and after: beside a 60px box on the baseline too, the 20px and
-    /// 30px boxes stand on its bottom, 40px and 30px down; beside one aligned <c>top</c> or
-    /// <c>bottom</c>, which were never counted, 10px and 0px down, or 40px and 30px.
+    /// 30px boxes stand on its bottom, 40px and 30px down; beside one aligned <c>top</c>, which is
+    /// never counted, 10px and 0px down.
     /// </summary>
     [Theory(Timeout = 600000)]
     [InlineData("baseline", 40)]
     [InlineData("top", 10)]
-    [InlineData("bottom", 40)]
     public void Control_A_Box_On_The_Baseline_Or_Aligned_To_The_Line(string verticalAlign, float shortTop)
     {
         var (block, shortBox, other) = Lay(verticalAlign);
 
         Assert.Equal(shortTop, shortBox.Location.Y - block.Location.Y, 1);
+        Assert.Equal(other.Location.Y + 10, shortBox.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// Beside a 60px box aligned <c>bottom</c>, which is not counted either, the 20px and 30px boxes
+    /// stand 36.8px and 26.8px down: the box ends where the line does, at the bottom of the strut,
+    /// the font's 3.2px descent below the baseline they stand on (CSS 2.1 §10.8.1). It ended on the
+    /// baseline, and they stood 40px and 30px down; browsers stand them 36px and 26px down in 16px
+    /// text.
+    /// </summary>
+    [Fact(Timeout = 600000)]
+    public void Beside_A_Box_Aligned_Bottom_They_Stand_Above_The_Struts_Descent()
+    {
+        var (block, shortBox, other) = Lay("bottom");
+
+        Assert.Equal(36.8, shortBox.Location.Y - block.Location.Y, 1);
         Assert.Equal(other.Location.Y + 10, shortBox.Location.Y, 1);
     }
 

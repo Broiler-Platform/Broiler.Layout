@@ -770,7 +770,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
 
         _listItemBox.Words[0].Left = Location.X - _listItemBox.Size.Width - 5;
-        _listItemBox.Words[0].Top = Location.Y + ActualPaddingTop; // +FontAscent;
+        // Half the item's leading down, where the first line's text stands (CSS 2.1 §10.8.1).
+        _listItemBox.Words[0].Top = Location.Y + ActualPaddingTop + CssLayoutEngine.HalfLeading(this);
     }
 
     internal string GetAttribute(string attribute) => GetAttribute(attribute, string.Empty);
