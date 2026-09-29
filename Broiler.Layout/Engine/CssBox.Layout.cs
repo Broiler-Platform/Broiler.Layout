@@ -573,6 +573,46 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
         else if (!replacedSizeSettled
             && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
+            && AlignsBetweenInlineInsets())
+        {
+            // CSS Box Alignment 3 §6.1: with both inline insets, a `justify-self` other than
+            // `normal` or `stretch` sizes the box as fit-content in the space between them, and
+            // PositionAbsoluteBox aligns it there. It was stretched across that space, and
+            // PositionAbsoluteBox then shrank it to the right edge of its widest child, which says
+            // nothing of the text in it: "x" with `left: 0; right: 0; justify-self: center` stayed
+            // 500px wide at the left of a 500px containing block, where browsers make it 8px wide,
+            // 246px in. Same framing as the legend branch below: ComputeShrinkToFitWidth is a
+            // content-box width and GetMinMaxWidth a border-box one.
+            EnsureDescendantWordsMeasured(g);
+
+            double ownPadBorder = ActualBorderLeftWidth + ActualBorderRightWidth
+                                + ActualPaddingLeft + ActualPaddingRight;
+            double maxContent = ComputeShrinkToFitWidth();
+
+            GetMinMaxWidth(out double minBorderBox, out _);
+
+            if (double.IsNaN(minBorderBox))
+                minBorderBox = 0;
+
+            if (double.IsNaN(maxContent))
+                maxContent = 0;
+
+            double cbWidth = PositionedContainingBlockWidth();
+            // AlignsBetweenInlineInsets has both insets set.
+            double available = Math.Max(0, cbWidth - ParseUsedLength(Left!, cbWidth) - ParseUsedLength(Right!, cbWidth)
+                - ActualMarginLeft - ActualMarginRight - ownPadBorder);
+            double fitWidth = Math.Min(Math.Max(Math.Max(0, minBorderBox - ownPadBorder), available), maxContent);
+
+            if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
+                fitWidth = Math.Min(fitWidth, ResolveMaxWidthLength(cbWidth));
+
+            if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
+                fitWidth = Math.Max(fitWidth, ResolveMinWidthLength(cbWidth));
+
+            Size = new SizeF((float)(fitWidth + ownPadBorder), Size.Height);
+        }
+        else if (!replacedSizeSettled
+            && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
             && Float != CssConstants.None)
         {
             // CSS2.1 §10.3.5: Floating non-replaced elements with
@@ -2185,6 +2225,42 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             InvalidateActualMargins();
     }
 
+    /// <summary>
+    /// Whether this box is absolutely or fixed positioned with both inline insets in a horizontal
+    /// containing block, and aligned between them by a <c>justify-self</c> other than
+    /// <c>normal</c> or <c>stretch</c> (CSS Box Alignment 3 §6.1), which PositionAbsoluteBox does.
+    /// <c>anchor-center</c> is left to anchor positioning.
+    /// </summary>
+    private bool AlignsBetweenInlineInsets()
+    {
+        if (Position is not (CssConstants.Absolute or CssConstants.Fixed)
+            || Left == null || Left == CssConstants.Auto
+            || Right == null || Right == CssConstants.Auto)
+        {
+            return false;
+        }
+
+        string js = JustifySelf?.Trim().ToLowerInvariant() ?? "auto";
+        if (js is "auto" or "normal" or "stretch" or "anchor-center")
+            return false;
+
+        string cbWritingMode = FindPositionedContainingBlock().WritingMode;
+        return cbWritingMode != "vertical-rl" && cbWritingMode != "vertical-lr";
+    }
+
+    /// <summary>
+    /// The width of the containing block an absolutely or fixed positioned box's insets resolve
+    /// against: the viewport's, or the padding box's of its positioned containing block.
+    /// </summary>
+    private double PositionedContainingBlockWidth()
+    {
+        if (Position == CssConstants.Fixed && LayoutEnvironment != null)
+            return FixedPositioningViewport().Width;
+
+        GetAbsoluteContainingBlockPaddingBox(FindPositionedContainingBlock(), out _, out _, out double width, out _);
+        return width;
+    }
+
     // The used border-box inline size is known (Size.Width has been resolved by positioning time) —
     // the case §10.3.7 centring needs — for an explicit length/percentage width AND for an
     // intrinsic-keyword (min-/max-/fit-content) width, which ResolveBlockUsedWidth now shrink-wraps
@@ -2304,7 +2380,20 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (jsPostNonDefault || asPostNonDefault)
             {
                 var cb = FindPositionedContainingBlock();
-                GetAbsoluteContainingBlockPaddingBox(cb, out double cbPadLeft, out double cbPadTop, out double cbPadWidth, out double cbPadHeight);
+                double cbPadLeft, cbPadTop, cbPadWidth, cbPadHeight;
+
+                // A fixed box is aligned in the viewport, its containing block, as it is placed
+                // above: it was aligned in its nearest positioned ancestor's padding box.
+                if (Position == CssConstants.Fixed)
+                {
+                    var viewport = FixedPositioningViewport();
+                    (cbPadLeft, cbPadTop) = (viewport.X, viewport.Y);
+                    (cbPadWidth, cbPadHeight) = (viewport.Width, viewport.Height);
+                }
+                else
+                {
+                    GetAbsoluteContainingBlockPaddingBox(cb, out cbPadLeft, out cbPadTop, out cbPadWidth, out cbPadHeight);
+                }
 
                 bool hasL = Left != null && Left != CssConstants.Auto;
                 bool hasR = Right != null && Right != CssConstants.Auto;
@@ -2337,7 +2426,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         double imcbLeft = cbPadLeft + cssLeft;
                         double imcbWidth = cbPadWidth - cssLeft - cssRight;
 
-                        double boxWidth = GetShrinkToFitWidth();
+                        // ResolveBlockUsedWidth sized a box with an auto width as fit-content between
+                        // the insets already (AlignsBetweenInlineInsets); measuring it again from its
+                        // children's right edges would miss its text, and count its positioned children.
+                        double boxWidth = (Width == CssConstants.Auto || string.IsNullOrEmpty(Width)) && AlignsBetweenInlineInsets()
+                            ? Size.Width
+                            : GetShrinkToFitWidth();
                         Size = new SizeF((float)boxWidth, Size.Height);
 
                         // For a box the vertical-flow rotation will transpose, the
@@ -2346,8 +2440,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                         // rotation swaps them). Align with the physical extent so
                         // an overflowing vrl item (laid out with a small logical
                         // width) is centered/clamped by its true width.
-                        double alignWidth = WillBeVerticalTransposed()
-                            ? GetShrinkToFitHeight() : boxWidth;
+                        //
+                        // What is aligned is the margin box: with `margin-left: 40px`, a centred 8px
+                        // box was 286px in, where browsers put it 266px in.
+                        double alignWidth = (WillBeVerticalTransposed()
+                            ? GetShrinkToFitHeight() : boxWidth) + ActualMarginLeft + ActualMarginRight;
 
                         // Inline-axis start edge follows the CB's direction (start/end);
                         // self-start/self-end follow the ITEM's start in this horizontal
