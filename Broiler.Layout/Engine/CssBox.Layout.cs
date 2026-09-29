@@ -275,6 +275,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // Use the viewport width for percentage/auto resolution.
         double width;
 
+        // Whether the width is the border box's, found from the insets (CSS2.1 §10.3.7), with the
+        // margins already off it.
+        bool widthFromInsets = false;
+
         if (Position == CssConstants.Fixed && LayoutEnvironment != null)
         {
             width = FixedPositioningViewport().Width;
@@ -366,10 +370,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             width = cbContentWidth - cssLeft - cssRight - ActualMarginLeft - ActualMarginRight;
 
-            if (width < 0)
-                width = 0;
-
-            width = ResolveSpecifiedWidthToBorderBox(width);
+            // That is the border box's width, the padding and the border being in the equation
+            // too, and the content box is never narrower than nothing. It was taken for the content
+            // box's, and under `box-sizing: content-box` the padding and the border were added to
+            // it again; the margins were then taken off it again below, as for a box whose width is
+            // its containing block's. In a 500px containing block, `left: 0; right: 0;
+            // padding: 0 10px` made a box 520px wide, where browsers make it 500px wide, and 5px
+            // margins took 10px more off it.
+            width = Math.Max(width, ActualPaddingLeft + ActualPaddingRight + ActualBorderLeftWidth + ActualBorderRightWidth);
+            widthFromInsets = true;
         }
 
         // CSS2.1 §10.4: Apply max-width constraint even when
@@ -778,7 +787,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             resolved += ownPadBorder;
             Size = new SizeF((float)resolved, Size.Height);
         }
-        else if (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
+        else if ((Width == CssConstants.Auto || string.IsNullOrEmpty(Width)) && !widthFromInsets)
         {
             // Margins reduce the box width only for auto-width elements.
             // For explicit widths, margins affect position only (CSS1 box model).
