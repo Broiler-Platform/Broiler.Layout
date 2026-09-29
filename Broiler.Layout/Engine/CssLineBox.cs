@@ -22,6 +22,17 @@ internal sealed class CssLineBox
     public CssBox OwnerBox { get; }
     public Dictionary<CssBox, RectangleF> Rectangles { get; }
 
+    /// <summary>
+    /// The top of the line, where the flow put it, before vertical alignment moved what is on it;
+    /// null for a line made outside the flow.
+    /// </summary>
+    /// <remarks>
+    /// What is on a line does not say where the line starts once it is aligned: an image stands
+    /// on the strut's baseline from the start, and an inline-block moves down to it, below the
+    /// line's top, when no text on the line starts there.
+    /// </remarks>
+    internal double? FlowTop { get; set; }
+
     public double LineBottom
     {
         get
@@ -193,11 +204,19 @@ internal sealed class CssLineBox
             if (Math.Abs(shift) > 0.01)
             {
                 Rectangles[b] = new RectangleF(r.X, (float)baseline, r.Width, r.Height);
-                b.Location = new PointF(b.Location.X, (float)baseline);
-                b.ActualBottom = baseline + r.Height;
                 foreach (var word in ws)
                     word.Top += shift;
             }
+
+            // The box stands where its rectangle does, moved or not, and is as wide and as tall.
+            // It was put there only when the alignment moved it, so an image the flow had already
+            // stood on the baseline, one beside text or alone on its line, kept the place the box
+            // had before its line was laid out, the page's top-left corner. Only its top and
+            // height were set: script, which reads the box in preference to the line's rectangle
+            // once the box has a size, found an image beside text at the left edge of the page,
+            // 0px wide.
+            b.Location = new PointF(r.X, (float)baseline);
+            b.Size = new SizeF(r.Width, r.Height);
             return;
         }
 
