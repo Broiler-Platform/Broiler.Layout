@@ -76,9 +76,10 @@ public sealed class InlineBoxRectangleFollowsWordsTests
 
     /// <summary>
     /// An inline-flex container has no words on its line, and keeps its rectangle there where the
-    /// box is, at the top of the line, and the block is 27.2px tall, the box's 24px and the strut's
-    /// descent. In a 10px font, the rectangle was moved 4.8px down, by what the font's ascent is
-    /// short of the block's, and the block grew by as much.
+    /// box is, at the top of the line. It stands on its first item's baseline (CSS Flexbox §8.5),
+    /// which leaves the strut's descent inside it, so the block is the box's 24px tall. In a 10px
+    /// font, the rectangle was moved 4.8px down, by what the font's ascent is short of the block's,
+    /// and the block grew by as much.
     /// </summary>
     [Fact]
     public void An_Inline_Flex_Container_Keeps_Its_Rectangle()
@@ -95,7 +96,7 @@ public sealed class InlineBoxRectangleFollowsWordsTests
         Layout(tree);
 
         Assert.Equal(flex.Location.Y, flex.Rectangles.Values.First().Top, 1);
-        Assert.Equal(27.2, tree.Block.Size.Height, 1);
+        Assert.Equal(24, tree.Block.Size.Height, 1);
     }
 
     /// <summary>
