@@ -2023,6 +2023,15 @@ internal static class CssLayoutEngine
         maxRight = Math.Max(maxRight, ibBorderLeft + physicalBoxWidth);
         maxbottom = Math.Max(maxbottom, b.ActualBottom + b.ActualMarginBottom);
 
+        // CSS2.1 §10.8: the line the box stands on has the strut, as tall as the block's line
+        // height, and the next line starts below that, as it does below a line of words. It
+        // started below the box and the strut's descent: an 84px and a 20px inline-block, each 10px
+        // tall, in a 25px block of 16px/20px text, put the second box's line 15.15px down, where
+        // browsers start it 20px down. A flex container's lines hold its items and have no strut
+        // (CreateLineBoxes).
+        if (blockbox.Display is not ("flex" or "inline-flex"))
+            maxbottom = Math.Max(maxbottom, cury + lineHeight);
+
         // A relative offset waits for the line to be settled: see ApplyRelativeOffsets.
     }
 
