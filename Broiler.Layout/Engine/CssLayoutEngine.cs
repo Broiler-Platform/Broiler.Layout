@@ -974,45 +974,53 @@ internal static class CssLayoutEngine
     {
         var keys = new List<CssBox>(linebox.Rectangles.Keys);
         foreach (var box in keys)
-        {
-            var r = linebox.Rectangles[box];
-            linebox.Rectangles[box] = new RectangleF(r.X, (float)(r.Y + shift), r.Width, r.Height);
-
-            // An inline-block, or an inline flex or grid container, that the flow placed on
-            // this line whole moves with everything in it, as SetBaseLine moves one: what it
-            // holds is positioned absolutely, on lines and in blocks of its own. Moving its
-            // Location alone left that content behind, and adding the shift to ActualBottom
-            // as well, which is the Location plus the height, made the box taller by the
-            // shift. An inline flex or grid container was not moved at all, only its
-            // rectangle on this line.
-            //
-            // An inline-block holding words of its own, as a ::before with
-            // `display: inline-block` does, and an image, which SetBaseLine places with its
-            // word, move their own box alone: their words are on these lines, and are moved
-            // below. The image's box was left where it was, and it was drawn and measured above
-            // its word; the inline-block's was moved and made taller by the shift too, its
-            // ActualBottom being its Location plus its height.
-            if (box.Words.Count == 0
-                && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
-            {
-                box.OffsetTop(shift);
-            }
-            else if (box.Display == CssConstants.InlineBlock || box.IsImage)
-            {
-                box.Location = new PointF(box.Location.X, (float)(box.Location.Y + shift));
-            }
-
-            // Update the box's own Rectangles copy (assigned
-            // earlier by AssignRectanglesToBoxes).
-            if (box.Rectangles.ContainsKey(linebox))
-                box.Rectangles[linebox] = linebox.Rectangles[box];
-        }
+            ShiftOnLine(linebox, box, shift);
 
         foreach (var word in linebox.Words)
             word.Top += shift;
 
         if (linebox.Baseline is double baseline)
             linebox.Baseline = baseline + shift;
+    }
+
+    /// <summary>
+    /// Moves <paramref name="box"/>'s rectangle on <paramref name="linebox"/> down by
+    /// <paramref name="shift"/>, and the box with what is in it when the flow placed it on the line
+    /// whole; its words on the line are the caller's to move.
+    /// </summary>
+    private static void ShiftOnLine(CssLineBox linebox, CssBox box, double shift)
+    {
+        var r = linebox.Rectangles[box];
+        linebox.Rectangles[box] = new RectangleF(r.X, (float)(r.Y + shift), r.Width, r.Height);
+
+        // An inline-block, or an inline flex or grid container, that the flow placed on
+        // this line whole moves with everything in it, as SetBaseLine moves one: what it
+        // holds is positioned absolutely, on lines and in blocks of its own. Moving its
+        // Location alone left that content behind, and adding the shift to ActualBottom
+        // as well, which is the Location plus the height, made the box taller by the
+        // shift. An inline flex or grid container was not moved at all, only its
+        // rectangle on this line.
+        //
+        // An inline-block holding words of its own, as a ::before with
+        // `display: inline-block` does, and an image, which SetBaseLine places with its
+        // word, move their own box alone: their words are on these lines, and are moved
+        // with the line's. The image's box was left where it was, and it was drawn and measured
+        // above its word; the inline-block's was moved and made taller by the shift too, its
+        // ActualBottom being its Location plus its height.
+        if (box.Words.Count == 0
+            && box.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid")
+        {
+            box.OffsetTop(shift);
+        }
+        else if (box.Display == CssConstants.InlineBlock || box.IsImage)
+        {
+            box.Location = new PointF(box.Location.X, (float)(box.Location.Y + shift));
+        }
+
+        // Update the box's own Rectangles copy (assigned
+        // earlier by AssignRectanglesToBoxes).
+        if (box.Rectangles.ContainsKey(linebox))
+            box.Rectangles[linebox] = linebox.Rectangles[box];
     }
 
     /// <summary>
@@ -3143,7 +3151,9 @@ internal static class CssLayoutEngine
     /// How far below the line's baseline the baseline of the box's parent lies: each inline box
     /// around the box, up to the block, that <c>sub</c>, <c>super</c> or a length lowers or raises
     /// from its own parent's baseline moves it by as much, and so does one that <c>middle</c>,
-    /// <c>text-top</c> or <c>text-bottom</c> aligns to its parent's font (ParentFontShift).
+    /// <c>text-top</c> or <c>text-bottom</c> aligns to its parent's font (ParentFontShift). One
+    /// aligned <c>top</c> or <c>bottom</c> moves it by nothing here: it is aligned to the line box
+    /// with what is in it once the rest of the line is (<see cref="LineBoxAlignedRoot"/>).
     /// </summary>
     private static double ParentBaselineShift(CssBox box)
     {
@@ -3200,6 +3210,104 @@ internal static class CssLayoutEngine
     /// </summary>
     private static double ParentFontHeightOf(CssBox box, CssLineBox lineBox) =>
         (box.ParentBox ?? lineBox.OwnerBox)?.ActualFont.Height ?? 0;
+
+    /// <summary>
+    /// The box aligned <c>top</c> or <c>bottom</c> whose aligned subtree the box is in on a line of
+    /// <paramref name="block"/>: the box itself, or the nearest inline box around it, up to the
+    /// block, that is aligned so; null for a box in none.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.8.1: the aligned subtree of an inline element is the element and the aligned
+    /// subtrees of its inline children not aligned <c>top</c> or <c>bottom</c> themselves, which
+    /// are aligned subtrees of their own.
+    /// </remarks>
+    private static CssBox? LineBoxAlignedRoot(CssBox? box, CssBox? block)
+    {
+        for (var b = box; b != null && b != block; b = b.ParentBox)
+        {
+            if (b.VerticalAlign is CssConstants.Top or CssConstants.Bottom)
+                return b;
+
+            if (b.ParentBox is not { Display: CssConstants.Inline })
+                break;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Where the aligned subtree of <paramref name="root"/>, a box aligned <c>top</c> or
+    /// <c>bottom</c>, starts and ends on <paramref name="lineBox"/>: a box placed on the line whole
+    /// is its rectangle, and an inline box reaches as far as the words and whole boxes in its
+    /// subtree, each word with the leading around it (<see cref="WordLayoutTop"/>,
+    /// <see cref="WordLayoutBottom"/>). <see cref="double.MaxValue"/> and
+    /// <see cref="double.MinValue"/> for an inline box with nothing in its subtree on the line.
+    /// </summary>
+    private static (double Top, double Bottom) AlignedSubtreeExtent(CssLineBox lineBox, CssBox root)
+    {
+        if (!root.IsInlineNonReplaced)
+        {
+            var rect = lineBox.Rectangles[root];
+            return (rect.Top, rect.Bottom);
+        }
+
+        double top = double.MaxValue;
+        double bottom = double.MinValue;
+
+        foreach (var (box, rect) in lineBox.Rectangles)
+        {
+            if (!box.IsInlineNonReplaced && LineBoxAlignedRoot(box, lineBox.OwnerBox) == root)
+            {
+                top = Math.Min(top, rect.Top);
+                bottom = Math.Max(bottom, rect.Bottom);
+            }
+        }
+
+        foreach (var word in lineBox.Words)
+        {
+            if (LineBoxAlignedRoot(word.OwnerBox, lineBox.OwnerBox) == root)
+            {
+                top = Math.Min(top, WordLayoutTop(word));
+                bottom = Math.Max(bottom, WordLayoutBottom(word));
+            }
+        }
+
+        return (top, bottom);
+    }
+
+    /// <summary>
+    /// Moves the aligned subtree of <paramref name="root"/>, an inline box aligned <c>top</c> or
+    /// <c>bottom</c>, down <paramref name="lineBox"/> by <paramref name="shift"/>: the boxes placed
+    /// on the line whole with what is in them, and the words of the inline boxes in it.
+    /// </summary>
+    /// <remarks>
+    /// An inline box's words are moved as vertical alignment moves them everywhere else, through
+    /// <see cref="CssLineBox.SetBaseLine"/>, which takes the box's rectangle with them as far as it
+    /// takes any inline box's.
+    /// </remarks>
+    private static void ShiftAlignedSubtree(CssLineBox lineBox, CssBox root, double shift)
+    {
+        foreach (var box in new List<CssBox>(lineBox.Rectangles.Keys))
+        {
+            if (LineBoxAlignedRoot(box, lineBox.OwnerBox) != root)
+                continue;
+
+            var words = lineBox.WordsOf(box);
+
+            if (box.IsInlineNonReplaced)
+            {
+                if (words.Count > 0)
+                    lineBox.SetBaseLine(box, words[0].Top + shift);
+
+                continue;
+            }
+
+            ShiftOnLine(lineBox, box, shift);
+
+            foreach (var word in words)
+                word.Top += shift;
+        }
+    }
 
     /// <summary>
     /// Whether an inline box around the box, up to the block, is aligned to its parent's font
@@ -3298,12 +3406,17 @@ internal static class CssLayoutEngine
         // the line sets.
         //
         // What is inside an inline box aligned to its parent's font stands where that box puts it,
-        // and says no more about where the line's baseline is than the box does.
+        // and says no more about where the line's baseline is than the box does. Nor does what is
+        // inside one aligned `top` or `bottom`, which is aligned to the line box with it: the text
+        // of a span with `line-height: 40px` aligned `top` in 16px/20px text set the baseline half
+        // its leading down, and the rest of the line stood beside it, 10px down, where browsers
+        // leave it at the line's top.
         foreach (var box in lineBox.Rectangles.Keys)
         {
             if (topBottomBoxes.Contains(box)
                 || IsAlignedToParentFontMetrics(box.VerticalAlign)
-                || IsInsideBoxAlignedToParentFont(box))
+                || IsInsideBoxAlignedToParentFont(box)
+                || (topBottomBoxes.Count > 0 && LineBoxAlignedRoot(box, lineBox.OwnerBox) != null))
             {
                 continue;
             }
@@ -3474,7 +3587,7 @@ internal static class CssLayoutEngine
             // measures: its vertical padding and border are not part of the line (CSS2.1 §10.6.1).
             foreach (var kvp in lineBox.Rectangles)
             {
-                if (!topBottomBoxes.Contains(kvp.Key) && !kvp.Key.IsInlineNonReplaced)
+                if (!kvp.Key.IsInlineNonReplaced && LineBoxAlignedRoot(kvp.Key, lineBox.OwnerBox) == null)
                 {
                     finalTop = Math.Min(finalTop, kvp.Value.Top);
                     finalBottom = Math.Max(finalBottom, kvp.Value.Bottom);
@@ -3489,7 +3602,7 @@ internal static class CssLayoutEngine
             // below the box.
             foreach (var word in lineBox.Words)
             {
-                if (!topBottomBoxes.Contains(word.OwnerBox))
+                if (LineBoxAlignedRoot(word.OwnerBox, lineBox.OwnerBox) == null)
                 {
                     finalTop = Math.Min(finalTop, WordLayoutTop(word));
                     finalBottom = Math.Max(finalBottom, WordLayoutBottom(word));
@@ -3502,23 +3615,49 @@ internal static class CssLayoutEngine
                 finalBottom = Math.Max(finalBottom, baseline + StrutDescent(strutBox));
             }
 
-            foreach (CssBox box in boxes)
+            if (finalTop < double.MaxValue)
             {
-                if (!topBottomBoxes.Contains(box))
-                    continue;
+                // A box aligned `top` or `bottom` is aligned with its aligned subtree, what is in it
+                // but for what is aligned so itself, to the top or bottom of the line box
+                // (CSS 2.1 §10.8.1); the box alone was moved, and an inline box holds no words, its
+                // text being in an inline box of its own: the text of a span aligned `top` beside a
+                // 40px inline-block stood on the baseline, 25.15px down the line, where browsers
+                // put it at the top. The line box is as tall as the tallest subtree, where that is
+                // taller than the rest of the line: a subtree aligned `top` makes it reach lower,
+                // and one aligned `bottom` higher. Each was aligned to the line as the rest of it
+                // reached, and a box aligned `bottom` beside a taller one aligned `top` ended at the
+                // bottom of the text, not of the line.
+                var subtrees = new List<(CssBox Root, double Top, double Bottom)>();
 
-                if (box.VerticalAlign == CssConstants.Top)
+                foreach (CssBox box in boxes)
                 {
-                    if (finalTop < double.MaxValue)
-                        lineBox.SetBaseLine(box, finalTop);
-                }
-                else // Bottom
-                {
-                    if (finalBottom > double.MinValue && lineBox.Rectangles.TryGetValue(box, out RectangleF value))
+                    if (!topBottomBoxes.Contains(box))
+                        continue;
+
+                    var (top, bottom) = AlignedSubtreeExtent(lineBox, box);
+                    if (top == double.MaxValue)
+                        continue;
+
+                    subtrees.Add((box, top, bottom));
+
+                    double grow = bottom - top - (finalBottom - finalTop);
+                    if (grow > 0)
                     {
-                        double boxHeight = value.Height;
-                        lineBox.SetBaseLine(box, finalBottom - boxHeight);
+                        if (box.VerticalAlign == CssConstants.Top)
+                            finalBottom += grow;
+                        else
+                            finalTop -= grow;
                     }
+                }
+
+                foreach (var (root, top, bottom) in subtrees)
+                {
+                    double shift = root.VerticalAlign == CssConstants.Top ? finalTop - top : finalBottom - bottom;
+
+                    if (root.IsInlineNonReplaced)
+                        ShiftAlignedSubtree(lineBox, root, shift);
+                    else
+                        lineBox.SetBaseLine(root, top + shift);
                 }
             }
         }
