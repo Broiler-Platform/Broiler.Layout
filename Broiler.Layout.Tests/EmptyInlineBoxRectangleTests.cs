@@ -401,11 +401,12 @@ public sealed class EmptyInlineBoxRectangleTests
 
     /// <summary>
     /// "aa ", an empty span with <c>padding: 0 2px</c>, "bb cc", another such span, " dd", then a word
-    /// too long for the line, justified in 200px: the words of the first line move apart, "bb" to
-    /// 50px in and "cc" to 100px in. The first span, after the space, stays against "bb", 4px wide
-    /// from 46px in, and the second, with no space before it, stays against "cc", from 116px in.
-    /// They were 0 × 0 at the top of the line, 22px and 62px in, where the flow had put them before
-    /// the words moved.
+    /// too long for the line, justified in 200px: the words of the first line move apart, keeping
+    /// the room the spans take beside them, 4px each, out of what the spaces share (CSS Text 3 §7.3).
+    /// "bb" goes 52px in and "cc" 100px in. The first span, after the space, stays against "bb", 4px
+    /// wide from 48px in, and the second, with no space before it, stays against "cc", from 116px
+    /// in. They were 0 × 0 at the top of the line, 22px and 62px in, where the flow had put them
+    /// before the words moved, and "bb" went 50px in.
     /// </summary>
     [Fact]
     public void Empty_Spans_On_A_Justified_Line_Keep_To_Their_Words()
@@ -421,10 +422,289 @@ public sealed class EmptyInlineBoxRectangleTests
         Text(block, " dd eeeeeeeeeeeeeeeeeeeeeeeee");
         Layout(block);
 
-        Assert.Equal(50, Word(block, "bb").Left - block.Location.X, 1);
+        Assert.Equal(52, Word(block, "bb").Left - block.Location.X, 1);
         Assert.Equal(100, Word(block, "cc").Left - block.Location.X, 1);
-        AssertRectangle(46, 2, 4, 16, ScriptRectangle(first, block));
+        AssertRectangle(48, 2, 4, 16, ScriptRectangle(first, block));
         AssertRectangle(116, 2, 4, 16, ScriptRectangle(second, block));
+    }
+
+    /// <summary>
+    /// An empty span with <c>padding: 0 8px</c>, then "aa bb cc " and a word too long for the line,
+    /// justified in 200px: the span starts the line, 16px wide from its start, and "aa" follows it,
+    /// 16px in, while "cc" ends the line. Justification left the span out: "aa" went to the start
+    /// of the line, over the span, and the span was 0 × 0 at the top of the line, 8px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Starting_A_Justified_Line_Starts_It()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        var span = Span(block);
+        span.PaddingLeft = span.PaddingRight = "8px";
+        Text(block, "aa bb cc ");
+        Text(block, "eeeeeeeeeeeeeeeeeeeeeeeee");
+        Layout(block);
+
+        AssertRectangle(0, 2, 16, 16, ScriptRectangle(span, block));
+        Assert.Equal(16, Word(block, "aa").Left - block.Location.X, 1);
+        Assert.Equal(184, Word(block, "cc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// "aa bb cc ", an empty span with <c>padding: 0 8px</c>, then a word too long for the line,
+    /// justified in 200px: the span ends the line, against "cc", 16px wide from 184px in, and "cc"
+    /// ends 16px before the line does, 168px in. The span was 0 × 0 at the top of the line, 68px in,
+    /// and "cc" ended the line, 184px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Ending_A_Justified_Line_Ends_It_Inside_The_Block()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa bb cc ");
+        var span = Span(block);
+        span.PaddingLeft = span.PaddingRight = "8px";
+        Text(block, "eeeeeeeeeeeeeeeeeeeeeeeee");
+        Layout(block);
+
+        AssertRectangle(184, 2, 16, 16, ScriptRectangle(span, block));
+        Assert.Equal(168, Word(block, "cc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// An empty span, then " abc def": the space after the span starts the line and is removed
+    /// (CSS Text 3 §4.1.3), so "abc" starts the line with the span, both at its start. "abc" stood
+    /// a space in, 4px, and the span was 0 × 0 at the top of the line.
+    /// </summary>
+    [Fact]
+    public void A_Space_After_An_Empty_Span_Starting_A_Line_Is_Removed()
+    {
+        var block = Block();
+        var span = Span(block);
+        Text(block, " abc def");
+        Layout(block);
+
+        Assert.Equal(0, Word(block, "abc").Left - block.Location.X, 1);
+        AssertRectangle(0, 2, 0, 16, ScriptRectangle(span, block));
+    }
+
+    /// <summary>
+    /// The same right to left: the line is mirrored, and the span starts it on the right, 200px
+    /// in, with "abc" against it, from 176px in. The span was 0 × 0 at the top-left of the line.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_And_A_Space_Starting_A_Right_To_Left_Line_Stand_At_Its_Right()
+    {
+        var block = Block();
+        block.Direction = CssConstants.Rtl;
+        var span = Span(block);
+        Text(block, " abc def");
+        Layout(block);
+
+        Assert.Equal(176, Word(block, "abc").Left - block.Location.X, 1);
+        AssertRectangle(200, 2, 0, 16, ScriptRectangle(span, block));
+    }
+
+    /// <summary>
+    /// <c>white-space: pre-line</c>: "x" and a preserved newline, an empty span, then " abc": the
+    /// newline is a forced break, and the space after the span starts the second line and is
+    /// removed there: "abc" stands at its start, 22px down. It stood a space in, 4px.
+    /// </summary>
+    [Fact]
+    public void A_Space_After_An_Empty_Span_After_A_Forced_Break_Is_Removed()
+    {
+        var block = Block();
+        block.WhiteSpace = CssConstants.PreLine;
+        Text(block, "x\n");
+        Span(block);
+        Text(block, " abc");
+        Layout(block);
+
+        Assert.Equal(0, Word(block, "abc").Left - block.Location.X, 1);
+        Assert.Equal(22, Word(block, "abc").Top - block.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// "aaaa bbbb ", a link with <c>padding-left: 4px</c> holding an empty span with
+    /// <c>padding-left: 16px</c> (an icon) and "link", then " x", in a 100px block: "link" does not
+    /// fit, and the line breaks at the space before the link, which starts the second line whole
+    /// with its icon: the link is 4 + 16 + 32 = 52px wide from its start, 22px down, the icon 16px
+    /// wide from 4px in, and "link" 20px in. The icon was 0 × 0 at the top of the first line, 92px
+    /// in, and the link held "link" alone, without its padding, at the start of the second line.
+    /// </summary>
+    [Fact]
+    public void A_Link_Starting_With_An_Empty_Span_Wraps_Whole()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb ");
+        var link = Span(block, tag: "a");
+        link.PaddingLeft = "4px";
+        var icon = Span(link);
+        icon.PaddingLeft = "16px";
+        Text(link, "link");
+        Text(block, " x");
+        Layout(block);
+
+        AssertRectangle(0, 22, 52, 16, ScriptRectangle(link, block));
+        AssertRectangle(4, 22, 16, 16, ScriptRectangle(icon, block));
+        Assert.Equal(20, Word(block, "link").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// The same with the link's markup indented: a newline before the icon in the link. The newline
+    /// follows the space before the link and collapses (CSS Text 3 §4.1.1): the link starts the
+    /// second line with its icon, 16px wide at its start, and "link" 16px in. The icon was 0 × 0 at
+    /// the top of the first line, 92px in, and "link" started the second line.
+    /// </summary>
+    [Fact]
+    public void A_Link_Starting_With_White_Space_And_An_Empty_Span_Wraps_Whole()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb ");
+        var link = Span(block, tag: "a");
+        Text(link, "\n");
+        var icon = Span(link);
+        icon.PaddingLeft = "16px";
+        Text(link, "link");
+        Text(block, " x");
+        Layout(block);
+
+        AssertRectangle(0, 22, 16, 16, ScriptRectangle(icon, block));
+        Assert.Equal(16, Word(block, "link").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// "aaaa bbbb ", then a link holding an empty span with <c>padding-left: 16px</c> and a 30 × 10px
+    /// inline-block, in a 100px block: the inline-block does not fit, and the link starts the
+    /// second line with its icon, 16px wide at its start, 22px down, and the inline-block 16px in.
+    /// The icon was 0 × 0 at the top of the first line, 88px in, and the inline-block started the
+    /// second line.
+    /// </summary>
+    [Fact]
+    public void A_Link_Starting_With_An_Empty_Span_Wraps_Whole_With_Its_Inline_Block()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb ");
+        var link = Span(block, tag: "a");
+        var icon = Span(link);
+        icon.PaddingLeft = "16px";
+        var inlineBlock = new CssBox(link, new HtmlTag("span", false, null), BaseUrl)
+        {
+            Display = CssConstants.InlineBlock,
+            Width = "30px",
+            Height = "10px",
+        };
+        Text(block, " x");
+        Layout(block);
+
+        AssertRectangle(0, 22, 16, 16, ScriptRectangle(icon, block));
+        Assert.Equal(16, inlineBlock.Location.X - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// "aaaa ", then a link holding an empty span with <c>padding: 0 2px</c> and "bbbb", in a 34px
+    /// block: "aaaa" and the space after it already fill the line, and browsers leave the link's
+    /// start and the span there, against "aaaa", 4px wide from 32px in, and put "bbbb" on the next
+    /// line. The span was 0 × 0 at the top of the line, 38px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Starting_A_Link_Stays_On_A_Line_Its_Content_And_Space_Fill()
+    {
+        var block = Block("34px");
+        Text(block, "aaaa ");
+        var link = Span(block, tag: "a");
+        var span = Span(link);
+        span.PaddingLeft = span.PaddingRight = "2px";
+        Text(link, "bbbb");
+        Layout(block);
+
+        AssertRectangle(32, 2, 4, 16, ScriptRectangle(span, block));
+        Assert.Equal(22, Word(block, "bbbb").Top - block.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// "aaaa bbbb", then a link holding a space, an empty span with <c>padding-left: 4px</c> and
+    /// "link", then " x", in a 100px block: the space in the link is where the line breaks, so the
+    /// link starts on the first line, and the span after the space stays there too, at the end of
+    /// the line against "bbbb", 4px wide from 68px in, as browsers keep it. It was 0 × 0 at the top
+    /// of the line, 76px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_After_White_Space_Inside_A_Link_Stays_Where_The_Line_Breaks()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb");
+        var link = Span(block, tag: "a");
+        Text(link, " ");
+        var span = Span(link);
+        span.PaddingLeft = "4px";
+        Text(link, "link");
+        Text(block, " x");
+        Layout(block);
+
+        AssertRectangle(68, 2, 4, 16, ScriptRectangle(span, block));
+        Assert.Equal(22, Word(block, "link").Top - block.Location.Y, 1);
+    }
+
+    /// <summary>
+    /// "abc", an absolutely positioned span holding "x " (its text ends in a space), then an empty
+    /// span with <c>padding: 0 2px</c>: the positioned span is out of the flow, and no space lies
+    /// between "abc" and the empty span, which stands against "abc", 4px wide from 24px in. It was
+    /// 0 × 0 at the top of the line, 26px in.
+    /// </summary>
+    [Fact]
+    public void A_Positioned_Spans_White_Space_Leaves_An_Empty_Span_Against_The_Word_Before()
+    {
+        var block = Block();
+        Text(block, "abc");
+        Positioned(block, "x ");
+        var span = Span(block);
+        span.PaddingLeft = span.PaddingRight = "2px";
+        Layout(block);
+
+        AssertRectangle(24, 2, 4, 16, ScriptRectangle(span, block));
+    }
+
+    /// <summary>
+    /// A justified line in 200px: "aa bb ", an empty span with <c>padding: 0 2px</c>, an absolutely
+    /// positioned span holding "tip" 400px along, then "cc dd" and a word too long for the line:
+    /// the empty span keeps to "cc", the next word in the flow, and ends where "cc" starts. It was
+    /// 0 × 0 at the top of the line, 42px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Before_A_Positioned_Box_On_A_Justified_Line_Keeps_To_The_Next_Word()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa bb ");
+        var span = Span(block);
+        span.PaddingLeft = span.PaddingRight = "2px";
+        Positioned(block, "tip");
+        Text(block, "cc dd eeeeeeeeeeeeeeeeeeeeeeeee");
+        Layout(block);
+
+        double cc = Word(block, "cc").Left - block.Location.X;
+        AssertRectangle(cc - 4, 2, 4, 16, ScriptRectangle(span, block));
+    }
+
+    /// <summary>
+    /// Right to left, in a 40px block: "abcd ", an empty span with <c>padding-left: 16px</c>, then
+    /// "efgh", which wraps. The span ends the first line and overflows it at its left, its end,
+    /// 16px wide from 8px left of the block, with "abcd" against the line's right edge. The span
+    /// was 0 × 0 at the top of the line, 52px in.
+    /// </summary>
+    [Fact]
+    public void An_Empty_Span_Overflowing_A_Right_To_Left_Line_Overflows_It_On_The_Left()
+    {
+        var block = Block("40px");
+        block.Direction = CssConstants.Rtl;
+        Text(block, "abcd ");
+        var span = Span(block);
+        span.PaddingLeft = "16px";
+        Text(block, "efgh");
+        Layout(block);
+
+        AssertRectangle(-8, 2, 16, 16, ScriptRectangle(span, block));
     }
 
     /// <summary>
@@ -746,6 +1026,180 @@ public sealed class EmptyInlineBoxRectangleTests
         AssertRectangle(Word(block, "abc").Left - block.Location.X, 2, 24, 16, ScriptRectangle(link, block));
     }
 
+    /// <summary>
+    /// Control, which passes before and after: right to left, an empty named anchor, then " abc
+    /// def"; the anchor, a newline, then "abc def"; and, justified, an empty span, then " aaa bbb ccc"
+    /// and a word too long for the line. The white space after the empty box starts the line and
+    /// takes no room (CSS Text 3 §4.1.3): "abc" ends the lines at their right edge, 176px in, and
+    /// the justified line fills the block, "aaa" from 176px in and "ccc" at its left edge.
+    /// </summary>
+    [Fact]
+    public void Control_A_Space_After_An_Empty_Box_Starting_A_Right_To_Left_Line_Takes_No_Room()
+    {
+        var anchor = Block();
+        anchor.Direction = CssConstants.Rtl;
+        Span(anchor, tag: "a");
+        Text(anchor, " abc def");
+        Layout(anchor);
+
+        var newline = Block();
+        newline.Direction = CssConstants.Rtl;
+        Span(newline, tag: "a");
+        Text(newline, "\n");
+        Text(newline, "abc def");
+        Layout(newline);
+
+        var justified = Block();
+        justified.Direction = CssConstants.Rtl;
+        justified.TextAlign = CssConstants.Justify;
+        Span(justified);
+        Text(justified, " aaa bbb ccc dddddddddddddddddddddddd");
+        Layout(justified);
+
+        Assert.Equal(176, Word(anchor, "abc").Left - anchor.Location.X, 1);
+        Assert.Equal(148, Word(anchor, "def").Left - anchor.Location.X, 1);
+        Assert.Equal(176, Word(newline, "abc").Left - newline.Location.X, 1);
+        Assert.Equal(176, Word(justified, "aaa").Left - justified.Location.X, 1);
+        Assert.Equal(0, Word(justified, "ccc").Left - justified.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: in 100px blocks, "aaaa bbbb ", a link starting with an
+    /// empty box and holding "link", then " x", where "link" wraps: right-aligned, with an empty span
+    /// with <c>padding-left: 16px</c> (an icon) in the link, and with an empty <c>&lt;b&gt;</c>. The
+    /// link goes to the second line whole: the first line ends with "bbbb", right-aligned from 32px
+    /// in, and the link is "link" alone on the second line, 32 × 16 at its start.
+    /// </summary>
+    [Fact]
+    public void Control_A_Line_Before_A_Wrapped_Link_Starting_With_An_Empty_Box_Keeps_Its_Place()
+    {
+        var right = Block("100px");
+        right.TextAlign = CssConstants.Right;
+        Text(right, "aaaa bbbb ");
+        var iconLink = Span(right, tag: "a");
+        Span(iconLink).PaddingLeft = "16px";
+        Text(iconLink, "link");
+        Text(right, " x");
+        Layout(right);
+
+        var plain = Block("100px");
+        Text(plain, "aaaa bbbb ");
+        var link = Span(plain, tag: "a");
+        Span(link, tag: "b");
+        Text(link, "link");
+        Text(plain, " x");
+        Layout(plain);
+
+        Assert.Equal(32, Word(right, "aaaa").Left - right.Location.X, 1);
+        Assert.Equal(68, Word(right, "bbbb").Left - right.Location.X, 1);
+        AssertRectangle(0, 22, 32, 16, ScriptRectangle(link, plain));
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: "aaaa ", then a link holding an empty span and
+    /// "bbbb", in a 34px block. "aaaa" and the space after it fill the first line, where the span
+    /// stays, taking no room; the link is "bbbb" alone on the second line, 32 × 16 at its start, as
+    /// browsers find it (they leave the empty piece of it on the first line out).
+    /// </summary>
+    [Fact]
+    public void Control_A_Link_Starting_With_An_Empty_Span_Left_On_A_Full_Line_Is_Its_Text_Alone()
+    {
+        var block = Block("34px");
+        Text(block, "aaaa ");
+        var link = Span(block, tag: "a");
+        Span(link);
+        Text(link, "bbbb");
+        Layout(block);
+
+        AssertRectangle(0, 22, 32, 16, ScriptRectangle(link, block));
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: "aaaa bbbb ", a link holding an empty span and a
+    /// <c>&lt;b&gt;</c> with <c>padding-left: 4px</c> holding "link", then " x", in a 100px block:
+    /// "link" wraps with the <c>&lt;b&gt;</c>, which starts the second line with its padding, 36px
+    /// wide from its start, and "link" 4px in.
+    /// </summary>
+    [Fact]
+    public void Control_An_Inline_Box_Starting_A_Wrapped_Line_Has_Its_Padding_There_Once()
+    {
+        var block = Block("100px");
+        Text(block, "aaaa bbbb ");
+        var link = Span(block, tag: "a");
+        Span(link);
+        var bold = Span(link, tag: "b");
+        bold.PaddingLeft = "4px";
+        Text(bold, "link");
+        Text(block, " x");
+        Layout(block);
+
+        AssertRectangle(0, 22, 36, 16, ScriptRectangle(bold, block));
+        Assert.Equal(4, Word(block, "link").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a justified line in 200px, "aa ", then a link holding
+    /// "bb ", an empty span, an absolutely positioned span holding "tip" 400px along, and "cc"; then
+    /// " dd" and a word too long for the line. The link stays around its words, from where "bb"
+    /// starts to where "cc" ends, wherever justification puts them.
+    /// </summary>
+    [Fact]
+    public void Control_A_Link_Around_An_Empty_Span_And_A_Positioned_Box_Stays_Around_Its_Words()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Justify;
+        Text(block, "aa ");
+        var link = Span(block, tag: "a");
+        Text(link, "bb ");
+        Span(link);
+        Positioned(link, "tip");
+        Text(link, "cc");
+        Text(block, " dd eeeeeeeeeeeeeeeeeeeeeeeee");
+        Layout(block);
+
+        var r = ScriptRectangle(link, block);
+        Assert.Equal(Word(block, "bb").Left - block.Location.X, r.Left, 1);
+        Assert.Equal(Word(block, "cc").Right - block.Location.X, r.Right, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: right to left, in a 40px block, "abcd ", an empty span
+    /// with <c>padding-left: 16px</c>, then "efgh", which wraps. "abcd" stands against the first
+    /// line's right edge, 8px in, and the span overflows the line at its left.
+    /// </summary>
+    [Fact]
+    public void Control_An_Empty_Span_Overflowing_A_Right_To_Left_Line_Leaves_Its_Word_At_The_Edge()
+    {
+        var block = Block("40px");
+        block.Direction = CssConstants.Rtl;
+        Text(block, "abcd ");
+        Span(block).PaddingLeft = "16px";
+        Text(block, "efgh");
+        Layout(block);
+
+        Assert.Equal(8, Word(block, "abcd").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: right to left, "abc ", then a link with
+    /// <c>padding-right: 10px</c> holding "def" and an empty span. The link is as wide as its word
+    /// and its padding, 34px.
+    /// </summary>
+    [Fact]
+    public void Control_A_Right_To_Left_Link_Closing_After_An_Empty_Span_Is_As_Wide_As_Its_Word_And_Padding()
+    {
+        var block = Block();
+        block.Direction = CssConstants.Rtl;
+        Text(block, "abc ");
+        var link = Span(block, tag: "a");
+        link.PaddingRight = "10px";
+        Text(link, "def");
+        Span(link);
+        Layout(block);
+
+        Assert.Equal(34, ScriptRectangle(link, block).Width, 1);
+    }
+
     /// <summary>A 200px block (or as wide as given) with 20px lines of a 16px font, in a block in the root.</summary>
     private static CssBox Block(string width = "200px")
     {
@@ -784,6 +1238,20 @@ public sealed class EmptyInlineBoxRectangleTests
             span.FontSize = fontSize;
 
         return span;
+    }
+
+    /// <summary>
+    /// An absolutely positioned span in <paramref name="parent"/>, 400px from the left and at the top,
+    /// holding the text.
+    /// </summary>
+    private static CssBox Positioned(CssBox parent, string text)
+    {
+        var positioned = Span(parent);
+        positioned.Position = CssConstants.Absolute;
+        positioned.Left = "400px";
+        positioned.Top = "0";
+        Text(positioned, text);
+        return positioned;
     }
 
     /// <summary>A 5 × 5px box in <paramref name="parent"/>, positioned absolutely at its top-left corner.</summary>

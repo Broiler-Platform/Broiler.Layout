@@ -40,8 +40,17 @@ internal sealed class CssLineBox
     /// </summary>
     internal double TrailingSpace { get; set; }
 
-    /// <summary>How many words and boxes placed whole the flow has put on the line.</summary>
+    /// <summary>
+    /// How many words and boxes placed whole the flow has put on the line, not counting the forced
+    /// break that starts it.
+    /// </summary>
     internal int ContentCount { get; private set; }
+
+    /// <summary>
+    /// The inline boxes the flow opened on the line, in the order it opened them, and what it had
+    /// put on the line when it did (CssLayoutEngine.CarryOpenedInlineBoxes).
+    /// </summary>
+    internal List<InlineBoxOpening> Openings { get; } = [];
 
     /// <summary>
     /// Notes that the flow put a word or a box whole on the line, with
@@ -51,6 +60,19 @@ internal sealed class CssLineBox
     {
         ContentCount++;
         TrailingSpace = trailingSpace;
+    }
+
+    /// <summary>
+    /// Takes the line back to what the flow had put on it before it laid out a box out of the flow
+    /// there: its words, white space and inline boxes are no part of the line.
+    /// </summary>
+    internal void RestoreFlowState(int contentCount, double trailingSpace, int openings)
+    {
+        ContentCount = contentCount;
+        TrailingSpace = trailingSpace;
+
+        if (Openings.Count > openings)
+            Openings.RemoveRange(openings, Openings.Count - openings);
     }
 
     /// <summary>
@@ -187,11 +209,19 @@ internal sealed class CssLineBox
     /// it. The inline boxes around it take it in along the line only.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// CSS 2.1 §10.6.1: an inline box's content area is as tall as its own font, whatever it holds.
     /// An inline box around the box keeps the height what else it holds on the line gives it, and
     /// one holding nothing else there gets its own content area. Fitted to the box as
     /// <see cref="UpdateRectangle"/> fits them to a word, a span of 16px text around an empty span in
     /// a 40px font was 46.4px tall, where browsers keep it 17px tall.
+    /// </para>
+    /// <para>
+    /// One that takes no room on the line, and holds what it does on a later line, gets no
+    /// rectangle here: browsers leave such a piece of it out of <c>getBoundingClientRect</c> and
+    /// hit testing, and a link starting with an empty span at the end of a full line, its text
+    /// wrapped to the next, was found across both lines, over the words of the first.
+    /// </para>
     /// </remarks>
     internal void UpdateRectangleAlongLine(
         CssBox box, double x, double r, Func<CssBox, (double Top, double Bottom)> contentArea)
@@ -206,6 +236,10 @@ internal sealed class CssLineBox
         {
             Rectangles[box] = RectangleF.FromLTRB(
                 (float)Math.Min(f.X, x), f.Top, (float)Math.Max(f.Right, r), f.Bottom);
+        }
+        else if (r <= x && box.LastHostingLineBox != null && !box.LastHostingLineBox.Equals(this))
+        {
+            return;
         }
         else
         {
@@ -390,3 +424,11 @@ internal sealed class CssLineBox
 /// put no more by the end of the line, nothing but white space and empty boxes follows the box there.
 /// </param>
 internal readonly record struct EmptyInlineBox(CssBox Box, double SpaceBefore, int ContentBefore);
+
+/// <summary>An inline box the flow opened on a line (<see cref="CssLineBox.Openings"/>).</summary>
+/// <param name="Box">The box.</param>
+/// <param name="X">Where its margin box starts.</param>
+/// <param name="ContentBefore">The line's <see cref="CssLineBox.ContentCount"/> when it opened.</param>
+/// <param name="SpaceBefore">The line's <see cref="CssLineBox.TrailingSpace"/> when it opened.</param>
+/// <param name="EmptyBefore">How many empty inline boxes the flow had put on the line when it opened.</param>
+internal readonly record struct InlineBoxOpening(CssBox Box, double X, int ContentBefore, double SpaceBefore, int EmptyBefore);
