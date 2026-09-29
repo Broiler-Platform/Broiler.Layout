@@ -598,84 +598,24 @@ internal sealed class CssLayoutEngineTable
     {
         double occupedSpace = 0f;
 
-        if (_widthSpecified) //If a width was specified,
+        // CSS Tables 3: a table with a width of its own shares it out over its columns as it shares
+        // out a spanning cell's (see ShareOut), from their minimums: the columns with a width of
+        // their own up to it, then the others up to their maximums, then past those, the others in
+        // proportion to their maximums. What some columns left once they reached their maximums was
+        // split evenly over the columns without a width instead. In a 1024px page, a table with
+        // `width: 100%` gave "Some longer text here" and "short" 572.93px and 451.07px, where
+        // browsers give them 835.22px and 188.78px, and an empty column beside a y took 96px of
+        // 200px, where browsers give it none. A table narrower than its columns' widths took
+        // theirs: with `width: 60px`, two 50px columns made it 100px wide, where browsers keep it
+        // 60px wide, with 30px columns.
+        if (_widthSpecified)
         {
-            //Assign NaNs equally with space left after gathering not-NaNs
-            int numOfNans = 0;
+            var widths = (double[])GetColumnMinWidths().Clone();
 
-            //Calculate number of NaNs and occupied space
-            foreach (double colWidth in _columnWidths)
-            {
-                if (double.IsNaN(colWidth))
-                    numOfNans++;
-                else
-                    occupedSpace += colWidth;
-            }
+            if (widths.Length > 0)
+                ShareOut(availCellSpace, 0, widths.Length - 1, widths, _columnMaxWidths);
 
-            var orgNumOfNans = numOfNans;
-            double[] orgColWidths = null;
-
-            if (numOfNans < _columnWidths.Length)
-            {
-                orgColWidths = new double[_columnWidths.Length];
-                
-                for (int i = 0; i < _columnWidths.Length; i++)
-                    orgColWidths[i] = _columnWidths[i];
-            }
-
-            if (numOfNans > 0)
-            {
-                // Determine the max width for each column
-                GetColumnsMinMaxWidthByContent(true, out _, out double[] maxFullWidths);
-
-                // set the columns that can fulfill by the max width in a loop because it changes the nanWidth
-                int oldNumOfNans;
-                do
-                {
-                    oldNumOfNans = numOfNans;
-
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                    {
-                        var nanWidth = (availCellSpace - occupedSpace) / numOfNans;
-                        if (double.IsNaN(_columnWidths[i]) && nanWidth > maxFullWidths[i])
-                        {
-                            _columnWidths[i] = maxFullWidths[i];
-                            numOfNans--;
-                            occupedSpace += maxFullWidths[i];
-                        }
-                    }
-                } while (oldNumOfNans != numOfNans);
-
-                if (numOfNans > 0)
-                {
-                    // Determine width that will be assigned to un assigned widths
-                    double nanWidth = (availCellSpace - occupedSpace) / numOfNans;
-
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                    {
-                        if (double.IsNaN(_columnWidths[i]))
-                            _columnWidths[i] = nanWidth;
-                    }
-                }
-            }
-
-            if (numOfNans == 0 && occupedSpace < availCellSpace)
-            {
-                if (orgNumOfNans > 0)
-                {
-                    // spread extra width between all non width specified columns
-                    double extWidth = (availCellSpace - occupedSpace) / orgNumOfNans;
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                        if (orgColWidths == null || double.IsNaN(orgColWidths[i]))
-                            _columnWidths[i] += extWidth;
-                }
-                else
-                {
-                    // spread extra width between all columns with respect to relative sizes
-                    for (int i = 0; i < _columnWidths.Length; i++)
-                        _columnWidths[i] += (availCellSpace - occupedSpace) * (_columnWidths[i] / occupedSpace);
-                }
-            }
+            _columnWidths = widths;
         }
         else
         {
