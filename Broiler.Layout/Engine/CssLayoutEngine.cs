@@ -1118,7 +1118,11 @@ internal static class CssLayoutEngine
             {
                 bool wrapNoWrapBox = false;
 
-                if (b.WhiteSpace == CssConstants.NoWrap && curx > startx)
+                // A box that does not wrap goes to the next line whole when it does not fit, where
+                // the line may break before it (MayBreakBefore): not after what comes before it in
+                // a box that does not wrap either, as text and images in a `white-space: nowrap`
+                // block do.
+                if (b.WhiteSpace == CssConstants.NoWrap && curx > startx && MayBreakBefore(b, blockbox))
                 {
                     var boxRight = curx;
                     foreach (var word in b.Words)
@@ -1700,10 +1704,17 @@ internal static class CssLayoutEngine
                 // The strut's descent below a box on the line it leaves is already in maxbottom (see
                 // below). It was added here too, below any line an inline-block wrapped from, which
                 // put a row of inline-blocks holding text a descent lower than browsers put it.
-                cury = DropLineBelowNarrowBands(
-                    blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
-                curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
-                line = NextLine(blockbox, line, maxbottom, cury);
+                //
+                // Where the line may not break before the box (MayBreakBefore), it overflows the
+                // line instead: an 84px and a 20px inline-block in a 25px `white-space: nowrap`
+                // block went on two lines, where browsers keep them on one.
+                if (MayBreakBefore(b, blockbox))
+                {
+                    cury = DropLineBelowNarrowBands(
+                        blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
+                    curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
+                    line = NextLine(blockbox, line, maxbottom, cury);
+                }
             }
             else
             {
@@ -2033,6 +2044,50 @@ internal static class CssLayoutEngine
             maxbottom = Math.Max(maxbottom, cury + lineHeight);
 
         // A relative offset waits for the line to be settled: see ApplyRelativeOffsets.
+    }
+
+    /// <summary>
+    /// Whether a line of <paramref name="blockbox"/> may break before <paramref name="box"/>, when
+    /// what comes before it on the line leaves it no room.
+    /// </summary>
+    /// <remarks>
+    /// CSS Text 3 §5.1: whether there is a soft wrap opportunity between two pieces of content is
+    /// for the <c>white-space</c> of their nearest common ancestor, and one that does not wrap,
+    /// <c>nowrap</c> or <c>pre</c>, gives none. That ancestor is the parent of the box, or of the
+    /// inline box around it, that has in-flow content before it; a box with none before it in the
+    /// block is first on its line.
+    /// </remarks>
+    private static bool MayBreakBefore(CssBox box, CssBox blockbox)
+    {
+        for (var node = box; node.ParentBox is { } parent; node = parent)
+        {
+            if (HasInFlowContentBefore(node, parent))
+                return parent.WhiteSpace is not (CssConstants.NoWrap or CssConstants.Pre);
+
+            if (parent == blockbox || parent.Display != CssConstants.Inline)
+                break;
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether a child of <paramref name="parent"/> in the flow comes before <paramref name="child"/>.</summary>
+    private static bool HasInFlowContentBefore(CssBox child, CssBox parent)
+    {
+        foreach (var sibling in parent.Boxes)
+        {
+            if (sibling == child)
+                return false;
+
+            if (sibling.Display != CssConstants.None
+                && sibling.Float == CssConstants.None
+                && sibling.Position is not (CssConstants.Absolute or CssConstants.Fixed))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
