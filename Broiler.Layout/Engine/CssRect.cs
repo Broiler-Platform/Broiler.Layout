@@ -34,7 +34,10 @@ internal abstract class CssRect(CssBox owner)
 
     public double FullWidth => _rect.Width + ActualWordSpacing;
 
-    public double ActualWordSpacing => OwnerBox != null ? (HasSpaceAfter ? OwnerBox.ActualWordSpacing : 0) + (IsImage ? OwnerBox.ActualWordSpacing : 0) : 0;
+    // CSS Text 3 §4.1: the space after a word on its line is white space in the text after it. An
+    // image was given one all the same, so two images with nothing between them stood a space apart,
+    // and two 50px images did not fit on a 100px line.
+    public double ActualWordSpacing => OwnerBox != null && HasSpaceAfter ? OwnerBox.ActualWordSpacing : 0;
 
     public double Height
     {

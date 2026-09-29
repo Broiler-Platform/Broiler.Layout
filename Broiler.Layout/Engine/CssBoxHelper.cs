@@ -374,10 +374,6 @@ internal static class CssBoxHelper
                 maxSum += word.FullWidth + (word.HasSpaceBefore ? word.OwnerBox.ActualWordSpacing : 0);
                 min = Math.Max(min, paddingSum + word.Width);
             }
-
-            // remove the last word padding
-            if (box.Words.Count > 0 && !box.Words[^1].HasSpaceAfter)
-                maxSum -= box.Words[^1].ActualWordSpacing;
         }
         else if (box.TryGetFlexRowIntrinsicContentWidths(out double flexMin, out double flexMax))
         {
