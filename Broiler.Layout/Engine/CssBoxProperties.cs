@@ -2005,7 +2005,7 @@ internal abstract partial class CssBoxProperties
 
             if (double.IsNaN(_actualBorderTopWidth))
             {
-                _actualBorderTopWidth = ApplyZoomToLength(BorderTopWidth, CssLengthParser.GetActualBorderWidth(BorderTopWidth, GetEmHeight()));
+                _actualBorderTopWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderTopWidth, CssLengthParser.GetActualBorderWidth(BorderTopWidth, GetEmHeight())));
 
                 if (string.IsNullOrEmpty(BorderTopStyle) || BorderTopStyle == CssConstants.None)
                     _actualBorderTopWidth = 0f;
@@ -2024,7 +2024,7 @@ internal abstract partial class CssBoxProperties
 
             if (double.IsNaN(_actualBorderLeftWidth))
             {
-                _actualBorderLeftWidth = ApplyZoomToLength(BorderLeftWidth, CssLengthParser.GetActualBorderWidth(BorderLeftWidth, GetEmHeight()));
+                _actualBorderLeftWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderLeftWidth, CssLengthParser.GetActualBorderWidth(BorderLeftWidth, GetEmHeight())));
 
                 if (string.IsNullOrEmpty(BorderLeftStyle) || BorderLeftStyle == CssConstants.None)
                     _actualBorderLeftWidth = 0f;
@@ -2043,7 +2043,7 @@ internal abstract partial class CssBoxProperties
 
             if (double.IsNaN(_actualBorderBottomWidth))
             {
-                _actualBorderBottomWidth = ApplyZoomToLength(BorderBottomWidth, CssLengthParser.GetActualBorderWidth(BorderBottomWidth, GetEmHeight()));
+                _actualBorderBottomWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderBottomWidth, CssLengthParser.GetActualBorderWidth(BorderBottomWidth, GetEmHeight())));
 
                 if (string.IsNullOrEmpty(BorderBottomStyle) || BorderBottomStyle == CssConstants.None)
                     _actualBorderBottomWidth = 0f;
@@ -2062,7 +2062,7 @@ internal abstract partial class CssBoxProperties
 
             if (double.IsNaN(_actualBorderRightWidth))
             {
-                _actualBorderRightWidth = ApplyZoomToLength(BorderRightWidth, CssLengthParser.GetActualBorderWidth(BorderRightWidth, GetEmHeight()));
+                _actualBorderRightWidth = SnapAsBorderWidth(ApplyZoomToLength(BorderRightWidth, CssLengthParser.GetActualBorderWidth(BorderRightWidth, GetEmHeight())));
 
                 if (string.IsNullOrEmpty(BorderRightStyle) || BorderRightStyle == CssConstants.None)
                     _actualBorderRightWidth = 0f;
@@ -2301,7 +2301,25 @@ internal abstract partial class CssBoxProperties
     {
         if (string.IsNullOrEmpty(styleValue) || styleValue == CssConstants.None)
             return 0f;
-        return CssLengthParser.GetActualBorderWidth(widthValue, GetEmHeight());
+        return SnapAsBorderWidth(CssLengthParser.GetActualBorderWidth(widthValue, GetEmHeight()));
+    }
+
+    /// <summary>
+    /// CSS Values 4 §6.1.1, "snap as a border width": a border width between 0 and 1px is 1px,
+    /// and one wider than 1px is rounded down to whole pixels, a CSS pixel being a device pixel
+    /// here.
+    /// </summary>
+    /// <remarks>
+    /// Borders were as wide as given: a <c>0.5px</c> border made a 100px box 101px wide, where
+    /// browsers make it 102px with a 1px border, and a <c>2.7px</c> one made it 105.4px, where
+    /// browsers make it 104px.
+    /// </remarks>
+    internal static double SnapAsBorderWidth(double width)
+    {
+        if (width <= 0 || double.IsNaN(width) || double.IsInfinity(width))
+            return width;
+
+        return width < 1 ? 1 : Math.Floor(width + 1e-6);
     }
 
     // Frame edges are the logical (horizontal-tb LTR) frame's physical edges;
