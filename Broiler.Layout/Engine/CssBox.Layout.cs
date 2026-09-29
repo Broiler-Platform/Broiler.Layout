@@ -1120,6 +1120,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
                 if (maxFloatBottom > 0)
                 {
+                    ClearsFloats = ParentBox == null || maxFloatBottom > ParentBox.ClientTop;
                     double hypotheticalTop = top;
 
                     // Compute uncollapsed position: margins are NOT

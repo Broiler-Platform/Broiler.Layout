@@ -738,6 +738,25 @@ internal static class CssBoxHelper
         if (lastInFlow == null)
             return mb;
 
+        // An empty last child's margins collapse through it (§8.3.1), and with the margins before
+        // it, so this box's margin joins the whole set: the margins the child stands below, its own
+        // and its children's. Only its own were taken: after a 30px block, an empty last child with
+        // margin-top: 20px handed on nothing, where browsers put the 20px below this box.
+        // CssBox.MarginBottomCollapse ends the box where the set begins. The set of a first child
+        // begins above this box, which is then empty itself and hands the set on as one, and one
+        // that collapses with a top margin that has clearance stays inside this box (§8.3.1; see
+        // CssBox.ClearsFloats).
+        if (IsEmptyCollapsible(lastInFlow) && !lastInFlow.MarginTopCollapsesWithParent)
+        {
+            if (lastInFlow.ClearsFloats)
+                return mb;
+
+            double setPositive = Math.Max(Math.Max(mb, 0), lastInFlow.CollapsedMarginTop);
+            double setNegative = Math.Min(Math.Min(mb, 0), lastInFlow.NegativeMarginTopAbove);
+            CollectEmptyBoxMargins(lastInFlow, ref setPositive, ref setNegative);
+            return setPositive + setNegative;
+        }
+
         double childMb = GetPropagatedMarginBottom(lastInFlow);
 
         // Collapse: max(positives,0) + min(negatives,0)

@@ -108,7 +108,24 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         CollapsedMarginTop = 0;
         _marginTopCollapsesWithParent = false;
         _negativeMarginTopAbove = 0;
+        ClearsFloats = false;
     }
+
+    /// <summary>
+    /// Whether <c>clear</c> found floats for this box to clear on this layout pass (CSS2.1 §9.5.2)
+    /// that reach below its parent's content top, whether or not it had to move the box down past
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// An empty box with clearance does not hand its margins on to its parent's bottom margin
+    /// (§8.3.1): they stay inside the parent. Chromium has it so wherever the box has floats to
+    /// clear that reach into its parent, even ones that end above the box: www.mediawiki.org's
+    /// <c>#mw-content-text</c> ends with a clearfix's empty <c>::after</c>, below the 16px bottom
+    /// margin of the article's last paragraph, and its thumbnail floats well above that. Where
+    /// the floats to clear end above the parent, or there are none, the box's margins collapse
+    /// through it as any empty box's do.
+    /// </remarks>
+    internal bool ClearsFloats { get; private set; }
 
     /// <summary>
     /// The most negative of the margins that <see cref="MarginTopCollapse"/> collapsed together
@@ -215,6 +232,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// of this box whose margin is larger moves the topmost box of such a run rather than this one.
     /// </summary>
     private bool _marginTopCollapsesWithParent;
+
+    /// <summary>
+    /// Whether this box's top margin collapses with its parent's on this layout pass; see <see
+    /// cref="_marginTopCollapsesWithParent"/>.
+    /// </summary>
+    internal bool MarginTopCollapsesWithParent => _marginTopCollapsesWithParent;
 
     protected double MarginTopCollapse(CssBoxProperties prevSibling)
     {
@@ -452,14 +475,6 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     private double MarginBottomCollapse()
     {
-        double margin = 0;
-
-        // NOTE: When the last in-flow child's bottom margin collapses through
-        // this box (computed below, once the last child is known) the collapsed
-        // margin is NOT included in this box's height — it is external spacing
-        // propagated to the parent via GetPropagatedMarginBottom().  The
-        // `margin` variable stays 0.
-
         // CSS2.1 §10.6.3 / §10.6.7: Floated children contribute to the
         // height of their parent only when the parent establishes a new
         // block formatting context (BFC).  Non-BFC blocks (e.g. a plain
@@ -467,55 +482,30 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // in their height calculation.
         bool isBfc = CssBoxHelper.EstablishesBfc(this);
 
-        // Use the maximum ActualBottom across all children to handle
-        // floated children that may not be the last in source order.
-        // Initialize to the content-area top so that padding is preserved
-        // even when all children are floated (CSS2.1 §10.6.3: content
-        // height is zero but padding is additive).
-        double maxChildBottom = Location.Y + ActualBorderTopWidth + ActualPaddingTop;
+        // CSS2.1 §10.6.3: the height ends at the last in-flow child, not at the lowest one. The
+        // lowest bottom among the children stood for it, so a last child that a negative margin
+        // pulls up over the one before it ended this box where that one ends: after a 30px block,
+        // one with margin-top: -25px and height: 10px ended its parent 30px down, where browsers
+        // end it 15px down.
+        //
+        // Only children in the normal flow are taken into account. Not an absolutely positioned
+        // box, nor a float: a formatting-context root takes its floats in below. Nor a box that is
+        // not generated (display: none), whose margin was added below a block with bottom padding.
+        // Nor an inline box: it is laid out in this box's lines, whose extent CreateLineBoxes has
+        // already made this box's height, and it has no bottom of its own: its Location is not
+        // kept by line layout, and OffsetTop moves it with every shift of the boxes around it.
+        // Reading it gave a flex item holding one word, which a row centred 33.5px down, the
+        // bottom of a text box shifted there twice, 67px down.
         CssBox lastInFlowChild = null;
-        
+
         foreach (var child in Boxes)
         {
-            // CSS2.1 §10.6.3: Only children in the normal flow are taken
-            // into account.  Absolutely positioned and fixed-position boxes
-            // are out of flow and must not influence the parent's auto height.
-            if (child.Position == CssConstants.Absolute || child.Position == CssConstants.Fixed)
+            if (child.Position is CssConstants.Absolute or CssConstants.Fixed
+                || child.Float != CssConstants.None
+                || child.Display is CssConstants.None or CssConstants.Inline)
                 continue;
-
-            if (!isBfc && child.Float != CssConstants.None)
-                continue;
-
-            // CSS2.1 §9.4.3: Relative positioning is visual-only and
-            // does not affect the flow position used for auto-height
-            // calculation.  Undo the relative offset so the parent
-            // measures the child's normal-flow bottom.
-            double childBottom = child.ActualBottom;
-
-            if (child.Position == CssConstants.Relative)
-                childBottom -= CssBoxHelper.GetRelativeOffsetY(child);
-
-            // An inline box is laid out in this box's lines, whose extent CreateLineBoxes has
-            // already made this box's height, and it has no bottom of its own: its Location is not
-            // kept by line layout, and OffsetTop moves it with every shift of the boxes around it.
-            // Reading it gave a flex item holding one word, which a row centred 33.5px down, the
-            // bottom of a text box shifted there twice, 67px down.
-            if (child.Display != CssConstants.Inline)
-                maxChildBottom = Math.Max(maxChildBottom, childBottom);
 
             lastInFlowChild = child;
-        }
-
-        // CSS2.1 §10.6.7: When a BFC root auto-sizes its height it must
-        // extend to contain all descendant floats — not only direct-child
-        // floats.  Walk the subtree (stopping at nested BFC boundaries)
-        // to find the maximum float bottom.
-        if (isBfc)
-        {
-            double maxFloatDesc = maxChildBottom;
-
-            FindMaxDescendantFloatBottom(this, ref maxFloatDesc);
-            maxChildBottom = Math.Max(maxChildBottom, maxFloatDesc);
         }
 
         // CSS2.1 §8.3.1 / §10.6.3: The auto height extends to the bottom
@@ -546,7 +536,73 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             && !CssBoxHelper.IsRootElement(this)
             && lastInFlowChild.Float == CssConstants.None
             && lastInFlowChild.Display != CssConstants.Inline
-            && lastInFlowChild.Display != CssConstants.InlineBlock;
+            && lastInFlowChild.Display != CssConstants.InlineBlock
+            // CSS2.1 §8.3.1: nor with the margins of an empty child that collapse with a top margin
+            // that has clearance, which stay inside this box (see ClearsFloats): a clearfix's empty
+            // ::after ends it below the floats the ::after clears, and below the margin above it.
+            && !(lastInFlowChild.ClearsFloats && CssBoxHelper.IsEmptyCollapsible(lastInFlowChild));
+
+        // The content-area top, so that padding is preserved even when all children are floated
+        // (CSS2.1 §10.6.3: content height is zero but padding is additive), and so that a last
+        // child pulled up above it leaves the content zero tall.
+        double contentBottom = Location.Y + ActualBorderTopWidth + ActualPaddingTop;
+
+        if (lastInFlowChild != null)
+            contentBottom = Math.Max(contentBottom, LastInFlowChildEdge(lastInFlowChild, collapseThrough));
+
+        // CSS2.1 §10.6.7: When a BFC root auto-sizes its height it must
+        // extend to contain all descendant floats — not only direct-child
+        // floats.  Walk the subtree (stopping at nested BFC boundaries)
+        // to find the maximum float bottom.
+        if (isBfc)
+            FindMaxDescendantFloatBottom(this, ref contentBottom);
+
+        return Math.Max(ActualBottom, contentBottom + ActualPaddingBottom + ActualBorderBottomWidth);
+    }
+
+    /// <summary>
+    /// Where <paramref name="child"/>, its parent's last in-flow child, ends the parent's content
+    /// (CSS2.1 §10.6.3): at the bottom edge of the child's bottom margin, or, where that margin
+    /// collapses through the parent (<paramref name="collapsesThrough"/>), at the bottom border
+    /// edge of the last in-flow child whose top margin does not collapse with the parent's bottom
+    /// margin.
+    /// </summary>
+    internal static double LastInFlowChildEdge(CssBox child, bool collapsesThrough)
+    {
+        // An empty child's margins collapse through it (§8.3.1), and with the margins before it,
+        // which it stands below by as much as the part of them above it comes to. Where they
+        // collapse through the parent as well, the content ends where they begin, below the
+        // last child that is not empty. The empty child's own top edge stood for it: after a 30px
+        // block, an empty one with margin-top: 20px ended its parent 50px down, where browsers end
+        // it 30px down and put the 20px margin below it. Where they do not, the content ends
+        // where the whole set of them does, which is as far below the empty child as what is left
+        // of the set after the part above it.
+        if (CssBoxHelper.IsEmptyCollapsible(child))
+        {
+            if (child.ClearsFloats)
+                return child.Location.Y + child.ActualMarginBottom;
+
+            if (!collapsesThrough)
+                return child.Location.Y + CssBoxHelper.GetEffectiveMarginBottom(child);
+
+            // A first child's set begins above its parent, which it moved down, or kept inside it
+            // where the parent keeps its place, as the root element's box does.
+            return child.MarginTopCollapsesWithParent
+                ? child.Location.Y
+                : child.Location.Y - child.MarginSpentAboveTop;
+        }
+
+        // CSS2.1 §9.4.3: Relative positioning is visual-only and
+        // does not affect the flow position used for auto-height
+        // calculation.  Undo the relative offset so the parent
+        // measures the child's normal-flow bottom.
+        double bottom = child.ActualBottom;
+
+        if (child.Position == CssConstants.Relative)
+            bottom -= CssBoxHelper.GetRelativeOffsetY(child);
+
+        if (collapsesThrough)
+            return bottom;
 
         // Wherever the last child's bottom margin stays inside this box, for any of the reasons
         // above, what stays inside is that margin as it has collapsed with those of the child's
@@ -556,14 +612,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // own lost the paragraph's at a block with bottom padding: <div style="padding-bottom:
         // 1px"><div><p>Text</p></div></div> ended 1 px below the paragraph, where browsers end it
         // 17 px below.
-        if (!collapseThrough && lastInFlowChild != null)
-        {
-            maxChildBottom += lastInFlowChild.Float == CssConstants.None
-                && lastInFlowChild.Display is not (CssConstants.Inline or CssConstants.InlineBlock or CssConstants.None)
-                    ? CssBoxHelper.GetPropagatedMarginBottom(lastInFlowChild)
-                    : lastInFlowChild.ActualMarginBottom;
-        }
-
-        return Math.Max(ActualBottom, maxChildBottom + margin + ActualPaddingBottom + ActualBorderBottomWidth);
+        return bottom + (child.Display != CssConstants.InlineBlock
+            ? CssBoxHelper.GetPropagatedMarginBottom(child)
+            : child.ActualMarginBottom);
     }
 }
