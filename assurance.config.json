@@ -1,0 +1,146 @@
+{
+  "$comment": "Per-declaration assurance for Broiler.Layout. One product project; Broiler.Layout.Tests is not listed, so it is not covered. The layout engine was moved here from Broiler.HTML, whose renderer grew from HTML Renderer (ArthurHub/HTML-Renderer, BSD-3-Clause). The files in spdxOverrides are the ones that still hold HTML Renderer code, so their headers carry its two copyright holders beside the platform line. HUMAN_REVIEW.md is a hand-written, signed record and stays as it is; the generated per-unit record goes to HUMAN_REVIEW.units.md.",
+  "schema": 1,
+  "component": "Broiler.Layout",
+  "projects": [
+    "Broiler.Layout/Broiler.Layout.csproj"
+  ],
+  "exclude": [],
+  "exemptionPredicate": "owning-component",
+  "spdx": {
+    "copyright": [
+      "2026 Broiler Platform contributors"
+    ],
+    "license": "Apache-2.0"
+  },
+  "spdxOverrides": [
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Background.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.ContainingBlock.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Geometry.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Layout.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Margins.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Sizing.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBox.Text.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBoxHelper.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBoxHr.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBoxImage.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssBoxProperties.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssLayoutEngine.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssLayoutEngineTable.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssLineBox.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssRect.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssRectImage.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssRectWord.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssSpacingBox.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/CssUtils.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/ISelectionHandler.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/Engine/LayoutBoxUtils.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/HtmlTag.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    },
+    {
+      "glob": "Broiler.Layout/LayoutHtmlSupport.cs",
+      "copyright": [ "2026 Broiler Platform contributors", "2009 José Manuel Menéndez Poo", "2013-2025 Arthur Teplitzki" ],
+      "license": "Apache-2.0 AND BSD-3-Clause"
+    }
+  ],
+  "artefacts": {
+    "report": "CODE-ASSURANCE.md",
+    "humanReview": "HUMAN_REVIEW.units.md",
+    "manifest": "assurance.manifest.json"
+  },
+  "forbidDirectives": false,
+  "forgeryVocabulary": "narrow",
+  "regenerateCommand": "dotnet run --project Broiler.Code/src/Broiler.Code.Review.Cli -c Release -- assurance generate --root Broiler.Layout"
+}
