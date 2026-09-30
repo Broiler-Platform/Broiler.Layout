@@ -408,6 +408,11 @@ internal static class CssLayoutEngine
         // where browsers make it 30, and one made it 19.
         bool linesHoldFlexItems = blockBox.Display is "flex" or "inline-flex";
 
+        // A column's lines stack its items, one to a line, along its main axis (CSS Flexbox §9.2),
+        // where each item takes up its margin box: they are not line boxes, and they do not stack
+        // as line boxes do (see the restack below).
+        bool linesStackColumnItems = linesHoldFlexItems && blockBox.IsColumnFlexContainer();
+
         // Where each line ends, which the line after it starts below (see the restack below).
         var lineBottoms = new Dictionary<CssLineBox, double>();
 
@@ -432,7 +437,13 @@ internal static class CssLayoutEngine
                 if (rect.Key.IsInlineNonReplaced)
                     continue;
 
-                maxBottom = Math.Max(maxBottom, rect.Value.Bottom);
+                // A column's item ends its line where its margin box ends (CSS Flexbox §9.2), below
+                // its border box by a bottom margin and above it by a negative one. Its border box
+                // stood for it: a last 10px item with `margin-bottom: -20px` after a 30px one ended
+                // its column 40px down, where browsers end it 20px down.
+                maxBottom = Math.Max(maxBottom, linesStackColumnItems
+                    ? rect.Value.Bottom + rect.Key.ActualMarginBottom
+                    : rect.Value.Bottom);
                 // CSS2.1 §10.8: an atomic inline-block contributes its *margin*
                 // box plus the line's strut descent below the baseline to the
                 // line-box height.  Its rectangle is only the border box (it
@@ -612,12 +623,30 @@ internal static class CssLayoutEngine
         // as it placed it, before the alignment. Text in a larger font, or a box lowered from the
         // baseline, reached into the next line: in 16px/20px text, a 32px "B" made its line 26px
         // tall in browsers, and the next line started 20px down, where browsers start it 26px down.
+        //
+        // A column flex container's lines are not line boxes, and do not stack so: the flow has
+        // stacked its items along the column (CSS Flexbox §9.2), where a negative margin lets an
+        // item overlap the one before it. The restack moved a line down below the one above it,
+        // and down again to hold an item such a margin put above the line, and the column ended
+        // where its lines had moved, not where its items stand: a 30px item, then a 10px item with
+        // `margin-top: -25px` 5px down, made a 40px column, where browsers make it 15px. The column
+        // ends where its last item's margin box does, as what its items' outer sizes add up to
+        // (§9.9.1), and not above its top.
         double restack = 0;
         double lineAboveBottom = double.MinValue;
         double settledBottom = starty;
+        double columnEnd = starty;
 
         foreach (var linebox in blockBox.LineBoxes)
         {
+            if (linesStackColumnItems)
+            {
+                if (lineBottoms[linebox] > double.MinValue)
+                    columnEnd = lineBottoms[linebox];
+
+                continue;
+            }
+
             double flowTopBelow = (linebox.FlowTop ?? starty) + restack;
             if (lineAboveBottom > flowTopBelow + 0.01)
                 restack += lineAboveBottom - flowTopBelow;
@@ -651,7 +680,7 @@ internal static class CssLayoutEngine
         // The block reaches the bottom of its lowest line where the lines now are. Each line moved by
         // its own shift, not the last one's, so the lowest line before the restack moved by the
         // whole of it only where it is the last.
-        maxBottom = settledBottom;
+        maxBottom = linesStackColumnItems ? Math.Max(starty, columnEnd) : settledBottom;
 
         // CSS2.1 §9.4.3: the lines are settled, so the boxes the flow placed on them whole take
         // their relative offsets now.
