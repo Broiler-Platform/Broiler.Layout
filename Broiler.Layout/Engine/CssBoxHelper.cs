@@ -397,11 +397,11 @@ internal static class CssBoxHelper
         else if (box.Words.Count > 0)
         {
             // calculate the min and max sum for all the words in the box; the space before the
-            // first is left out at the start of a line (see above), and a forced break starts a
-            // line with nothing on it
+            // first is left out at the start of a line (see above), unless break-spaces keeps it
+            // there, and a forced break starts a line with nothing on it
             foreach (CssRect word in box.Words)
             {
-                maxSum += word.FullWidth + (word.HasSpaceBefore && lineHoldsContent ? word.OwnerBox.ActualWordSpacing : 0);
+                maxSum += word.FullWidth + (word.HasSpaceBefore && (lineHoldsContent || word.OwnerBox.WhiteSpace == "break-spaces") ? word.OwnerBox.ActualWordSpacing : 0);
                 min = Math.Max(min, paddingSum + word.Width);
                 lineHoldsContent = !word.IsLineBreak;
             }
@@ -457,13 +457,13 @@ internal static class CssBoxHelper
                 // too narrow and the last item wrapped — two 10px inline-blocks measured 20px and
                 // stacked, where they need 24px to sit side by side. Layout itself lays the space
                 // out; only the intrinsic measurement was missing it. One that starts a line is
-                // removed there (see above), and takes no room.
+                // removed there (see above), and takes no room, unless break-spaces keeps it.
                 if (IsCollapsedWhitespaceSeparator(childBox))
                 {
                     double space = childBox.ActualWordSpacing;
                     if (double.IsNaN(space))
                         space = box.ActualWordSpacing;
-                    if (!double.IsNaN(space) && lineHoldsContent)
+                    if (!double.IsNaN(space) && (lineHoldsContent || childBox.WhiteSpace == "break-spaces"))
                         maxSum += space;
                     continue;
                 }

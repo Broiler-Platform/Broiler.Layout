@@ -1552,6 +1552,152 @@ public sealed class EmptyInlineBoxRectangleTests
         AssertRectangle(32, 2, 5, 16, Relative(link.Rectangles.Values.OrderBy(r => r.Top).First(), block));
     }
 
+    /// <summary>
+    /// "x ", a link holding an empty span with <c>margin-left: -5px</c> and <c>padding-left: 20px</c>,
+    /// and "lll", then " y": the link starts where it opens, after "x ", 12px in, and is 39px wide, to
+    /// the end of "lll"; the span's border sticks out 5px before it, 20px wide from 7px in, as in
+    /// browsers. The link started at "lll", 27px in, 24px wide, and the span was 0 × 0; with the
+    /// span's negative margin taken as none, the link would start at the span's border, 7px in.
+    /// </summary>
+    [Fact]
+    public void A_Link_Starting_With_An_Empty_Span_With_A_Negative_Margin_Starts_Where_It_Opens()
+    {
+        var block = Block();
+        Text(block, "x ");
+        var link = Span(block, tag: "a");
+        var span = Span(link);
+        span.MarginLeft = "-5px";
+        span.PaddingLeft = "20px";
+        Text(link, "lll");
+        Text(block, " y");
+        Layout(block);
+
+        AssertRectangle(7, 2, 20, 16, ScriptRectangle(span, block));
+        AssertRectangle(12, 2, 39, 16, ScriptRectangle(link, block));
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: "xxxx ", a link holding an empty span with
+    /// <c>margin-left: -16px</c> and <c>padding-left: 16px</c>, an icon hung before the link's text,
+    /// and "lll", then " y": the link starts where it opens, where "lll" does, 36px in, 24px wide, as
+    /// in browsers. With the span's negative margin taken as none, the link would start at the
+    /// span's border, 20px in, over "xxxx".
+    /// </summary>
+    [Fact]
+    public void Control_A_Link_Starting_With_A_Hanging_Icon_Starts_Where_It_Opens()
+    {
+        var block = Block();
+        Text(block, "xxxx ");
+        var link = Span(block, tag: "a");
+        var span = Span(link);
+        span.MarginLeft = "-16px";
+        span.PaddingLeft = "16px";
+        Text(link, "lll");
+        Text(block, " y");
+        Layout(block);
+
+        AssertRectangle(36, 2, 24, 16, ScriptRectangle(link, block));
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a block with <c>white-space: break-spaces</c> holding
+    /// an empty span, a space and "abc" in a <c>&lt;b&gt;</c>: the space is kept at the start of the
+    /// line, as browsers keep it, so "abc" is 4px in. Removed there, as a space that collapses is,
+    /// it would leave "abc" at the block's edge.
+    /// </summary>
+    [Fact]
+    public void Control_A_Preserved_Space_After_An_Empty_Span_Starting_A_Line_Takes_Room()
+    {
+        var block = Block();
+        block.WhiteSpace = "break-spaces";
+        Span(block);
+        Text(block, " ");
+        Text(Span(block, tag: "b"), "abc");
+        Layout(block);
+
+        Assert.Equal(4, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: as above with an absolutely positioned span holding
+    /// "tip" in place of the empty span: the space is kept, and "abc" is 4px in.
+    /// </summary>
+    [Fact]
+    public void Control_A_Preserved_Space_After_A_Positioned_Box_Starting_A_Line_Takes_Room()
+    {
+        var block = Block();
+        block.WhiteSpace = "break-spaces";
+        Positioned(block, "tip");
+        Text(block, " ");
+        Text(Span(block, tag: "b"), "abc");
+        Layout(block);
+
+        Assert.Equal(4, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: an inline-block with <c>white-space: break-spaces</c>,
+    /// right-aligned in 200px, holding an empty span, a space and "abc" in a <c>&lt;b&gt;</c>: it is
+    /// measured with the space, 28px wide, as browsers measure it. Measured without the space, it
+    /// would be 24px wide.
+    /// </summary>
+    [Fact]
+    public void Control_An_Inline_Block_Counts_A_Preserved_Space_After_An_Empty_Span()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        var inlineBlock = Span(block);
+        inlineBlock.Display = "inline-block";
+        inlineBlock.WhiteSpace = "break-spaces";
+        Span(inlineBlock);
+        Text(inlineBlock, " ");
+        Text(Span(inlineBlock, tag: "b"), "abc");
+        Layout(block);
+
+        Assert.Equal(28, inlineBlock.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: an inline-block with <c>white-space: break-spaces</c>,
+    /// right-aligned in 200px, holding "xy", a line break, an empty span and " abc": the space keeps
+    /// its room at the start of the second line, so the inline-block is 28px wide and "abc" ends it,
+    /// 176px in. Measured without the space, it would be 24px wide, and "abc" would run 4px past it.
+    /// </summary>
+    [Fact]
+    public void Control_An_Inline_Block_Counts_A_Preserved_Space_Starting_A_Line_After_A_Break()
+    {
+        var block = Block();
+        block.TextAlign = CssConstants.Right;
+        var inlineBlock = Span(block);
+        inlineBlock.Display = "inline-block";
+        inlineBlock.WhiteSpace = "break-spaces";
+        Text(inlineBlock, "xy");
+        _ = new CssBox(inlineBlock, new HtmlTag("br", false, null), BaseUrl) { Display = "block" };
+        Span(inlineBlock);
+        Text(inlineBlock, " abc");
+        Layout(block);
+
+        Assert.Equal(28, inlineBlock.Size.Width, 1);
+        Assert.Equal(176, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a block with <c>white-space: pre-wrap</c> holding an
+    /// empty span and " abc": the space is kept at the start of the line, where the engine holds it
+    /// as a word of its own, one letter wide in the fake font, so "abc" is 8px in.
+    /// </summary>
+    [Fact]
+    public void Control_A_Pre_Wrap_Space_After_An_Empty_Span_Takes_Room()
+    {
+        var block = Block();
+        block.WhiteSpace = CssConstants.PreWrap;
+        Span(block);
+        Text(block, " abc");
+        Layout(block);
+
+        Assert.Equal(8, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
     /// <summary>A 200px block (or as wide as given) with 20px lines of a 16px font, in a block in the root.</summary>
     private static CssBox Block(string width = "200px")
     {

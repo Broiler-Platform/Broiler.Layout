@@ -1668,9 +1668,10 @@ internal static class CssLayoutEngine
                 line.EmptyInlineBoxes.Add(new EmptyInlineBox(box, startSpace, line.ContentCount));
         }
 
-        // handle box that is only a whitespace; at the start of a line it is removed, as above
+        // handle box that is only a whitespace; at the start of a line it is removed where white
+        // space collapses, as above
         if (box.Text.Length > 0 && box.Text.Span.IsWhiteSpace() && !box.IsImage && box.IsInline && box.Boxes.Count == 0 && box.Words.Count == 0
-            && line.ContentCount > 0)
+            && (line.ContentCount > 0 || !CollapsesSpaces(box)))
         {
             curx += box.ActualWordSpacing;
             line.TrailingSpace += box.ActualWordSpacing;

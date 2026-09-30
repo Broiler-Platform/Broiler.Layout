@@ -275,10 +275,11 @@ internal sealed class CssLineBox
     }
 
     /// <summary>
-    /// The room a margin takes outside a box's border on its line; a negative one, which draws what
-    /// is beside the box over it, takes none.
+    /// The room a margin takes outside a box's border on its line. A negative one takes room back:
+    /// the box around starts where the margin does, and the box's border sticks out before it, as an
+    /// icon hung before a link's text by a negative margin does in browsers.
     /// </summary>
-    private static double OuterMargin(double margin) => double.IsNaN(margin) || margin < 0 ? 0 : margin;
+    private static double OuterMargin(double margin) => double.IsNaN(margin) ? 0 : margin;
 
     /// <summary>
     /// Projects this line's per-box rectangles onto the boxes, as the per-line map
