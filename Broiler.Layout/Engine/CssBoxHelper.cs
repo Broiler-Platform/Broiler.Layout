@@ -410,6 +410,25 @@ internal static class CssBoxHelper
                 min = Math.Max(min, paddingSum + word.Width);
                 lineHoldsContent = !word.IsLineBreak;
             }
+
+            // CSS Text 3 §5.1: the edge of an element inside a word is no place to break a line
+            // (SoftWrapOpportunities), so the widest thing that cannot be broken can reach from
+            // this box's last word into the boxes after it. Only the words were measured: a float
+            // holding "aaa<b>bbb</b>" was as wide as "bbb", where browsers make it as wide as both.
+            // The word is measured from where it starts, so each one once.
+            //
+            // The run takes in the right border and padding of each inline box it walks out of,
+            // where they are, so they come off paddingSum, which holds them for every box on the
+            // path, and so do the left ones where the word is not the box's first. Counted twice,
+            // they made a table cell holding a <code> with 6px of padding on each side, then a
+            // full stop, 72.25px wide, where browsers make it 66.27px.
+            var last = box.Words[^1];
+            if (box.WhiteSpace is not (CssConstants.NoWrap or CssConstants.Pre) && !SoftWrapOpportunities.After(last)
+                && (box.Words.Count > 1 || SoftWrapOpportunities.BeforeFirstWord(box)))
+            {
+                double start = paddingSum - SoftWrapOpportunities.InlinePathEdges(box, left: box.Words.Count > 1);
+                min = Math.Max(min, start + last.Width + SoftWrapOpportunities.RunAfterLastWord(null, box, double.PositiveInfinity));
+            }
         }
         else if (box.TryGetFlexRowIntrinsicContentWidths(out double flexMin, out double flexMax))
         {
