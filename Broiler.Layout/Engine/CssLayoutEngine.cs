@@ -374,11 +374,13 @@ internal static class CssLayoutEngine
                 baseRtl = lineRtl;
             }
 
+            SettleEmptyInlineBoxes(blockBox, linebox);
             ApplyHorizontalAlignment(linebox, lineRtl);
             ApplyRightToLeft(linebox, lineRtl);
             BubbleRectangles(blockBox, linebox);
             ApplyVerticalAlignment(linebox);
             FitWordlessInlineBoxes(linebox);
+            PlaceEmptyInlineBoxes(blockBox, linebox);
 
             linebox.AssignRectanglesToBoxes();
         }
@@ -1141,6 +1143,14 @@ internal static class CssLayoutEngine
     }
 
     /// <summary>
+    /// Whether the spaces in <paramref name="box"/>'s text collapse (CSS Text 3 §4.1.1): unless its
+    /// <c>white-space</c> preserves them.
+    /// </summary>
+    private static bool CollapsesSpaces(CssBox box) =>
+        box.WhiteSpace != CssConstants.Pre && box.WhiteSpace != CssConstants.PreWrap
+        && box.WhiteSpace != "break-spaces";
+
+    /// <summary>
     /// How much of <paramref name="line"/>'s width what is on it takes, up to <paramref name="curx"/>:
     /// from its first word, or the margin edge of its first box placed whole, to there.
     /// </summary>
@@ -1167,11 +1177,105 @@ internal static class CssLayoutEngine
         return new CssLineBox(blockbox) { FlowTop = top };
     }
 
+    /// <summary>
+    /// The flow has just begun <paramref name="next"/> with content in <paramref name="inner"/>:
+    /// moves the inline boxes around that content that opened at the end of
+    /// <paramref name="line"/>, after all it holds, to <paramref name="next"/>, with the empty inline
+    /// boxes in them, and returns where on <paramref name="next"/> the content goes after them. Null,
+    /// and nothing moves, when they hold no empty inline box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS Text 3 §5: the line breaks at the soft wrap opportunity the white space ending it gives,
+    /// and an inline box opening after that begins the next line with the content it holds. The
+    /// flow opened it at the end of the line before, which was harmless while it held nothing there,
+    /// but an empty inline box it starts with stayed there, and the box took that in: a link holding
+    /// an empty span and "link", wrapped after "aaaa bbbb", reached back to the end of the first
+    /// line, where a padded link painted a sliver of its padding and border, script found it across
+    /// both lines and clicks on the first line's words landed on it, and a right-aligned first line
+    /// was aligned with the span as its end. Browsers put the link on the next line whole.
+    /// </para>
+    /// <para>
+    /// White space inside such a box before the content follows the white space before the box and
+    /// collapses (§4.1.1), or begins the next line and is removed (§4.1.3); a box that opened with no
+    /// white space before it and white space after it has the line break inside it, and stays where
+    /// it is. Browsers also leave the boxes where they are when the line's content and the white
+    /// space after it already fill the line.
+    /// </para>
+    /// </remarks>
+    private static double? CarryOpenedInlineBoxes(
+        CssBox blockbox, CssBox inner, CssLineBox line, CssLineBox next,
+        double curx, double lineRight, double nextLeft, double nextTop)
+    {
+        if (line.EmptyInlineBoxes.Count == 0 || IsInAbsposSubtree(inner, blockbox))
+            return null;
+
+        // The outermost of the boxes around the content that opened after the line's last content.
+        int outer = -1;
+
+        for (int i = line.Openings.Count - 1; i >= 0 && line.Openings[i].ContentBefore == line.ContentCount; i--)
+        {
+            var opening = line.Openings[i];
+
+            if (opening.Box != inner && !IsInside(inner, opening.Box))
+                continue;
+
+            if (opening.SpaceBefore == 0 && line.TrailingSpace > 0)
+                break;
+
+            outer = i;
+        }
+
+        if (outer < 0)
+            return null;
+
+        var first = line.Openings[outer];
+
+        if (line.EmptyInlineBoxes.Count <= first.EmptyBefore || first.X > lineRight)
+            return null;
+
+        double shift = nextLeft - first.X;
+
+        for (int i = first.EmptyBefore; i < line.EmptyInlineBoxes.Count; i++)
+        {
+            var empty = line.EmptyInlineBoxes[i];
+            double x = empty.Box.Location.X + shift - (empty.SpaceBefore - first.SpaceBefore);
+            empty.Box.Location = new PointF((float)x, (float)nextTop);
+            next.EmptyInlineBoxes.Add(new EmptyInlineBox(empty.Box, 0, 0));
+        }
+
+        line.EmptyInlineBoxes.RemoveRange(first.EmptyBefore, line.EmptyInlineBoxes.Count - first.EmptyBefore);
+
+        for (int i = outer; i < line.Openings.Count; i++)
+        {
+            var box = line.Openings[i].Box;
+
+            if (box.FirstHostingLineBox == line)
+                box.FirstHostingLineBox = next;
+
+            if (box.LastHostingLineBox == line)
+                box.LastHostingLineBox = next;
+        }
+
+        double carried = curx + shift - (line.TrailingSpace - first.SpaceBefore);
+        line.TrailingSpace = first.SpaceBefore;
+        return carried;
+    }
+
     private static void FlowBox(ILayoutEnvironment g, CssBox blockbox, CssBox box, double limitRight, double linespacing, double startx, ref CssLineBox line, ref double curx, ref double cury, ref double maxRight, ref double maxbottom)
     {
         var startX = curx;
         var startY = cury;
+        var startSpace = line.TrailingSpace;
         box.FirstHostingLineBox = line;
+
+        if (box != blockbox && box.IsInline)
+        {
+            line.Openings.Add(new InlineBoxOpening(
+                box, startX - (box.ActualMarginLeft + box.ActualBorderLeftWidth + box.ActualPaddingLeft),
+                line.ContentCount, startSpace, line.EmptyInlineBoxes.Count));
+        }
+
         var localCurx = curx;
         var localMaxRight = maxRight;
         var localmaxbottom = maxbottom;
@@ -1225,6 +1329,9 @@ internal static class CssLayoutEngine
             double childSaveMaxRight = maxRight;
             double childSaveMaxBottom = maxbottom;
             CssLineBox childSaveLine = line;
+            int childSaveContent = line.ContentCount;
+            double childSaveSpace = line.TrailingSpace;
+            int childSaveOpenings = line.Openings.Count;
 
             double leftspacing = !isAbsposChild ? b.ActualMarginLeft + b.ActualBorderLeftWidth + b.ActualPaddingLeft : 0;
             double rightspacing = !isAbsposChild ? b.ActualMarginRight + b.ActualBorderRightWidth + b.ActualPaddingRight : 0;
@@ -1302,8 +1409,24 @@ internal static class CssLayoutEngine
                         noWrapRunWidth = width + SoftWrapOpportunities.RunAfterLastWord(g, b, limitRight - startx - width);
                 }
 
+                // CSS Text 3 §4.1.3: collapsible white space at the start of a line is removed, and a
+                // line starts with what the flow puts on it in the flow, whatever empty inline boxes,
+                // box boundaries and boxes out of the flow come before it. The space before the text
+                // was kept there: after an empty named anchor starting a paragraph its words stood a
+                // space in, where browsers start them at its edge, and a right-to-left line, which is
+                // mirrored with the anchor (ApplyRightToLeftOnLine), ended a space short of its edge.
                 if (LayoutBoxUtils.IsBoxHasWhitespace(b))
-                    curx += box.ActualWordSpacing;
+                {
+                    if (!CollapsesSpaces(b))
+                    {
+                        curx += box.ActualWordSpacing;
+                    }
+                    else if (line.ContentCount > 0)
+                    {
+                        curx += box.ActualWordSpacing;
+                        line.TrailingSpace += box.ActualWordSpacing;
+                    }
+                }
 
                 for (int wordIndex = 0; wordIndex < b.Words.Count; wordIndex++)
                 {
@@ -1429,6 +1552,8 @@ internal static class CssLayoutEngine
                     if (wrapWord || word.IsLineBreak || wrapNoWrapBox)
                     {
                         wrapNoWrapBox = false;
+                        var lineBeforeWrap = line;
+                        double curxBeforeWrap = curx;
                         cury = maxbottom + linespacing;
 
                         // CSS2.1 §9.5: the new line sits between the floats that reach it, and is
@@ -1439,6 +1564,7 @@ internal static class CssLayoutEngine
                             runWidth);
 
                         curx = BandLeftAt(blockbox, cury, boxLineHeight, startx);
+                        double nextLineLeft = curx;
 
                         // handle if line is wrapped for the first text element where parent has left margin\padding
                         if (b == box.Boxes[0] && !word.IsLineBreak && (word == b.Words[0] || (box.ParentBox != null && box.ParentBox.IsBlock)))
@@ -1448,6 +1574,12 @@ internal static class CssLayoutEngine
 
                         if (word.IsImage || word.Equals(b.FirstWord))
                             curx += leftspacing;
+
+                        if (!word.IsLineBreak
+                            && CarryOpenedInlineBoxes(blockbox, box, lineBeforeWrap, line, curxBeforeWrap, lineRight, nextLineLeft, cury) is double carried)
+                        {
+                            curx = carried;
+                        }
                     }
 
                     // CSS2.1 §9.5: a line box beside floats too narrow for its first content is
@@ -1500,6 +1632,10 @@ internal static class CssLayoutEngine
                     }
 
                     curx = word.Left + word.FullWidth;
+
+                    // A forced break starts the line it is put on, which holds nothing yet.
+                    if (!word.IsLineBreak)
+                        line.ReportContent(CollapsesSpaces(b) ? word.ActualWordSpacing : 0);
 
                     maxRight = Math.Max(maxRight, word.Right);
                     maxbottom = Math.Max(maxbottom, InlineWordLineBoxBottom(word));
@@ -1619,6 +1755,11 @@ internal static class CssLayoutEngine
                 maxRight = childSaveMaxRight;
                 maxbottom = childSaveMaxBottom;
                 line = childSaveLine;
+
+                // Nor do its words and white space count as the line's (see CssLineBox.TrailingSpace):
+                // text in a visually hidden span that ends in a space moved an icon after the span
+                // back over the word before it.
+                line.RestoreFlowState(childSaveContent, childSaveSpace, childSaveOpenings);
             }
         }
 
@@ -1644,6 +1785,7 @@ internal static class CssLayoutEngine
             // hack for actual width handling
             curx += box.ActualWidth - (curx - startX);
             line.Rectangles.Add(box, new RectangleF((float)startX, (float)startY, (float)box.ActualWidth, (float)box.ActualHeight));
+            line.ReportContent(0);
         }
         else if (box.IsInline && box != blockbox && !line.Rectangles.ContainsKey(box)
             && !InlineBoxHasInFlowContent(box))
@@ -1661,11 +1803,27 @@ internal static class CssLayoutEngine
             // css/css-inline/empty-span-scroll: an empty relative <span> holds the
             // scrollIntoView target, which must land on the line, not at the origin.
             box.Location = new PointF((float)startX, (float)startY);
+
+            // Its rectangle comes once the line is placed, if the line holds anything else
+            // (PlaceEmptyInlineBoxes). A run of white space the flow collapsed is text, not an
+            // inline box of its own: it has nothing to paint, and nothing to add to the boxes
+            // around it.
+            if (!IsInAbsposSubtree(box, blockbox) && !(box.HtmlTag == null && box.Text.Length > 0))
+                line.EmptyInlineBoxes.Add(new EmptyInlineBox(box, startSpace, line.ContentCount));
         }
 
-        // handle box that is only a whitespace
-        if (box.Text.Length > 0 && box.Text.Span.IsWhiteSpace() && !box.IsImage && box.IsInline && box.Boxes.Count == 0 && box.Words.Count == 0)
+        // handle box that is only a whitespace; at the start of a line it is removed where white
+        // space collapses, as above
+        if (box.Text.Length > 0 && box.Text.Span.IsWhiteSpace() && !box.IsImage && box.IsInline && box.Boxes.Count == 0 && box.Words.Count == 0
+            && (line.ContentCount > 0 || !CollapsesSpaces(box)))
+        {
             curx += box.ActualWordSpacing;
+
+            // Only collapsible white space goes at the end of a line (CSS Text 3 §4.1.3). A space
+            // that break-spaces keeps stays before an empty box after it.
+            if (CollapsesSpaces(box))
+                line.TrailingSpace += box.ActualWordSpacing;
+        }
 
         // hack to support specific absolute position elements
         if (box.Position == CssConstants.Absolute)
@@ -1909,7 +2067,9 @@ internal static class CssLayoutEngine
         double lineHeight = blockbox.ActualLineHeight > 0 ? blockbox.ActualLineHeight : blockbox.ActualFont.Height;
         double bandLeft = BandLeftAt(blockbox, cury, lineHeight, startx);
 
-        if (edgeBeforeBox + totalExtent > BandRightAt(blockbox, cury, lineHeight, limitRight))
+        double lineRight = BandRightAt(blockbox, cury, lineHeight, limitRight);
+
+        if (edgeBeforeBox + totalExtent > lineRight)
         {
             if (edgeBeforeBox > bandLeft)
             {
@@ -1922,10 +2082,19 @@ internal static class CssLayoutEngine
                 // block went on two lines, where browsers keep them on one.
                 if (MayBreakBefore(b, blockbox))
                 {
+                    var lineBeforeWrap = line;
+                    double curxBeforeWrap = curx;
                     cury = DropLineBelowNarrowBands(
                         blockbox, maxbottom + linespacing, lineHeight, startx, limitRight, totalExtent);
-                    curx = BandLeftAt(blockbox, cury, lineHeight, startx) + leftspacing;
+                    double nextLineLeft = BandLeftAt(blockbox, cury, lineHeight, startx);
+                    curx = nextLineLeft + leftspacing;
                     line = NextLine(blockbox, line, maxbottom, cury);
+
+                    if (b.ParentBox is { } parent
+                        && CarryOpenedInlineBoxes(blockbox, parent, lineBeforeWrap, line, curxBeforeWrap, lineRight, nextLineLeft, cury) is double carried)
+                    {
+                        curx = carried;
+                    }
                 }
             }
             else
@@ -2234,6 +2403,7 @@ internal static class CssLayoutEngine
         // --- Register the inline-block as a rectangle in the line box ---
         line.Rectangles[b] = new RectangleF(b.Location.X, b.Location.Y,
             (float)physicalBoxWidth, (float)(b.ActualBottom - b.Location.Y));
+        line.ReportContent(0);
 
         // --- Advance flow position ---
         // curx has leftspacing (margin+border+padding) already added.
@@ -2557,9 +2727,11 @@ internal static class CssLayoutEngine
             foreach (CssRect word in words)
             {
                 // handle if line is wrapped for the first text element where parent has left margin\padding
+                // (unless the parent starts on this line, where UpdateRectangle gives it that room)
                 var left = word.Left;
 
-                if (box.ParentBox is { } boxParent && box == boxParent.Boxes[0] && word == box.Words[0] && word == line.Words[0] && line != line.OwnerBox.LineBoxes[0] && !word.IsLineBreak)
+                if (box.ParentBox is { } boxParent && box == boxParent.Boxes[0] && word == box.Words[0] && word == line.Words[0] && line != line.OwnerBox.LineBoxes[0] && !word.IsLineBreak
+                    && boxParent.FirstHostingLineBox != line)
                     left -= boxParent.ActualMarginLeft + boxParent.ActualBorderLeftWidth + boxParent.ActualPaddingLeft;
 
 
@@ -2840,12 +3012,44 @@ internal static class CssLayoutEngine
         double left = line.Words[0].Left;
         double right = line.Words[^1].Right;
 
+        // The empty inline boxes on the line are mirrored with its words, each with the room it
+        // takes (EmptyInlineBoxExtent), and that room at either end of the line with them. They
+        // stayed where the flow and the alignment put them, left to right: in a right-to-left
+        // 300px block, an empty span with `padding: 0 2px` before a word stood 242px in, left of
+        // all the line's words, where browsers put it against the word's right, 296px in; and the
+        // inline boxes around such a box, which take it in (PlaceEmptyInlineBoxes), reached
+        // across the line to it.
+        //
+        // Room that reaches past the line's right edge overflows it at its left, its end (CSS Text
+        // 3 §7.1), and the words start at the edge: mirrored with that room, "abcd" before a span
+        // with `padding-left: 16px` overflowing a 40px right-to-left line stood 16px in, past the
+        // block's edge, where browsers end it at the edge and let the span overflow on the left.
+        double lineRight = line.OwnerBox.ActualRight - line.OwnerBox.ActualPaddingRight - line.OwnerBox.ActualBorderRightWidth;
+        var holdingWords = line.EmptyInlineBoxes.Count > 0 ? InlineBoxesHoldingWords(line) : null;
+        var extents = new List<(double Left, double Right)>(line.EmptyInlineBoxes.Count);
+
+        foreach (var empty in line.EmptyInlineBoxes)
+        {
+            var extent = EmptyInlineBoxExtent(line, empty.Box, empty.Box.Location.X, holdingWords);
+            extents.Add(extent);
+            left = Math.Min(left, extent.Left);
+            right = Math.Max(right, Math.Min(extent.Right, lineRight));
+        }
+
         foreach (CssRect word in line.Words)
         {
             double diff = word.Left - left;
             double wright = right - diff;
 
             word.Left = wright - word.Width;
+        }
+
+        for (int i = 0; i < line.EmptyInlineBoxes.Count; i++)
+        {
+            var box = line.EmptyInlineBoxes[i].Box;
+            var (extentLeft, extentRight) = extents[i];
+            double mirroredLeft = left + right - extentRight;
+            box.Location = new PointF((float)(mirroredLeft + box.Location.X - extentLeft), box.Location.Y);
         }
     }
 
@@ -3602,6 +3806,124 @@ internal static class CssLayoutEngine
     {
         foreach (var box in new List<CssBox>(line.Rectangles.Keys))
             FitToContent(box, line);
+    }
+
+    /// <summary>
+    /// Gives each empty inline box the flow put on <paramref name="line"/> its rectangle there, now
+    /// that the line's baseline is placed: its font's content area on its own baseline, 0 wide at the
+    /// left of its content, with its padding and border around that.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// CSS 2.1 §9.4.2 and §10.8, CSS Inline 3: an empty inline element still generates an inline box,
+    /// with its margins, padding, borders and line height, whose content area is as tall as its font
+    /// and 0 wide. The flow gives it no rectangle, only a location at the top of its line (FlowBox),
+    /// and nothing else gave it one: script read it 0 × 0 there, and its background and border were
+    /// not painted. In 16px/20px text an empty span with <c>padding: 0 2px</c> was 0 × 0 at the top of
+    /// its line, 2px right of where it starts, where browsers make it 4 × 17 around the baseline.
+    /// </para>
+    /// <para>
+    /// It gets one only now, once the line's alignment has moved it with what else is on the line,
+    /// and before the line is measured, which leaves out the rectangles of inline boxes (their words
+    /// measure the line); and only on a line holding something in the flow besides
+    /// (<see cref="SettleEmptyInlineBoxes"/>). A line holding nothing else stays no line, as the flow
+    /// leaves it, and a rectangle would make it count as one and take the strut's height. The inline
+    /// boxes around the box take it in along the line, and keep their own height
+    /// (CssLineBox.UpdateRectangleAlongLine). A box in a subtree aligned <c>top</c> or
+    /// <c>bottom</c>, which is aligned to the line box with its subtree, is left where it was.
+    /// </para>
+    /// </remarks>
+    private static void PlaceEmptyInlineBoxes(CssBox blockBox, CssLineBox line)
+    {
+        if (line.EmptyInlineBoxes.Count == 0 || line.Baseline is not double lineBaseline)
+            return;
+
+        // An inline box's content area stands on its own baseline, as tall as its own font.
+        (double Top, double Bottom) ContentArea(CssBox box)
+        {
+            double baseline = lineBaseline + ParentBaselineShift(box) + BaselineShift(box);
+            double top = baseline - box.ActualFont.Height * TypicalAscentRatio;
+            return (top, top + box.ActualFont.Height);
+        }
+
+        foreach (var empty in line.EmptyInlineBoxes)
+        {
+            if (LineBoxAlignedRoot(empty.Box, blockBox) != null)
+                continue;
+
+            double left = empty.Box.Location.X;
+            line.UpdateRectangleAlongLine(empty.Box, left, left, ContentArea);
+        }
+    }
+
+    /// <summary>
+    /// Readies the empty inline boxes the flow put on <paramref name="line"/> for its alignment:
+    /// lets go of them if the line holds nothing else in the flow, and moves each one that ends the
+    /// line back over the collapsible white space before it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A line holding nothing in the flow but empty inline boxes stays no line, as the flow left it,
+    /// and its boxes keep the place the flow gave them (FlowBox) and get no rectangle. CSS 2.1
+    /// §9.4.2 makes such a line empty, and 0px tall, when none of the boxes has margins, padding or
+    /// borders; one that has them makes it a line as tall as the strut, where browsers also paint
+    /// the box, and the engine leaves that line empty too.
+    /// </para>
+    /// <para>
+    /// CSS Text 3 §4.1.3: collapsible white space at the end of a line is removed, and white space
+    /// with nothing but empty inline boxes after it is at the end. The flow keeps it, and puts what
+    /// comes next after it; the word before it ends the line without it (CssRect.Right). Placed
+    /// where the flow put it, an empty span with <c>padding: 0 2px</c> after "abc " stood a space
+    /// after "abc", 30.24px in, where browsers put it right after "abc", 25.8px in; it moved a
+    /// right-aligned "abc" left by the space; and after a word that wrapped it stood past the end
+    /// of its line.
+    /// </para>
+    /// </remarks>
+    private static void SettleEmptyInlineBoxes(CssBox blockBox, CssLineBox line)
+    {
+        if (line.EmptyInlineBoxes.Count == 0)
+            return;
+
+        if (!HoldsInFlowContent(line, blockBox))
+        {
+            line.EmptyInlineBoxes.Clear();
+            return;
+        }
+
+        for (int i = 0; i < line.EmptyInlineBoxes.Count; i++)
+        {
+            var empty = line.EmptyInlineBoxes[i];
+            if (empty.SpaceBefore > 0 && empty.ContentBefore == line.ContentCount)
+            {
+                var box = empty.Box;
+                box.Location = new PointF((float)(box.Location.X - empty.SpaceBefore), box.Location.Y);
+
+                // The space is gone; a pass over the line again (see CssLineBox.AssignRectanglesToBoxes)
+                // does not take it away twice.
+                line.EmptyInlineBoxes[i] = empty with { SpaceBefore = 0 };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="line"/> holds a word or a box in the flow of
+    /// <paramref name="blockBox"/>, not in an absolutely or fixed positioned subtree.
+    /// </summary>
+    private static bool HoldsInFlowContent(CssLineBox line, CssBox blockBox)
+    {
+        foreach (var word in line.Words)
+        {
+            if (!IsInAbsposSubtree(word.OwnerBox, blockBox))
+                return true;
+        }
+
+        foreach (var box in line.Rectangles.Keys)
+        {
+            if (!IsInAbsposSubtree(box, blockBox))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -4393,6 +4715,14 @@ internal static class CssLayoutEngine
         if (AlignedContentRight(lineBox) > lineBox.OwnerBox.ClientRight)
             return;
 
+        // The empty inline boxes on the line keep to their words (AnchorEmptyInlineBoxes), and the
+        // room they take beside a word is the word's, not the spaces' to stretch (CSS Text 3 §7.3).
+        var anchors = AnchorEmptyInlineBoxes(lineBox);
+        var room = EmptyInlineBoxRoom(lineBox, anchors);
+
+        foreach (var (before, after) in room.Values)
+            textSum += before + after;
+
         double spacing = (availWidth - textSum) / words; //Spacing that will be used
         double curx = lineBox.OwnerBox.ClientLeft + indent;
 
@@ -4403,12 +4733,95 @@ internal static class CssLayoutEngine
 
         foreach (CssRect word in lineBox.Words)
         {
-            word.Left = curx;
-            curx = word.Right + spacing;
+            room.TryGetValue(word, out var beside);
+            word.Left = curx + beside.Before;
+            curx = word.Right + beside.After + spacing;
 
             if (stretch && word == lineBox.Words[^1])
-                word.Left = lineBox.OwnerBox.ClientRight - word.Width;
+                word.Left = lineBox.OwnerBox.ClientRight - beside.After - word.Width;
         }
+
+        foreach (var (box, word, offset) in anchors)
+            box.Location = new PointF((float)(word.Left + offset), box.Location.Y);
+    }
+
+    /// <summary>
+    /// The room the empty inline boxes kept to each word on <paramref name="line"/>
+    /// (<paramref name="anchors"/>) take before it and after it, where they stand beside it.
+    /// </summary>
+    /// <remarks>
+    /// Left out of the justified line, a padded empty box kept to the word ending the line, which
+    /// justification puts at the line's end, stood past the end: an empty span with
+    /// <c>padding: 0 8px</c> after the last word of a justified 200px line was drawn from 200px to
+    /// 216px, where browsers end it at 200px and the word before it 16px sooner.
+    /// </remarks>
+    private static Dictionary<CssRect, (double Before, double After)> EmptyInlineBoxRoom(
+        CssLineBox line, List<(CssBox Box, CssRect Word, double Offset)> anchors)
+    {
+        var room = new Dictionary<CssRect, (double Before, double After)>();
+
+        foreach (var (box, word, offset) in anchors)
+        {
+            var (extentLeft, extentRight) = EmptyInlineBoxExtent(line, box, word.Left + offset);
+            room.TryGetValue(word, out var beside);
+            room[word] = (Math.Max(beside.Before, word.Left - extentLeft), Math.Max(beside.After, extentRight - word.Right));
+        }
+
+        return room;
+    }
+
+    /// <summary>
+    /// The word in the flow each empty inline box on <paramref name="line"/> keeps its place beside
+    /// when justification moves the words apart, and how far from that word's left it stands: the
+    /// word after it, or the word before it when no white space lies between them or no word
+    /// follows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Justification widens the spaces between words (CSS Text 3 §7.3), and an empty inline box
+    /// stays on its side of the space it is next to. It stayed where the flow put it: on a
+    /// justified line of a 300px block, an empty span with <c>padding: 0 2px</c> between "aa " and
+    /// "bb" stood 22.24px in, where browsers put it against "bb", 92px in, and the inline boxes
+    /// around such a box, which take it in (PlaceEmptyInlineBoxes), reached back to it.
+    /// </para>
+    /// <para>
+    /// A box kept to the word after it stands against that word: white space between them follows
+    /// the space before the box, and collapses (CSS Text 3 §4.1.1), where the flow keeps it. Kept
+    /// where the flow put it, an empty named anchor between "aa " and " bb" took that space for
+    /// room of its own beside "bb" (EmptyInlineBoxRoom), and the gap before "bb" on a justified
+    /// line was a space wider than the others.
+    /// </para>
+    /// <para>
+    /// The words of an absolutely or fixed positioned box on the line are out of the flow (CSS 2.1
+    /// §9.6.1), at their own offsets: an empty span kept to such a word, a tooltip 400px along, was
+    /// placed hundreds of pixels left of the block, and the link around it stretched to it.
+    /// </para>
+    /// </remarks>
+    private static List<(CssBox Box, CssRect Word, double Offset)> AnchorEmptyInlineBoxes(CssLineBox line)
+    {
+        var anchors = new List<(CssBox, CssRect, double)>(line.EmptyInlineBoxes.Count);
+
+        if (line.EmptyInlineBoxes.Count == 0)
+            return anchors;
+
+        var words = line.Words.FindAll(word => !IsInAbsposSubtree(word.OwnerBox, line.OwnerBox));
+
+        if (words.Count == 0)
+            return anchors;
+
+        foreach (var empty in line.EmptyInlineBoxes)
+        {
+            double x = empty.Box.Location.X;
+            int next = 0;
+            while (next < words.Count && words[next].Left < x)
+                next++;
+
+            bool keepsToNext = next < words.Count && (next == 0 || empty.SpaceBefore > 0);
+            CssRect word = words[keepsToNext ? next : next - 1];
+            anchors.Add((empty.Box, word, x - word.Left + (keepsToNext ? empty.SpaceAfter : 0)));
+        }
+
+        return anchors;
     }
 
     private static void ApplyCenterAlignment(CssLineBox line)
@@ -4436,6 +4849,8 @@ internal static class CssLayoutEngine
             line.Rectangles[b] = new RectangleF((float)(r.X + diff), r.Y, r.Width, r.Height);
             ShiftInlineBlockBox(b, diff);
         }
+
+        ShiftEmptyInlineBoxes(line, diff);
     }
 
     private static void ApplyRightAlignment(CssLineBox line)
@@ -4460,6 +4875,109 @@ internal static class CssLayoutEngine
             line.Rectangles[b] = new RectangleF((float)(r.X + diff), r.Y, r.Width, r.Height);
             ShiftInlineBlockBox(b, diff);
         }
+
+        ShiftEmptyInlineBoxes(line, diff);
+    }
+
+    /// <summary>
+    /// Moves the empty inline boxes on <paramref name="line"/> along it by <paramref name="dx"/>, as
+    /// aligning the line moves what else is on it. They are placed from where they stand on it
+    /// (<see cref="PlaceEmptyInlineBoxes"/>), which stayed where the flow put them: an empty span
+    /// with <c>padding: 0 2px</c> between "a" and "b" on a centred line of a 300px block stood
+    /// 10.9px in, where browsers put it 148px in, between them.
+    /// </summary>
+    private static void ShiftEmptyInlineBoxes(CssLineBox line, double dx)
+    {
+        foreach (var empty in line.EmptyInlineBoxes)
+            empty.Box.Location = new PointF((float)(empty.Box.Location.X + dx), empty.Box.Location.Y);
+    }
+
+    /// <summary>
+    /// Where an empty inline box on <paramref name="line"/> takes room along it, the left of its
+    /// content at <paramref name="x"/>: its margin box, and after it the right padding, border and
+    /// margin of each inline box around it that it closes, as the flow closed them there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The inline boxes around it that it opens are left out, as they are for a word: the words
+    /// after it on the line hold their place, and the room they take is found again around their
+    /// content (CssLineBox.UpdateRectangle).
+    /// </para>
+    /// <para>
+    /// A right-to-left line mirrors its words, and these boxes with their room
+    /// (ApplyRightToLeftOnLine), but not the padding of the inline boxes around its words, which is
+    /// found again around the words where they are mirrored to: there the room of a box it closes
+    /// that holds words on the line, one of <paramref name="holdingWords"/>, is the words' and is
+    /// left out. Mirrored with the empty box, to the other side of the words, a right-to-left link
+    /// with <c>padding-right: 10px</c> holding a word and then an empty span stood 10px wider than
+    /// its word and padding, reaching over the word before it.
+    /// </para>
+    /// </remarks>
+    private static (double Left, double Right) EmptyInlineBoxExtent(
+        CssLineBox line, CssBox box, double x, HashSet<CssBox>? holdingWords = null)
+    {
+        double left = x - box.ActualPaddingLeft - box.ActualBorderLeftWidth - LeftMargin(box);
+        double right = x + box.ActualPaddingRight + box.ActualBorderRightWidth + RightMargin(box);
+
+        for (var child = box; child.ParentBox is { Display: CssConstants.Inline } parent && parent != line.OwnerBox;
+             child = parent)
+        {
+            if (parent.LastHostingLineBox != line || LastInFlowChild(parent) != child
+                || (holdingWords != null && holdingWords.Contains(parent)))
+            {
+                break;
+            }
+
+            right += parent.ActualPaddingRight + parent.ActualBorderRightWidth + RightMargin(parent);
+        }
+
+        return (left, right);
+    }
+
+    /// <summary>
+    /// The inline boxes that hold a word on <paramref name="line"/> in the flow, up to the block it
+    /// belongs to.
+    /// </summary>
+    private static HashSet<CssBox> InlineBoxesHoldingWords(CssLineBox line)
+    {
+        var boxes = new HashSet<CssBox>();
+
+        foreach (var word in line.Words)
+        {
+            if (word.IsLineBreak || IsInAbsposSubtree(word.OwnerBox, line.OwnerBox))
+                continue;
+
+            // A box already found has its ancestors found with it.
+            var box = word.OwnerBox;
+            while (box != null && box != line.OwnerBox && boxes.Add(box))
+                box = box.ParentBox;
+        }
+
+        return boxes;
+    }
+
+    /// <summary>
+    /// The last of <paramref name="box"/>'s children in the flow: not hidden, floated or positioned
+    /// out of it, nor a run of white space the flow collapsed.
+    /// </summary>
+    private static CssBox? LastInFlowChild(CssBox box)
+    {
+        for (int i = box.Boxes.Count - 1; i >= 0; i--)
+        {
+            var child = box.Boxes[i];
+
+            if (child.Display == CssConstants.None
+                || child.Float != CssConstants.None
+                || child.Position is CssConstants.Absolute or CssConstants.Fixed
+                || (child.HtmlTag == null && child.Text.Length > 0 && child.Words.Count == 0 && child.Boxes.Count == 0))
+            {
+                continue;
+            }
+
+            return child;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -4505,8 +5023,28 @@ internal static class CssLayoutEngine
             contentRight = Math.Max(contentRight, rect.Right + margin);
         }
 
+        // An empty inline box that ends the line ends it with its right padding, border and margin,
+        // and those of the inline boxes it closes (EmptyInlineBoxExtent), as the flow placed them,
+        // without the white space before it that the end of the line removes
+        // (SettleEmptyInlineBoxes). They were left out, and the box, which has a rectangle of its own
+        // once the line is placed (PlaceEmptyInlineBoxes), was drawn past the end of a right-aligned
+        // line: after "abc" in a right-aligned 300px block, an empty span with `padding: 0 2px` was
+        // drawn from 300px, where browsers draw it from 296px and start "abc" 4px further left, and
+        // a link with `padding-right: 10px` holding only an empty span was drawn from 300px to 310px.
+        // Those of a box that holds words end the line after the empty box too, not after its last
+        // word, as the loop above takes them: a right-aligned 200px line ending with a link with
+        // `padding-right: 10px` holding "def" and then an empty span with `padding: 0 8px` put "def"
+        // 160px in and drew the link to 210px, past the line's end, where browsers put "def" 150px
+        // in and end the link at 200px.
+        foreach (var empty in line.EmptyInlineBoxes)
+            contentRight = Math.Max(contentRight, EmptyInlineBoxExtent(line, empty.Box, empty.Box.Location.X).Right);
+
         return contentRight;
     }
+
+    /// <summary>The box's left margin, 0 where it has none to speak of.</summary>
+    private static double LeftMargin(CssBox box) =>
+        double.IsNaN(box.ActualMarginLeft) ? 0 : box.ActualMarginLeft;
 
     /// <summary>The box's right margin, 0 where it has none to speak of.</summary>
     private static double RightMargin(CssBox box) =>
