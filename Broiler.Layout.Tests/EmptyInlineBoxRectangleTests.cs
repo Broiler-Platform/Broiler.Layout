@@ -1699,6 +1699,75 @@ public sealed class EmptyInlineBoxRectangleTests
     }
 
     /// <summary>
+    /// A block with <c>white-space: break-spaces</c> holding "abc", a space and an empty span with
+    /// <c>padding: 0 2px</c>: the space is kept at the end of the line (CSS Text 3 §4.1.3), and the
+    /// span stands after it, 28px in and 4px wide, as in browsers. It stood over the space, 24px in;
+    /// on <c>main</c> it had no width, 30px in.
+    /// </summary>
+    [Fact]
+    public void A_Break_Spaces_Empty_Span_Ending_A_Line_Stands_After_The_Kept_Space()
+    {
+        var block = Block();
+        block.WhiteSpace = "break-spaces";
+        Text(Span(block, tag: "b"), "abc");
+        Text(block, " ");
+        var span = Span(block);
+        span.PaddingLeft = "2px";
+        span.PaddingRight = "2px";
+        Layout(block);
+
+        var rect = ScriptRectangle(span, block);
+        Assert.Equal(28, rect.X, 1);
+        Assert.Equal(4, rect.Width, 1);
+    }
+
+    /// <summary>
+    /// As above in a 60px block, with " bbbb" after the span going to the next line: the span ends
+    /// the first line after "aaaa" and the kept space, 36px in. It was 32px in, and on <c>main</c>
+    /// 38px.
+    /// </summary>
+    [Fact]
+    public void A_Break_Spaces_Empty_Span_Ending_A_Wrapped_Line_Stands_After_The_Kept_Space()
+    {
+        var block = Block("60px");
+        block.WhiteSpace = "break-spaces";
+        Text(Span(block, tag: "b"), "aaaa");
+        Text(block, " ");
+        var span = Span(block);
+        span.PaddingLeft = "2px";
+        span.PaddingRight = "2px";
+        Text(block, " ");
+        Text(Span(block, tag: "b"), "bbbb");
+        Layout(block);
+
+        var rect = ScriptRectangle(span, block);
+        Assert.Equal(36, rect.X, 1);
+        Assert.Equal(2, rect.Y, 1);
+    }
+
+    /// <summary>
+    /// A justified block with <c>white-space: break-spaces</c> starting with an empty span with
+    /// <c>padding: 0 2px</c>, a space and "abc", then enough words to wrap: "abc" stands after the
+    /// span and the kept space, 8px in. It was 4px in, the space taken away, and on <c>main</c> 0px.
+    /// </summary>
+    [Fact]
+    public void A_Justified_Break_Spaces_Line_Keeps_The_Space_After_An_Empty_Span()
+    {
+        var block = Block();
+        block.WhiteSpace = "break-spaces";
+        block.TextAlign = "justify";
+        var span = Span(block);
+        span.PaddingLeft = "2px";
+        span.PaddingRight = "2px";
+        Text(block, " ");
+        Text(Span(block, tag: "b"), "abc");
+        Text(block, " dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz");
+        Layout(block);
+
+        Assert.Equal(8, Word(block, "abc").Left - block.Location.X, 1);
+    }
+
+    /// <summary>
     /// A 300px flex row: an item growing to take the room left, then an item holding an
     /// inline-block with <c>min-width: 44px</c> around a 20px inline-block icon, as an icon-only
     /// button is. The item is measured with the button's min-width, so it is 44px wide and the

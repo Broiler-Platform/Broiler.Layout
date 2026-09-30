@@ -1818,7 +1818,11 @@ internal static class CssLayoutEngine
             && (line.ContentCount > 0 || !CollapsesSpaces(box)))
         {
             curx += box.ActualWordSpacing;
-            line.TrailingSpace += box.ActualWordSpacing;
+
+            // Only collapsible white space goes at the end of a line (CSS Text 3 §4.1.3). A space
+            // that break-spaces keeps stays before an empty box after it.
+            if (CollapsesSpaces(box))
+                line.TrailingSpace += box.ActualWordSpacing;
         }
 
         // hack to support specific absolute position elements
