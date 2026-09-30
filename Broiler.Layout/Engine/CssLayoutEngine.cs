@@ -1118,6 +1118,29 @@ internal static class CssLayoutEngine
     private static bool LineHoldsContent(CssLineBox line) => line.Words.Count > 0 || line.Rectangles.Count > 0;
 
     /// <summary>
+    /// How wide the words of <paramref name="box"/>, a box that does not wrap, are up to the first
+    /// line break it keeps, and whether it keeps one.
+    /// </summary>
+    private static double WidthToLineBreak(CssBox box, out bool lineBreak)
+    {
+        double width = 0;
+
+        foreach (var word in box.Words)
+        {
+            if (word.IsLineBreak)
+            {
+                lineBreak = true;
+                return width;
+            }
+
+            width += word.FullWidth;
+        }
+
+        lineBreak = false;
+        return width;
+    }
+
+    /// <summary>
     /// How much of <paramref name="line"/>'s width what is on it takes, up to <paramref name="curx"/>:
     /// from its first word, or the margin edge of its first box placed whole, to there.
     /// </summary>
@@ -1219,21 +1242,73 @@ internal static class CssLayoutEngine
                 // the line may break before it (MayBreakBefore): not after what comes before it in
                 // a box that does not wrap either, as text and images in a `white-space: nowrap`
                 // block do.
-                if (b.WhiteSpace == CssConstants.NoWrap && curx > startx && MayBreakBefore(b, blockbox))
-                {
-                    var boxRight = curx;
-                    foreach (var word in b.Words)
-                        boxRight += word.FullWidth;
+                //
+                // CSS Text 3 §5.1: nor where nothing in the text lets it break, at the edge of an
+                // element inside a word (SoftWrapOpportunities), and the word goes on past the box,
+                // up to where the text next lets the line break. "aaa" then a nowrap span holding
+                // "bbb" went on two lines of a 30px block, where browsers keep "aaabbb" on one.
+                // What follows the box counts only where the line holds content before it: a word
+                // that starts a line stays on it. Where left padding, an inline box's around it or
+                // text-indent put the box past the line's start, "aaa" in a nowrap span with 4px of
+                // left padding, then "bbbbbbb", went to the second line of a 50px block and left the
+                // first empty, where browsers keep "aaabbbbbbb" on the first.
+                //
+                // A `white-space: pre` box does not wrap either, up to the first line break it
+                // keeps, and goes to the next line whole in the same way where the line holds
+                // content before it. It stayed where it started: "x " then a pre span holding "aaa"
+                // and a span holding "bbb" kept "aaabbb" beside "x", past the side of a 50px block,
+                // where browsers break at the space.
+                bool doesNotWrap = b.WhiteSpace == CssConstants.NoWrap
+                    || (b.WhiteSpace == CssConstants.Pre && LineHoldsContent(line));
 
-                    if (boxRight > limitRight)
+                // CSS 2.1 §9.5: the text joined to the box, up to where the line may break, has to fit
+                // beside the floats too, and where it does not the box goes to the next line, or the
+                // line moves below them, as a word does (below): the box's first word takes the width
+                // of the box and that text to the float checks. The box alone was measured, and only
+                // against the block's side, and the text joined to it, which may not wrap by itself,
+                // ran on over the floats: in a 100px block, a nowrap span holding "aaa" then a span
+                // holding "bbbbbbb" were drawn over a 50px right float, where browsers put them below.
+                double noWrapRunWidth = 0;
+
+                if (doesNotWrap && curx > startx && MayBreakBefore(b, blockbox) && SoftWrapOpportunities.BeforeFirstWord(b))
+                {
+                    var boxRight = curx + WidthToLineBreak(b, out bool lineBreak);
+                    var right = limitRight;
+
+                    if (!lineBreak && LineHoldsContent(line) && !SoftWrapOpportunities.After(b.Words[^1]))
+                    {
+                        boxRight += SoftWrapOpportunities.RunAfterLastWord(g, b, limitRight - startx - (boxRight - curx));
+                        noWrapRunWidth = boxRight - curx;
+
+                        double lineHeight = box.ActualLineHeight > 0 ? box.ActualLineHeight : box.ActualFont.Height;
+                        right = BandRightAt(blockbox, cury, lineHeight, limitRight);
+                    }
+
+                    if (boxRight > right)
                         wrapNoWrapBox = true;
+                }
+
+                // At the start of a line beside floats, that width is what the line moves down for,
+                // in a block whose lines wrap. A block that does not wrap keeps its line beside the
+                // floats and lets it overflow, as browsers do: measured whole there, the first line
+                // of a nowrap or pre block would go below a float beside it, and the title of a
+                // one-line `overflow: hidden` row with a floated badge first would leave the row.
+                if (b.WhiteSpace is CssConstants.NoWrap or CssConstants.Pre && !LineHoldsContent(line)
+                    && blockbox.WhiteSpace is not (CssConstants.NoWrap or CssConstants.Pre)
+                    && blockbox.LineFloatBands is { IsEmpty: false } && !SoftWrapOpportunities.After(b.Words[^1]))
+                {
+                    double width = WidthToLineBreak(b, out bool lineBreak);
+                    if (!lineBreak)
+                        noWrapRunWidth = width + SoftWrapOpportunities.RunAfterLastWord(g, b, limitRight - startx - width);
                 }
 
                 if (LayoutBoxUtils.IsBoxHasWhitespace(b))
                     curx += box.ActualWordSpacing;
 
-                foreach (var word in b.Words)
+                for (int wordIndex = 0; wordIndex < b.Words.Count; wordIndex++)
                 {
+                    var word = b.Words[wordIndex];
+
                     // CSS2.1 §10.8: Every line box has a minimum height
                     // from the block container's line-height (the "strut").
                     // When ActualLineHeight is 0, the minimum comes from the
@@ -1309,10 +1384,49 @@ internal static class CssLayoutEngine
                     // the next line.
                     bool lineHasContent = LineHoldsContent(line);
                     double lineRight = BandRightAt(blockbox, cury, boxLineHeight, limitRight);
-                    if ((b.WhiteSpace != CssConstants.NoWrap && b.WhiteSpace != CssConstants.Pre && curx + word.Width + rightspacing > lineRight
-                         && (b.WhiteSpace != CssConstants.PreWrap || !word.IsSpaces)
-                         && (b.WhiteSpace != CssConstants.PreLine || !word.IsSpaces)
-                         && lineHasContent) || word.IsLineBreak || wrapNoWrapBox)
+
+                    // CSS Text 3 §5.1, §5.2: a line breaks only where the text lets it, and the edge
+                    // of an element inside a word is no such place (SoftWrapOpportunities). What has
+                    // to fit where the line may break is the word up to where it may next break, so
+                    // a box's last word is measured on into the boxes after it; and a word the line
+                    // may not break before stays on its line, and overflows it. The flow broke the
+                    // line before any word that did not fit: in a 30px block, "aaa<b>bbb</b>" went
+                    // on two lines, and in a 50px one "x aaa<b>bbb</b>" kept "aaa" beside "x" and
+                    // put "bbb" on the next line, where browsers keep "aaabbb" together, on the
+                    // first line and on the second.
+                    //
+                    // The word is measured on only where the line may break before it, or it starts
+                    // the line, and where that can matter: where it fits by itself, or floats may
+                    // move its line down for it (below), for which it is measured as far as a whole
+                    // line. Measured from every box it crosses, a word thousands of elements long
+                    // would take time that grows with the square of their number.
+                    double runWidth = wordIndex == 0 && noWrapRunWidth > 0 ? noWrapRunWidth : word.Width + rightspacing;
+                    bool wrapWord = false;
+
+                    if (b.WhiteSpace != CssConstants.NoWrap && b.WhiteSpace != CssConstants.Pre
+                        && (b.WhiteSpace != CssConstants.PreWrap || !word.IsSpaces)
+                        && (b.WhiteSpace != CssConstants.PreLine || !word.IsSpaces))
+                    {
+                        bool runGoesOn = wordIndex == b.Words.Count - 1 && !SoftWrapOpportunities.After(word);
+                        bool floats = blockbox.LineFloatBands is { IsEmpty: false };
+                        double limit = Math.Max(lineRight - curx, limitRight - startx) - word.Width;
+
+                        if (!lineHasContent)
+                        {
+                            if (runGoesOn && floats)
+                                runWidth = word.Width + SoftWrapOpportunities.RunAfterLastWord(g, b, limit);
+                        }
+                        else if ((runGoesOn || curx + runWidth > lineRight)
+                            && (wordIndex > 0 || SoftWrapOpportunities.BeforeFirstWord(b)))
+                        {
+                            if (runGoesOn && (curx + runWidth <= lineRight || floats))
+                                runWidth = word.Width + SoftWrapOpportunities.RunAfterLastWord(g, b, limit);
+
+                            wrapWord = curx + runWidth > lineRight;
+                        }
+                    }
+
+                    if (wrapWord || word.IsLineBreak || wrapNoWrapBox)
                     {
                         wrapNoWrapBox = false;
                         cury = maxbottom + linespacing;
@@ -1322,7 +1436,7 @@ internal static class CssLayoutEngine
                         // empty band. Both edges move, so the left one is re-read after the drop.
                         cury = DropLineBelowNarrowBands(
                             blockbox, cury, boxLineHeight, startx, limitRight,
-                            word.Width + rightspacing);
+                            runWidth);
 
                         curx = BandLeftAt(blockbox, cury, boxLineHeight, startx);
 
@@ -1340,14 +1454,15 @@ internal static class CssLayoutEngine
                     // shifted down until the content fits or no float is beside it. Only a line
                     // that wrapped was: the first word on the block's first line, or after a
                     // <br>, stayed beside a float it did not fit beside and ran on across the
-                    // float's side, where browsers put it below the float.
+                    // float's side, where browsers put it below the float. The first content is the
+                    // word up to where the line may break in it, as above.
                     else if (!word.IsLineBreak && !word.IsSpaces && !lineHasContent
-                        && curx + word.Width + rightspacing > lineRight)
+                        && curx + runWidth > lineRight)
                     {
                         double bandLeft = BandLeftAt(blockbox, cury, boxLineHeight, startx);
                         double dropped = DropLineBelowNarrowBands(
                             blockbox, cury, boxLineHeight, startx, limitRight,
-                            curx - bandLeft + word.Width + rightspacing);
+                            curx - bandLeft + runWidth);
 
                         if (dropped > cury)
                         {
@@ -4269,6 +4384,14 @@ internal static class CssLayoutEngine
 
         if (words <= 0f)
             return; //Avoid Zero division
+
+        // CSS Text 3 §7.1: justification only stretches a line, and a line whose contents are too
+        // long for it is start-aligned and overflows, as under the other alignments. A word across
+        // the edges of elements stays whole on a line it overflows (SoftWrapOpportunities), in
+        // pieces the spacing, below zero, drew over one another: "aaa<b>bbb</b>" starting a 30px
+        // justified line had "bbb" 0.68px along, over "aaa", where browsers put it 26.7px along.
+        if (AlignedContentRight(lineBox) > lineBox.OwnerBox.ClientRight)
+            return;
 
         double spacing = (availWidth - textSum) / words; //Spacing that will be used
         double curx = lineBox.OwnerBox.ClientLeft + indent;

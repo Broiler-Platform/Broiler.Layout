@@ -21,7 +21,8 @@ namespace Broiler.Layout.Tests;
 /// <para>
 /// Words here are 8×16px, each in an anonymous inline box that inherits its parent's style, in a
 /// 320px block of normal line height, 16px. A word stands half its box's leading down: 22px in a
-/// box with <c>line-height: 60px</c>.
+/// box with <c>line-height: 60px</c>. Each word is followed by a space, where a line may break
+/// (CSS Text 3 §5.1): the edge of a box inside a word is no such place.
 /// </para>
 /// </remarks>
 public sealed class InlineBoxLineHeightTests
@@ -122,7 +123,7 @@ public sealed class InlineBoxLineHeightTests
         {
             Display = "inline",
             LineHeight = "60px",
-            Text = "G".AsMemory(),
+            Text = "G ".AsMemory(),
         };
         span.ParseToWords();
         var spanWord = Assert.Single(span.Words);
@@ -231,7 +232,7 @@ public sealed class InlineBoxLineHeightTests
         var text = new CssBox(parent, null, BaseUrl);
         text.InheritStyle();
         text.Display = "inline";
-        text.Text = "X".AsMemory();
+        text.Text = "X ".AsMemory();
         text.ParseToWords();
         return Assert.Single(text.Words);
     }
