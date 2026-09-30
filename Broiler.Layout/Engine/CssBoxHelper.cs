@@ -254,13 +254,14 @@ internal static class CssBoxHelper
     {
         // The box lays out lines of its own, and the first starts with nothing on it.
         bool lineHoldsContent = false;
-        GetMinMaxSumWordsOnLine(box, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, suppressExplicitWidthFor);
+        GetMinMaxSumWordsOnLine(box, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, suppressExplicitWidthFor, rowMarginBase: 0);
     }
 
     /// <summary>
     /// <see cref="GetMinMaxSumWords"/>, on a line that holds content in the flow before
     /// <paramref name="box"/> if <paramref name="lineHoldsContent"/>, which is left saying whether it
-    /// does after the box.
+    /// does after the box. <paramref name="rowMarginBase"/> is the part of <paramref name="marginSum"/>
+    /// outside the table cell the box is in, if any (see HoldToMinWidth).
     /// </summary>
     /// <remarks>
     /// CSS Text 3 §4.1.3: collapsible white space at the start of a line is removed, before the
@@ -271,7 +272,7 @@ internal static class CssBoxHelper
     /// 24px of text, where browsers make it 24px wide, and at the end of its row, with the space
     /// gone from its line, it ended "abc" a space short of the row's end.
     /// </remarks>
-    private static void GetMinMaxSumWordsOnLine(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, ref bool lineHoldsContent, CssBox? suppressExplicitWidthFor)
+    private static void GetMinMaxSumWordsOnLine(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, ref bool lineHoldsContent, CssBox? suppressExplicitWidthFor, double rowMarginBase)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicVisits);
 
@@ -281,9 +282,10 @@ internal static class CssBoxHelper
             return;
 
         // Where the box starts on the running line and on the path to it: the margins of the boxes
-        // it is in are on its line, and on its path too (see HoldToMinWidth).
+        // it is in are on its line, and on its path too, from the table cell it is in, if any (see
+        // HoldToMinWidth).
         double minWidthEdge = AtomicInlineMinWidth(box);
-        double lineBeforeBox = maxSum, pathBeforeBox = paddingSum + marginSum;
+        double lineBeforeBox = maxSum, pathBeforeBox = paddingSum + marginSum - rowMarginBase;
         double? oldSum = null;
 
         // Block-level boxes start a new line, so max-content resets the running sum
@@ -494,6 +496,10 @@ internal static class CssBoxHelper
 
                 marginSum += childBox.ActualMarginLeft + childBox.ActualMarginRight;
 
+                // A row's cells share the margins of the boxes around the row, and a cell has no margins
+                // of its own (CSS 2.1 §8.3): the path in a cell starts at the cell.
+                double childRowMarginBase = sumsChildMinimums ? marginSum : rowMarginBase;
+
                 // CSS Sizing 3 §5: an inline-level child sits on the running line, so its own
                 // horizontal margins advance that line and belong in the sum. Only the
                 // block-level case was covered — a block child restarts its line at marginSum,
@@ -523,12 +529,12 @@ internal static class CssBoxHelper
                     // The cell's minimum is measured with this row's path; what the cell adds to it
                     // is its share of the row.
                     double childMin = 0;
-                    GetMinMaxSumWordsOnLine(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null);
+                    GetMinMaxSumWordsOnLine(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null, childRowMarginBase);
                     rowMin += Math.Max(0, childMin - paddingSum);
                 }
                 else
                 {
-                    GetMinMaxSumWordsOnLine(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null);
+                    GetMinMaxSumWordsOnLine(childBox, ref min, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null, childRowMarginBase);
                 }
 
                 if (ownLines)
@@ -617,6 +623,12 @@ internal static class CssBoxHelper
     /// padding alone, the button made that item's minimum 44px, 24px more than its line, and the
     /// item, which cannot be narrower than its minimum, came out 44px wide: the logo after it
     /// stood 24px right of where browsers put it.
+    /// <para>
+    /// In a table row the path starts at each cell. The margins of the boxes around the row are
+    /// shared by its cells, not part of any one cell's share of the row's minimum, and a cell has no
+    /// margins (CSS 2.1 §8.3). Counted in each cell, the side margins of a card around a row of ten
+    /// such buttons made the flex item holding it 1462px wide, where browsers make it 582px.
+    /// </para>
     /// </remarks>
     private static void HoldToMinWidth(
         double minWidthEdge, double lineBeforeBox, double pathBeforeBox, ref double min, ref double maxSum)

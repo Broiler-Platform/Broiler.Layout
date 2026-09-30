@@ -1869,6 +1869,44 @@ public sealed class EmptyInlineBoxRectangleTests
     }
 
     /// <summary>
+    /// A 300px flex row: an item holding a block with <c>margin: 0 50px</c> around a table with one
+    /// row of three cells, each holding a button with <c>min-width: 44px</c> around a 20px icon. The
+    /// cells share the block's margins, so the item is as wide as the table, 132px, and the margins
+    /// once: 232px. Counted in each cell's share of the row's minimum, the margins made the item
+    /// 432px wide; without the min-width, the table was 60px wide and the item 160px.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Holding_A_Row_Of_Buttons_Held_To_Their_Min_Width_Counts_The_Margins_Around_It_Once()
+    {
+        var row = Row();
+        var item = Item(row);
+        var card = Item(item);
+        card.MarginLeft = "50px";
+        card.MarginRight = "50px";
+        var table = new CssBox(card, new HtmlTag("table", false, null), BaseUrl);
+        table.InheritStyle();
+        table.Display = "table";
+        var body = new CssBox(table, new HtmlTag("tbody", false, null), BaseUrl);
+        body.InheritStyle();
+        body.Display = "table-row-group";
+        var tr = new CssBox(body, new HtmlTag("tr", false, null), BaseUrl);
+        tr.InheritStyle();
+        tr.Display = "table-row";
+        for (int i = 0; i < 3; i++)
+        {
+            var td = new CssBox(tr, new HtmlTag("td", false, null), BaseUrl);
+            td.InheritStyle();
+            td.Display = "table-cell";
+            IconButton(td, "44px");
+        }
+
+        Layout(row);
+
+        Assert.Equal(132, table.Size.Width, 1);
+        Assert.Equal(232, item.Size.Width, 1);
+    }
+
+    /// <summary>
     /// Control, which passes before and after: a flex item holding an <c>&lt;input&gt;</c> 28px wide
     /// with <c>min-width: 173px</c>, the placeholder minimum Broiler.HTML's default style gives every
     /// <c>&lt;input&gt;</c>: the item is measured from the input's width, 28px. Held to the
