@@ -280,6 +280,10 @@ internal static class CssBoxHelper
         if (box.Display == CssConstants.None)
             return;
 
+        // Where the box starts on the running line and on the path to it: the margins of the boxes
+        // it is in are on its line, and on its path too (see HoldToMinWidth).
+        double minWidthEdge = AtomicInlineMinWidth(box);
+        double lineBeforeBox = maxSum, pathBeforeBox = paddingSum + marginSum;
         double? oldSum = null;
 
         // Block-level boxes start a new line, so max-content resets the running sum
@@ -357,6 +361,7 @@ internal static class CssBoxHelper
 
                 if (oldSum.HasValue)
                     maxSum = Math.Max(maxSum, oldSum.Value);
+                HoldToMinWidth(minWidthEdge, lineBeforeBox, pathBeforeBox, ref min, ref maxSum);
                 return;
             }
         }
@@ -522,6 +527,86 @@ internal static class CssBoxHelper
         // max sum is max of all the lines in the box
         if (oldSum.HasValue)
             maxSum = Math.Max(maxSum, oldSum.Value);
+
+        HoldToMinWidth(minWidthEdge, lineBeforeBox, pathBeforeBox, ref min, ref maxSum);
+    }
+
+    /// <summary>
+    /// The width from border edge to border edge that the <c>min-width</c> of
+    /// <paramref name="box"/>, an atomic inline-level box, holds it to, or 0 where it holds nothing:
+    /// for any other box, and for a percentage.
+    /// </summary>
+    /// <remarks>
+    /// CSS Sizing 3 §5.2: a box's min- and max-content contributions are held to its min and max
+    /// sizes. The layout of an inline-block holds it to its <c>min-width</c>, but this walk did not,
+    /// so a box around one was measured too narrow for it. The icon-only buttons of Wikipedia's
+    /// header are inline-flex labels with <c>min-width: 44px</c> around a 20px icon: measured
+    /// around the icon alone, each dropdown holding one came out 22px narrower than browsers make
+    /// it, and its icon was drawn over the link after it. A percentage resolves against the width
+    /// being measured, so it holds nothing here (§5.2.1).
+    /// <para>
+    /// Form controls are measured as before. Broiler.HTML's default style gives an
+    /// <c>&lt;input&gt;</c>, a <c>&lt;select&gt;</c> and a <c>&lt;textarea&gt;</c> placeholder
+    /// minimums (173px, 60px and 170px) where browsers size them from their content and
+    /// attributes; held to those, the boxes around an <c>&lt;input size=2&gt;</c> or a short
+    /// <c>&lt;select&gt;</c> came out 50-150px wider than browsers make them.
+    /// </para>
+    /// </remarks>
+    private static double AtomicInlineMinWidth(CssBox box)
+    {
+        string minWidth = box.MinWidth;
+        if (!IsAtomicInlineLevel(box.Display) || string.IsNullOrEmpty(minWidth) || minWidth == "0"
+            || minWidth == CssConstants.Auto || minWidth.Contains('%') || IsFormControlWithDefaultMinWidth(box))
+            return 0;
+
+        double length = CssLengthParser.ParseLength(
+            minWidth, box.ContainingBlock?.Size.Width ?? 0, box.GetEmHeight());
+        if (!(length > 0))
+            return 0;
+
+        double edges = box.ActualBorderLeftWidth + box.ActualBorderRightWidth
+                     + box.ActualPaddingLeft + box.ActualPaddingRight;
+        return box.BoxSizing.Equals("border-box", StringComparison.OrdinalIgnoreCase)
+            ? Math.Max(length, edges)
+            : length + edges;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="box"/> is an <c>&lt;input&gt;</c>, a <c>&lt;select&gt;</c> or a
+    /// <c>&lt;textarea&gt;</c>, the form controls that the default style gives a placeholder
+    /// minimum width (see <see cref="AtomicInlineMinWidth"/>).
+    /// </summary>
+    private static bool IsFormControlWithDefaultMinWidth(CssBox box)
+    {
+        string? name = box.HtmlTag?.Name;
+        return name != null
+            && (name.Equals("input", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("select", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("textarea", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Holds what a box adds to the running line, from <paramref name="lineBeforeBox"/>, and its
+    /// minimum, past <paramref name="pathBeforeBox"/>, to at least <paramref name="minWidthEdge"/>
+    /// (<see cref="AtomicInlineMinWidth"/>).
+    /// </summary>
+    /// <remarks>
+    /// CSS Sizing 3 §5.2: a box's contributions include its margins, and a negative margin takes
+    /// room off. The path is measured with the margins of the boxes the box is in, as its line is.
+    /// Vector's main menu dropdown is a block with <c>margin: 0 -12px</c> around a button with
+    /// <c>min-width: 44px</c>, and browsers make the flex item holding it 20px wide. Held past the
+    /// padding alone, the button made that item's minimum 44px, 24px more than its line, and the
+    /// item, which cannot be narrower than its minimum, came out 44px wide: the logo after it
+    /// stood 24px right of where browsers put it.
+    /// </remarks>
+    private static void HoldToMinWidth(
+        double minWidthEdge, double lineBeforeBox, double pathBeforeBox, ref double min, ref double maxSum)
+    {
+        if (minWidthEdge <= 0)
+            return;
+
+        maxSum = Math.Max(maxSum, lineBeforeBox + minWidthEdge);
+        min = Math.Max(min, pathBeforeBox + minWidthEdge);
     }
 
     /// <summary>

@@ -1698,6 +1698,215 @@ public sealed class EmptyInlineBoxRectangleTests
         Assert.Equal(8, Word(block, "abc").Left - block.Location.X, 1);
     }
 
+    /// <summary>
+    /// A 300px flex row: an item growing to take the room left, then an item holding an
+    /// inline-block with <c>min-width: 44px</c> around a 20px inline-block icon, as an icon-only
+    /// button is. The item is measured with the button's min-width, so it is 44px wide and the
+    /// button ends the row, 256px in, as in browsers. The item was measured 20px wide, around the
+    /// icon alone, and the button, 44px wide, started 280px in and ran 24px past the row's end.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Holding_A_Button_Held_To_Its_Min_Width_Is_That_Wide()
+    {
+        var row = Row();
+        var item = Item(row);
+        var button = IconButton(item, "44px");
+        Layout(row);
+
+        Assert.Equal(44, item.Size.Width, 1);
+        Assert.Equal(256, button.Location.X - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// As above with an absolutely positioned box, a space and 4px margins around the button, as
+    /// Wikipedia's header dropdowns hold theirs: the space is removed at the start of the item's
+    /// line, and the item is 52px wide with the button 252px in, as in browsers. The item was 32px
+    /// wide with the space, the button 272px in and 16px past the row's end; without the space and
+    /// the min-width it would be 28px wide, the button 276px in.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Starting_With_A_Positioned_Box_And_A_Space_Before_A_Button_Held_To_Its_Min_Width_Holds_It()
+    {
+        var row = Row();
+        var item = Item(row);
+        AbsoluteBox(item);
+        Text(item, " ");
+        var button = IconButton(item, "44px");
+        button.MarginLeft = "4px";
+        button.MarginRight = "4px";
+        Layout(row);
+
+        Assert.Equal(52, item.Size.Width, 1);
+        Assert.Equal(252, button.Location.X - row.Location.X, 1);
+    }
+
+    /// <summary>
+    /// As the first with 11px of padding on each side of the button: with <c>box-sizing:
+    /// border-box</c> the min-width holds the whole button, 44px wide; with <c>content-box</c> it
+    /// holds its content, and the button is 66px wide. Either way the item was 42px wide, as wide
+    /// as the icon and the padding.
+    /// </summary>
+    [Theory]
+    [InlineData("border-box", 44)]
+    [InlineData("content-box", 66)]
+    public void A_Flex_Item_Holding_A_Padded_Button_Held_To_Its_Min_Width_Is_That_Wide(string boxSizing, double width)
+    {
+        var row = Row();
+        var item = Item(row);
+        var button = IconButton(item, "44px");
+        button.BoxSizing = boxSizing;
+        button.PaddingLeft = "11px";
+        button.PaddingRight = "11px";
+        Layout(row);
+
+        Assert.Equal(width, item.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// As the first with a button 20px wide holding nothing: its min-width wins over its width
+    /// (CSS 2.1 §10.4), and the item is 44px wide. It was 20px wide.
+    /// </summary>
+    [Fact]
+    public void A_Flex_Item_Holding_A_Button_With_A_Width_Under_Its_Min_Width_Is_As_Wide_As_The_Min_Width()
+    {
+        var row = Row();
+        var item = Item(row);
+        var button = Span(item);
+        button.Display = "inline-block";
+        button.Width = "20px";
+        button.Height = "20px";
+        button.MinWidth = "44px";
+        Layout(row);
+
+        Assert.Equal(44, item.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// A float in a 10px block holding the button: the button cannot be narrower than its
+    /// min-width, so the float is 44px wide. It was 20px wide, narrower than the button in it.
+    /// </summary>
+    [Fact]
+    public void A_Float_Holding_A_Button_Held_To_Its_Min_Width_Is_At_Least_That_Wide()
+    {
+        var block = Block("10px");
+        var box = Item(block);
+        box.Float = CssConstants.Left;
+        IconButton(box, "44px");
+        Layout(block);
+
+        Assert.Equal(44, box.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: as the first with <c>min-width: 10px</c>, less than
+    /// the icon: the item is as wide as the icon, 20px.
+    /// </summary>
+    [Fact]
+    public void Control_A_Flex_Item_Holding_A_Button_Wider_Than_Its_Min_Width_Is_As_Wide_As_The_Button()
+    {
+        var row = Row();
+        var item = Item(row);
+        IconButton(item, "10px");
+        Layout(row);
+
+        Assert.Equal(20, item.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: as the first with <c>min-width: 50%</c>, which
+    /// resolves against the width being measured and so holds nothing there: the item is 20px
+    /// wide.
+    /// </summary>
+    [Fact]
+    public void Control_A_Percentage_Min_Width_Does_Not_Widen_A_Flex_Item()
+    {
+        var row = Row();
+        var item = Item(row);
+        IconButton(item, "50%");
+        Layout(row);
+
+        Assert.Equal(20, item.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a float in a 300px block holding the button with
+    /// <c>min-width: 50%</c>: the percentage holds nothing while the float is measured, and the
+    /// float is as wide as the icon, 20px. Resolved against the block around the float, it would
+    /// make the float 150px wide.
+    /// </summary>
+    [Fact]
+    public void Control_A_Percentage_Min_Width_Does_Not_Widen_A_Float()
+    {
+        var block = Block("300px");
+        var box = Item(block);
+        box.Float = CssConstants.Left;
+        IconButton(box, "50%");
+        Layout(block);
+
+        Assert.Equal(20, box.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: as the first with the button in a block with
+    /// <c>margin: 0 -12px</c>, as Vector's main menu dropdown holds its button. The margins take
+    /// 24px off the button's line, so the item is 20px wide and the block in it 44px, as in
+    /// browsers. Held to the button's min-width without those margins, the item was 44px wide,
+    /// and the block 68px.
+    /// </summary>
+    [Fact]
+    public void Control_A_Block_With_Negative_Margins_Around_A_Button_Held_To_Its_Min_Width_Takes_Them_Off()
+    {
+        var row = Row();
+        var item = Item(row);
+        var dropdown = Item(item);
+        dropdown.MarginLeft = "-12px";
+        dropdown.MarginRight = "-12px";
+        IconButton(dropdown, "44px");
+        Layout(row);
+
+        Assert.Equal(20, item.Size.Width, 1);
+        Assert.Equal(44, dropdown.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// Control, which passes before and after: a flex item holding an <c>&lt;input&gt;</c> 28px wide
+    /// with <c>min-width: 173px</c>, the placeholder minimum Broiler.HTML's default style gives every
+    /// <c>&lt;input&gt;</c>: the item is measured from the input's width, 28px. Held to the
+    /// min-width, it would be 173px wide, where browsers size an input from its content and
+    /// attributes.
+    /// </summary>
+    [Fact]
+    public void Control_A_Form_Control_Is_Measured_Without_Its_Default_Min_Width()
+    {
+        var row = Row();
+        var item = Item(row);
+        var input = new CssBox(item, new HtmlTag("input", false, null), BaseUrl);
+        input.InheritStyle();
+        input.Display = "inline-block";
+        input.Width = "28px";
+        input.Height = "20px";
+        input.MinWidth = "173px";
+        Layout(row);
+
+        Assert.Equal(28, item.Size.Width, 1);
+    }
+
+    /// <summary>
+    /// An inline-block in <paramref name="parent"/> with the <c>min-width</c> given, holding an
+    /// inline-block icon 20px square.
+    /// </summary>
+    private static CssBox IconButton(CssBox parent, string minWidth)
+    {
+        var button = Span(parent);
+        button.Display = "inline-block";
+        button.MinWidth = minWidth;
+        var icon = Span(button);
+        icon.Display = "inline-block";
+        icon.Width = "20px";
+        icon.Height = "20px";
+        return button;
+    }
+
     /// <summary>A 200px block (or as wide as given) with 20px lines of a 16px font, in a block in the root.</summary>
     private static CssBox Block(string width = "200px")
     {
