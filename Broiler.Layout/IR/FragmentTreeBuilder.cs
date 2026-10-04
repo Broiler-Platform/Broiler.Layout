@@ -1,4 +1,5 @@
 using Broiler.Layout.Engine;
+using Broiler.Layout.Net;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -626,30 +627,15 @@ internal static class FragmentTreeBuilder
     /// </summary>
     private static string TryLoadSvgContent(string dataAttr, Uri baseUrl)
     {
-        // data:image/svg+xml,<svg>...</svg>
-        const string svgDataPrefix = "data:image/svg+xml";
-        if (dataAttr.StartsWith(svgDataPrefix, StringComparison.OrdinalIgnoreCase))
+        // A data: URL carries the image itself, percent-encoded or in base64, and names no file.
+        // The markup was taken as everything after the first comma, so a base64 body reached the SVG
+        // renderer still encoded and the <object> painted nothing: the base64 branch after it, which
+        // needed the body padded besides, was never reached.
+        if (dataAttr.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
         {
-            int comma = dataAttr.IndexOf(',');
-            if (comma >= 0 && comma + 1 < dataAttr.Length)
-                return Uri.UnescapeDataString(dataAttr[(comma + 1)..]);
-
-            // base64 variant
-            int semi = dataAttr.IndexOf(';');
-            if (semi >= 0)
-            {
-                string encoding = dataAttr[(semi + 1)..];
-                int commaB64 = encoding.IndexOf(',');
-                if (commaB64 >= 0 && encoding[..commaB64].Equals("base64", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        byte[] bytes = Convert.FromBase64String(encoding[(commaB64 + 1)..]);
-                        return Encoding.UTF8.GetString(bytes);
-                    }
-                    catch { /* invalid base64 — fall through */ }
-                }
-            }
+            if (DataUrl.TryParse(dataAttr, out var mimeType, out var body) && mimeType == "image/svg+xml"
+                && DataUrl.Utf8Decode(body) is { Length: > 0 } svg)
+                return svg;
 
             return null;
         }
@@ -718,12 +704,13 @@ internal static class FragmentTreeBuilder
 
             // Only text/html objects are nested documents.  Image/SVG data is
             // handled elsewhere; honour an explicit type, else fall back to the
-            // data URL's extension.
+            // data URL's extension, or to the type a data: URL declares, which
+            // the data: branch below reads.
             string type = box.GetAttribute("type");
             bool isHtml = !string.IsNullOrEmpty(type)
                 ? type.Trim().StartsWith("text/html", StringComparison.OrdinalIgnoreCase)
                   || type.Trim().StartsWith("application/xhtml", StringComparison.OrdinalIgnoreCase)
-                : HasHtmlExtension(url);
+                : HasHtmlExtension(url) || url.StartsWith("data:", StringComparison.OrdinalIgnoreCase);
             if (!isHtml)
                 return (null, null);
         }
@@ -758,12 +745,16 @@ internal static class FragmentTreeBuilder
             return (null, null);
         }
 
-        // data:text/html,<markup>
-        if (url.StartsWith("data:text/html", StringComparison.OrdinalIgnoreCase))
+        // A data: URL carries its document, percent-encoded or in base64, and names no file. Only a
+        // data:text/html URL was read, as everything after its first comma: a base64 document was
+        // painted as the base64 text itself, and any other data: URL was looked for on disk.
+        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
         {
-            int comma = url.IndexOf(',');
-            if (comma >= 0 && comma + 1 < url.Length)
-                return (Uri.UnescapeDataString(url[(comma + 1)..]), ContainerBaseUrl(box));
+            if (DataUrl.TryParse(url, out var mimeType, out var body)
+                && mimeType is "text/html" or "application/xhtml+xml"
+                && DataUrl.Utf8Decode(body) is { Length: > 0 } markup)
+                return (markup, ContainerBaseUrl(box));
+
             return (null, null);
         }
 
