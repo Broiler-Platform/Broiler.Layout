@@ -2118,6 +2118,9 @@ internal static class CssLayoutEngine
         b.Size = new SizeF((float)ibBoxWidth, 0);
         b.ActualBottom = b.Location.Y;
 
+        if (!isReplaced)
+            PreResolvePercentageHeight(b, containerWidth);
+
         // --- Lay out children inside the inline-block ---
         // CSS Flexbox §5.4: a flex container lays its items out, and paints them, in order-modified
         // document order, and a grid container places its items in it. LayoutBlockChildren sorts a
@@ -2603,6 +2606,40 @@ internal static class CssLayoutEngine
 
         cssHeight = CssLengthParser.ParseLength(b.Height, basis, b.GetEmHeight());
         return true;
+    }
+
+    /// <summary>
+    /// Gives an inline-block whose height is a percentage of a definite height that height before
+    /// its content is laid out, as a block is given its own (CssBox.PreResolveDefiniteHeightForDescendants),
+    /// so that a percentage height in the content resolves against it.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §10.5: a percentage height resolves against the height of the containing block.
+    /// <see cref="FlowInlineBlock"/> settles the inline-block's height after its content, which it
+    /// lays out at 0px tall, and a percentage of that was 0px. reCAPTCHA centres its checkbox and its
+    /// label each in a <c>display: table; height: 100%</c> inside a
+    /// <c>display: inline-block; height: 100%</c>: the tables came out 0px tall, so
+    /// <c>vertical-align: middle</c> had nothing to centre in, and the checkbox stood at the top of
+    /// its frame. A height in pixels needs none of this, as a percentage inside it reads the
+    /// declaration (CssBox.PercentageHeightContainingBlockHeight).
+    /// </remarks>
+    private static void PreResolvePercentageHeight(CssBox b, double containerWidth)
+    {
+        if (b.Display != CssConstants.InlineBlock
+            || string.IsNullOrEmpty(b.Height)
+            || !b.Height.Contains('%')
+            || !TryResolveAtomicInlineSpecifiedHeight(b, containerWidth, out double cssHeight))
+        {
+            return;
+        }
+
+        double height = b.BoxSizing.Equals("border-box", StringComparison.OrdinalIgnoreCase)
+            ? cssHeight
+            : cssHeight
+                + b.ActualBorderTopWidth + b.ActualBorderBottomWidth
+                + b.ActualPaddingTop + b.ActualPaddingBottom;
+
+        b.Size = new SizeF(b.Size.Width, (float)height);
     }
 
     /// <summary>
@@ -3686,6 +3723,14 @@ internal static class CssLayoutEngine
     /// of text its font's ascent below its top and an image at its bottom. A last line with an
     /// atomic inline on it has that box's baseline among its own, which is not tracked, so it gives
     /// null too, and the inline-block stands as it did before its baseline was tracked at all.
+    /// <para>
+    /// The lines in a table are not looked at: browsers take an inline-block's baseline from the
+    /// lines around a table, and one holding nothing but a table stands on its bottom margin edge,
+    /// whatever the table holds. Taken from the table, the baseline of reCAPTCHA's label, the text
+    /// in a cell in an inline-block, was that text's, while the inline-block beside it, whose cell
+    /// holds nothing but the checkbox, stood on its bottom edge: the label's inline-block came out
+    /// 61px lower, below the frame's bottom, where browsers put the two level.
+    /// </para>
     /// </remarks>
     internal static double? LastLineBaseline(CssBox box)
     {
@@ -3772,7 +3817,8 @@ internal static class CssLayoutEngine
             if (child.Display == CssConstants.None
                 || child.Position is CssConstants.Absolute or CssConstants.Fixed
                 || child.Float != CssConstants.None
-                || child.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table")
+                || child.Display is CssConstants.InlineBlock or "inline-flex" or "inline-grid" or "inline-table"
+                || child.Display == CssConstants.Table)
             {
                 continue;
             }
