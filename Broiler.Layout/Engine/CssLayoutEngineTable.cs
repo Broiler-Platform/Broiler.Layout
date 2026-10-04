@@ -1297,7 +1297,14 @@ internal sealed class CssLayoutEngineTable
         if (rowBounds.Count == 0)
             return naturalBottom;
 
-        double cbHeight = _tableBox.ContainingBlock?.ActualHeight ?? 0;
+        // CSS 2.1 §10.5: a percentage resolves against the containing block's content height where
+        // that is definite, and is auto otherwise, which leaves the rows as they are. It was read
+        // from the containing block's ActualHeight, which resolves the containing block's own
+        // declaration against the containing block's own size so far and keeps the result: for a
+        // `display: inline-block; height: 100%` still being laid out that is 0px, and the rows of a
+        // `height: 100%` table in it stayed as short as their content; for a `height: 50%` one 50px
+        // tall it is 25px, and they came to 25px.
+        double cbHeight = _tableBox.TryGetPercentageBlockSizeBasis(out double basis) ? basis : 0;
         double em = _tableBox.GetEmHeight();
 
         double target = naturalBottom;

@@ -524,13 +524,27 @@ internal static class CssBoxHelper
                 if (ownLines)
                     lineHoldsContent = false;
 
+                double lineBeforeChild = maxSum;
+
                 if (sumsChildMinimums)
                 {
                     // The cell's minimum is measured with this row's path; what the cell adds to it
                     // is its share of the row.
                     double childMin = 0;
                     GetMinMaxSumWordsOnLine(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null, childRowMarginBase);
-                    rowMin += Math.Max(0, childMin - paddingSum);
+                    double cellMin = Math.Max(0, childMin - paddingSum);
+                    rowMin += cellMin;
+                    HoldToCellWidth(childBox, lineBeforeChild, cellMin, ref maxSum);
+                }
+                else if (childBox.Display == CssConstants.TableCell)
+                {
+                    // A cell straight in a table, before the table has given it the anonymous row it
+                    // is in: its minimum is measured as any other child's, and kept apart only for
+                    // HoldToCellWidth.
+                    double childMin = 0;
+                    GetMinMaxSumWordsOnLine(childBox, ref childMin, ref maxSum, ref paddingSum, ref marginSum, ref lineHoldsContent, null, childRowMarginBase);
+                    min = Math.Max(min, childMin);
+                    HoldToCellWidth(childBox, lineBeforeChild, Math.Max(0, childMin - paddingSum), ref maxSum);
                 }
                 else
                 {
@@ -638,6 +652,39 @@ internal static class CssBoxHelper
 
         maxSum = Math.Max(maxSum, lineBeforeBox + minWidthEdge);
         min = Math.Max(min, pathBeforeBox + minWidthEdge);
+    }
+
+    /// <summary>
+    /// Makes what <paramref name="cell"/>, a table cell given a width of its own, adds to its row's
+    /// line, from <paramref name="lineBeforeCell"/>, that width from border edge to border edge, or
+    /// the cell's minimum, <paramref name="cellMin"/>, where that is wider.
+    /// </summary>
+    /// <remarks>
+    /// CSS 2.1 §17.5.2.2: a column given a width is that wide unless its cells need more, as
+    /// CssLayoutEngineTable.MeasureColumns makes it, and browsers measure a table from outside it
+    /// the same way: a <c>width: 152px</c> cell holding "I'm not a robot" makes a 152px table and a
+    /// shrink-to-fit box around it 152px wide, and a <c>width: 50px</c> cell holding a sentence a
+    /// 50px table. Its minimum stays its content's: in a 20px container that table is 20px wide.
+    /// This walk took the cell for its content: reCAPTCHA's label, a <c>width: 152px</c> cell in a
+    /// table in an inline-block, made the inline-block as wide as its text, 89px, and the table ran
+    /// out of it. A percentage resolves against the width being measured, and holds nothing here
+    /// (CSS Sizing 3 §5.2.1).
+    /// </remarks>
+    private static void HoldToCellWidth(CssBox cell, double lineBeforeCell, double cellMin, ref double maxSum)
+    {
+        if (cell.Display != CssConstants.TableCell
+            || string.IsNullOrEmpty(cell.Width)
+            || cell.Width == CssConstants.Auto
+            || cell.Width.Contains('%'))
+        {
+            return;
+        }
+
+        double width = CssLengthParser.ParseLength(cell.Width, 0, cell.GetEmHeight());
+        if (!(width > 0))
+            return;
+
+        maxSum = lineBeforeCell + Math.Max(cell.ResolveSpecifiedWidthToBorderBox(width), cellMin);
     }
 
     /// <summary>

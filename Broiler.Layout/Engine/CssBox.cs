@@ -408,7 +408,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         foreach (var child in box.Boxes)
         {
+            // A table's lines are its cells', not the inline-block's (see
+            // CssLayoutEngine.LastLineBaseline).
             if (child.Display == CssConstants.None
+                || child.Display == CssConstants.Table
                 || child.Position == CssConstants.Absolute
                 || child.Position == CssConstants.Fixed)
             {
