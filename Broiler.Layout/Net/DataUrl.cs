@@ -33,9 +33,10 @@ namespace Broiler.Layout.Net;
 /// such as <c>data://h:x/,X</c> with its invalid port, still decodes here.
 /// </para>
 /// <para>
-/// Broiler.HTML, Broiler.Layout and Broiler.HtmlBridge all decode <c>data:</c> URLs, and none of
-/// them can reach another's internals, so each carries this class. Keep the copies identical: each
-/// repository tests its copy against the same web-platform-tests vectors.
+/// Broiler.Net's <c>Broiler.Net.Http.DataUrl</c> is the public form of this processor, which
+/// Broiler.HTML and Broiler.HtmlBridge use. Broiler.Layout does not reference Broiler.Net, so it
+/// keeps this internal copy, which answers only the MIME type's essence. Keep the two in step: both
+/// are tested against the same web-platform-tests vectors.
 /// </para>
 /// </remarks>
 internal static class DataUrl
