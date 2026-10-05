@@ -699,7 +699,12 @@ internal static class CssLayoutEngine
         // inline formatting context has actual inline content (words or
         // inline-level boxes).  An empty block should have zero content
         // height from the IFC.
-        bool hasExplicitHeight = blockBox.Height != null && blockBox.Height != CssConstants.Auto;
+        // An intrinsic-sizing keyword (min-/max-/fit-content) is not an explicit height: the content height
+        // is its used value. Taken for one, it dropped the strut and -- in a scroll container, which the
+        // clamp below holds to its explicit height -- the content too: a popover (overflow: auto;
+        // height: fit-content) was as tall as its padding and border.
+        bool hasExplicitHeight = blockBox.Height != null && blockBox.Height != CssConstants.Auto
+            && !CssBox.IsIntrinsicSizingHeightKeyword(blockBox.Height);
         bool hasInlineContent = false;
         foreach (var lb in blockBox.LineBoxes)
         {

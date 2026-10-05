@@ -283,6 +283,27 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// intrinsic-keyword/ shrink-to-fit (abspos, float, orthogonal) widths, the
     /// min/max-widthclamps, and auto-margin centering. Sets Size.Width.
     /// </summary>
+    /// <summary>
+    /// The width a content-sized box may take out of <paramref name="containingWidth"/>: for an
+    /// absolutely or fixed positioned box, the containing block less the insets it specifies (CSS2.1
+    /// §10.3.7 solves with an auto inset at 0; CSS Position 3 calls what is left the inset-modified
+    /// containing block); for any other box, the containing block. Margins, border and padding are
+    /// the caller's to take off.
+    /// </summary>
+    private double OutOfFlowAvailableWidth(double containingWidth)
+    {
+        if (Position != CssConstants.Absolute && Position != CssConstants.Fixed)
+            return containingWidth;
+
+        double insets = 0;
+        if (Left != null && Left != CssConstants.Auto)
+            insets += ParseUsedLength(Left, containingWidth);
+        if (Right != null && Right != CssConstants.Auto)
+            insets += ParseUsedLength(Right, containingWidth);
+
+        return Math.Max(0, containingWidth - insets);
+    }
+
     private void ResolveBlockUsedWidth(ILayoutEnvironment g)
     {
         // CSS2.1 §9.6.1: The containing block for a fixed-position
@@ -313,6 +334,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                     - ContainingBlock.ActualBorderLeftWidth - ContainingBlock.ActualBorderRightWidth;
         }
 
+        // The containing block's width stays the basis of a percentage max-/min-width (CSS2.1 §10.4)
+        // whatever `width` below resolves to. It used to be that resolved width: `width: 500px;
+        // max-width: 50%` was clamped to 250px of 500 rather than to 50% of the containing block.
+        double basisWidth = width;
+
+        // And what a content-sized box may take: the containing block less a positioned box's
+        // specified insets (CSS2.1 §10.3.7 solves with an auto inset at 0). The box's own margins,
+        // border and padding come off it where it is used.
+        double contentSizedAvailable = OutOfFlowAvailableWidth(width);
+
         // CSS2.1 §10.3.4/§10.3.8: a block-level or out-of-flow *replaced* element resolves its width
         // with the inline rules (§10.3.2) — an auto width is its natural width, not the containing
         // block's, and for an absolutely positioned one it is not the inset constraint equation
@@ -330,19 +361,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // shrink-wraps to content rather than filling the inset-modified containing
             // block, so a `dialog:modal { inset:0; width:fit-content; margin:auto }` box
             // sizes to its content and the auto margins then centre it (§10.3.7). For such a
-            // box with both opposing insets, fit-content clamps to the space between the
-            // insets (the inset-modified containing block), not the full containing block.
-            double availableForIntrinsic = width;
-            if ((Position == CssConstants.Absolute || Position == CssConstants.Fixed)
-                && Left != null && Left != CssConstants.Auto
-                && Right != null && Right != CssConstants.Auto)
-            {
-                double insetLeft = ParseUsedLength(Left, width);
-                double insetRight = ParseUsedLength(Right, width);
-                availableForIntrinsic = Math.Max(0, width - insetLeft - insetRight);
-            }
-
-            width = ResolveIntrinsicWidth(g, Width, availableForIntrinsic);
+            // box, fit-content clamps to the space its insets leave (the inset-modified
+            // containing block), not the full containing block.
+            width = ResolveIntrinsicWidth(g, Width, contentSizedAvailable);
         }
         else if (Width != CssConstants.Auto && !string.IsNullOrEmpty(Width) && !IsIntrinsicWidthKeyword(Width))
         {
@@ -407,7 +428,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         if (!replacedSizeSettled && MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
         {
-            double maxW = ResolveMaxWidthLength(width);
+            double maxW = ResolveMaxWidthLength(basisWidth);
             maxW = ResolveSpecifiedWidthToBorderBox(maxW);
             if (width > maxW) width = maxW;
         }
@@ -416,7 +437,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // max per §10.4) — also when Width is auto.
         if (!replacedSizeSettled && MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
         {
-            double minW = ResolveMinWidthLength(width);
+            double minW = ResolveMinWidthLength(basisWidth);
 
             minW = ResolveSpecifiedWidthToBorderBox(minW);
 
@@ -552,7 +573,15 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // float's width would incorrectly sum with a preceding
             // block child's width.
             double preferred = ComputeShrinkToFitWidth();
-            double available = width - ActualMarginLeft - ActualMarginRight;
+
+            // §10.3.7's available width is what solving for `width` leaves with the auto inset at
+            // 0: the containing block less the other inset, the margins, the border and the padding.
+            // It was the containing block less the margins, so a positioned box of long text was as
+            // wide as its containing block in content alone and overflowed it by its padding and
+            // border. GetMinMaxWidth's minimum is a border-box width, preferred a content-box one.
+            double ownPadBorder = ActualBorderLeftWidth + ActualBorderRightWidth
+                                + ActualPaddingLeft + ActualPaddingRight;
+            double available = Math.Max(0, contentSizedAvailable - ActualMarginLeft - ActualMarginRight - ownPadBorder);
 
             GetMinMaxWidth(out double prefMin, out _);
 
@@ -563,11 +592,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (double.IsNaN(preferred))
                 preferred = 0;
 
-            double stfWidth = Math.Min(Math.Max(prefMin, available), preferred);
+            double stfWidth = Math.Min(Math.Max(Math.Max(0, prefMin - ownPadBorder), available), preferred);
 
             if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
             {
-                double maxW = ResolveMaxWidthLength(width);
+                double maxW = ResolveMaxWidthLength(basisWidth);
 
                 if (stfWidth > maxW)
                     stfWidth = maxW;
@@ -575,7 +604,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
             {
-                double minW = ResolveMinWidthLength(width);
+                double minW = ResolveMinWidthLength(basisWidth);
 
                 if (stfWidth < minW)
                     stfWidth = minW;
@@ -584,8 +613,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // CSS2.1 §10.3.7: Shrink-to-fit gives the content
             // width; add own borders and padding for the border-box
             // width that Size.Width represents.
-            stfWidth += ActualBorderLeftWidth + ActualBorderRightWidth
-                      + ActualPaddingLeft + ActualPaddingRight;
+            stfWidth += ownPadBorder;
 
             Size = new SizeF((float)stfWidth, Size.Height);
         }
@@ -645,8 +673,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // already resolved the right answer a few lines up and this branch overwrote it.
             EnsureDescendantWordsMeasured(g);
 
+            // §10.3.5 takes the same available width as §10.3.7: the containing block less the
+            // float's margins, border and padding. See the positioned branch above.
+            double ownPadBorder = ActualBorderLeftWidth + ActualBorderRightWidth
+                                + ActualPaddingLeft + ActualPaddingRight;
             double preferred = ComputeShrinkToFitWidth();
-            double available = width - ActualMarginLeft - ActualMarginRight;
+            double available = Math.Max(0, basisWidth - ActualMarginLeft - ActualMarginRight - ownPadBorder);
 
             GetMinMaxWidth(out double prefMin, out _);
 
@@ -656,11 +688,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (double.IsNaN(preferred))
                 preferred = 0;
 
-            double stfWidth = Math.Min(Math.Max(prefMin, available), preferred);
+            double stfWidth = Math.Min(Math.Max(Math.Max(0, prefMin - ownPadBorder), available), preferred);
 
             if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
             {
-                double maxW = ResolveMaxWidthLength(width);
+                double maxW = ResolveMaxWidthLength(basisWidth);
 
                 if (stfWidth > maxW)
                     stfWidth = maxW;
@@ -668,14 +700,13 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
             {
-                double minW = ResolveMinWidthLength(width);
+                double minW = ResolveMinWidthLength(basisWidth);
 
                 if (stfWidth < minW)
                     stfWidth = minW;
             }
 
-            stfWidth += ActualBorderLeftWidth + ActualBorderRightWidth
-                      + ActualPaddingLeft + ActualPaddingRight;
+            stfWidth += ownPadBorder;
 
             Size = new SizeF((float)stfWidth, Size.Height);
         }
@@ -715,7 +746,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
             {
-                double maxW = ResolveMaxWidthLength(width);
+                double maxW = ResolveMaxWidthLength(basisWidth);
 
                 if (legendWidth > maxW)
                     legendWidth = maxW;
@@ -723,7 +754,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
             {
-                double minW = ResolveMinWidthLength(width);
+                double minW = ResolveMinWidthLength(basisWidth);
 
                 if (legendWidth < minW)
                     legendWidth = minW;
@@ -818,7 +849,12 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 maxContent = 0;
 
             double minContent = Math.Max(0, minContentBorderBox - ownPadBorder);
-            double available = width - ActualMarginLeft - ActualMarginRight;
+
+            // Not `width`: by now that is the box's own border-box width as the keyword first
+            // resolved it, and fit-content taken against it again added the padding and the border a
+            // second time -- a popover of long text came out wider than the viewport by twice its
+            // padding and border, where Chromium wraps it at the viewport's edges.
+            double available = Math.Max(0, contentSizedAvailable - ActualMarginLeft - ActualMarginRight - ownPadBorder);
 
             double resolved = Width.StartsWith("min-content", StringComparison.OrdinalIgnoreCase)
                 ? minContent
@@ -828,7 +864,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MaxWidth != "none" && !string.IsNullOrEmpty(MaxWidth))
             {
-                double maxW = ResolveMaxWidthLength(width);
+                double maxW = ResolveMaxWidthLength(basisWidth);
 
                 if (resolved > maxW)
                     resolved = maxW;
@@ -836,7 +872,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
             if (MinWidth != "0" && !string.IsNullOrEmpty(MinWidth))
             {
-                double minW = ResolveMinWidthLength(width);
+                double minW = ResolveMinWidthLength(basisWidth);
 
                 if (resolved < minW)
                     resolved = minW;

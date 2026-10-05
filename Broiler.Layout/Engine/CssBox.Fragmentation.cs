@@ -411,7 +411,7 @@ internal partial class CssBox
     /// <remarks>
     /// Applied after the child is laid out rather than before, because its position is only known
     /// then — and the whole laid-out subtree moves with it, which is what
-    /// <see cref="OffsetTop"/> is for. Nothing else needs adjusting:
+    /// <see cref="OffsetTop(double)"/> is for. Nothing else needs adjusting:
     /// <see cref="CssBoxProperties.ActualBottom"/> is derived from the box's origin
     /// (<c>Location.Y + Size.Height</c>), so moving the origin carries the bottom edge — the edge
     /// the next sibling positions itself from — with it. Advancing it as well, which this used to

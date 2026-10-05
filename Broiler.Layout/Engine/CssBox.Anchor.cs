@@ -349,13 +349,18 @@ partial class CssBox
             (explicitH, percentH) = (Size.Height, null);
         }
 
+        // An auto size is the content's, as CSS Anchor Positioning's normal self-alignment has it, unless the
+        // box asks to stretch: a childless box with no width of its own is no wider than its padding and border
+        // (Chromium, measured). It filled the area.
         target = PositionAreaGrid.ResolveElementBox(
             c,
             ResolveInset(Top, c.Height), ResolveInset(Right, c.Width),
             ResolveInset(Bottom, c.Height), ResolveInset(Left, c.Width),
             explicitWidth: explicitW, percentWidth: percentW,
             explicitHeight: explicitH, percentHeight: percentH,
-            parsed);
+            parsed,
+            autoWidthIsContent: !string.Equals(JustifySelf, "stretch", StringComparison.OrdinalIgnoreCase),
+            autoHeightIsContent: !string.Equals(AlignSelf, "stretch", StringComparison.OrdinalIgnoreCase));
         return true;
     }
 

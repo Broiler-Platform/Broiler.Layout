@@ -290,8 +290,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             if (HtmlTag == null)
                 return false;
 
-            // <a> links (without only an id anchor)
-            if (HtmlTag.Name == HtmlConstants.A && !HtmlTag.HasAttribute("id"))
+            // An <a> is a link when it has an href (HTML §4.6.1), whatever else it carries. Asking for
+            // no id instead, the rule for an old page's named anchor, made every link with an id
+            // unclickable and every placeholder <a> without one a link to its own page.
+            if (HtmlTag.Name == HtmlConstants.A && HtmlTag.HasAttribute(HtmlConstants.Href))
                 return true;
 
             // <button> elements
@@ -539,13 +541,17 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // the scrolled geometry; independent of the anchor pass that follows.
                 RunStickyPositioning(this);
                 RunNativeAnchorPlacement(this);
-                // CSS2.1 §10.6.4 block-axis auto-margin centring for out-of-flow boxes whose used
-                // height is only final now (content / intrinsic-keyword heights) — the inline axis and
-                // definite heights are centred in-line during layout. Runs last so it sees the final
-                // (scrolled / anchor-placed) geometry. Powers content-height modal <dialog> vertical
-                // centring; inert unless such a box exists.
-                CenterOutOfFlowBlockAxis(this);
             }
+
+            // CSS2.1 §10.6.4 block-axis auto-margin centring for out-of-flow boxes whose used
+            // height is only final now (content / intrinsic-keyword heights) — the inline axis and
+            // definite heights are centred in-line during layout. Runs last so it sees the final
+            // (scrolled / anchor-placed) geometry. Powers content-height modal <dialog> and popover
+            // vertical centring; inert unless such a box exists. With native placement or without:
+            // gated on it, a renderer that bakes anchor positions itself never centred them, and a
+            // modal dialog or a popover stood at the top of the viewport.
+            if (ParentBox == null)
+                CenterOutOfFlowBlockAxis(this);
 
             // Multithreading item #13: count how much of the finished tree sits under a subtree
             // the item proposes to claim. One walk at the root, only while the layout-composition

@@ -156,7 +156,25 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         return pos - imcbStart;
     }
 
-    internal void OffsetTop(double amount)
+    internal void OffsetTop(double amount) => OffsetTop(amount, movedInFlow: null);
+
+    /// <summary>
+    /// Moves this box down by <paramref name="amount"/> in its parent's flow, as a margin that collapses
+    /// through its top moves it, with what it holds -- except an absolutely positioned box that its own
+    /// <c>top</c> or <c>bottom</c> places against a containing block outside this one, which stays where
+    /// that block put it (CSS2.1 §10.6.4).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="OffsetTop(double)"/> moves everything in the box, which is right for what moves the
+    /// content of the box's containing block as well -- a scroll container scrolls by moving each of its
+    /// children, and an absolutely positioned box in one whose containing block is the scroll container
+    /// scrolls with them. A margin moves only the box: in a body with no margin holding
+    /// <c>&lt;a style="position: absolute; top: 40px"&gt;</c> and then a paragraph, the paragraph's
+    /// margin moved the body 16px down with the link in it, which Chromium draws 40px down.
+    /// </remarks>
+    internal void OffsetTopInFlow(double amount) => OffsetTop(amount, movedInFlow: this);
+
+    private void OffsetTop(double amount, CssBox? movedInFlow)
     {
         List<CssLineBox> lines = [.. Rectangles.Keys];
 
@@ -174,11 +192,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // CSS2.1 §9.6.1: position:fixed elements are positioned relative
             // to the viewport and must not be shifted by ancestor offsets
             // (e.g. a parent's position:relative visual offset).
-            if (b.Position != CssConstants.Fixed)
-                b.OffsetTop(amount);
+            if (b.Position != CssConstants.Fixed && !(movedInFlow != null && b.IsPlacedVerticallyOutside(movedInFlow)))
+                b.OffsetTop(amount, movedInFlow);
         }
 
-        _listItemBox?.OffsetTop(amount);
+        _listItemBox?.OffsetTop(amount, movedInFlow);
 
         // Where the baselines of the lines the box lays its content out on are moves with that
         // content. The line-clamp measure reads them once the box's children are placed, and a

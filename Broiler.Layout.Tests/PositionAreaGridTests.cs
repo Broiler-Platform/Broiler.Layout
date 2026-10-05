@@ -263,11 +263,14 @@ public sealed class PositionAreaGridTests
     [Theory]
     // Start cell aligns element to the cell end (toward the anchor): offset = slack.
     [InlineData(PositionAreaSpan.Start, 100.0, 30.0, 70.0)]
+    // A span ending at the anchor's far edge (span-left/span-top) also aligns toward the anchor, to its end
+    // (Chromium, measured: bottom span-left puts the box's right edge at the anchor's right edge).
+    [InlineData(PositionAreaSpan.SpanStart, 100.0, 30.0, 70.0)]
     // Center: offset = slack / 2.
     [InlineData(PositionAreaSpan.Center, 100.0, 30.0, 35.0)]
-    // End and spanning selections align to the cell start: offset = 0.
+    // End and the span starting at the anchor align to the cell start: offset = 0. A span over all three tracks
+    // centres on the anchor in ResolveElementBox; with no anchor to centre on, it is the start.
     [InlineData(PositionAreaSpan.End, 100.0, 30.0, 0.0)]
-    [InlineData(PositionAreaSpan.SpanStart, 100.0, 30.0, 0.0)]
     [InlineData(PositionAreaSpan.SpanEnd, 100.0, 30.0, 0.0)]
     [InlineData(PositionAreaSpan.SpanAll, 100.0, 30.0, 0.0)]
     // No slack (element ≥ cell) → zero regardless of selection.
@@ -276,5 +279,50 @@ public sealed class PositionAreaGridTests
     public void AlignmentOffset(PositionAreaSpan sel, double cellSize, double elementSize, double expected)
     {
         Assert.Equal(expected, PositionAreaGrid.ComputeAlignmentOffset(sel, cellSize, elementSize));
+    }
+
+    /// <summary>
+    /// Chromium's placements (measured) of a 26.56x25.59 box against an 80x30
+    /// anchor at (300, 100) in a 1024-wide containing block: an area over all three columns centres it on the
+    /// anchor, a side and the centre put it against the anchor's edge, a side alone at the column's edge
+    /// nearest the anchor, and the centre column centres it.
+    /// </summary>
+    [Theory]
+    [InlineData("bottom", 326.72, 130.0)]
+    [InlineData("bottom span-left", 353.44, 130.0)]
+    [InlineData("bottom span-right", 300.0, 130.0)]
+    [InlineData("bottom left", 273.44, 130.0)]
+    [InlineData("bottom right", 380.0, 130.0)]
+    [InlineData("bottom center", 326.72, 130.0)]
+    [InlineData("top span-all", 326.72, 74.41)]
+    [InlineData("left center", 273.44, 102.205)]
+    public void A_Box_Is_Placed_As_Chromium_Places_It(string positionArea, double left, double top)
+    {
+        var area = PositionAreaValue.Parse(positionArea);
+        var cell = PositionAreaGrid.ComputeCell(0, 0, 1024, 768, 300, 100, 380, 130, area);
+
+        var box = PositionAreaGrid.ResolveElementBox(cell, 0, 0, 0, 0, 26.56, null, 25.59, null, area);
+
+        Assert.Equal(left, box.Left, 2);
+        Assert.Equal(top, box.Top, 2);
+    }
+
+    /// <summary>
+    /// An auto size is the content's under normal alignment -- an empty box is 0x0, centred on the anchor in
+    /// an area over all three columns (Chromium: at (340, 130)) -- and the area's under stretch.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 0.0, 340.0)]
+    [InlineData(false, 1024.0, 0.0)]
+    public void An_Auto_Size_Is_The_Contents_Unless_The_Box_Stretches(bool content, double width, double left)
+    {
+        var area = PositionAreaValue.Parse("bottom");
+        var cell = PositionAreaGrid.ComputeCell(0, 0, 1024, 768, 300, 100, 380, 130, area);
+
+        var box = PositionAreaGrid.ResolveElementBox(cell, 0, 0, 0, 0, null, null, null, null, area,
+            autoWidthIsContent: content, autoHeightIsContent: content);
+
+        Assert.Equal(width, box.Width, 2);
+        Assert.Equal(left, box.Left, 2);
     }
 }
