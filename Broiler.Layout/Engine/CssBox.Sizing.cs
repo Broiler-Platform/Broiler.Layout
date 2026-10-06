@@ -43,7 +43,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// content-derived height as a border-box value and drop the border/padding);
     /// leave the content-computed <c>ActualBottom</c> in place and let the §10.7
     /// min-/max-height clamp apply.</summary>
-    private static bool IsIntrinsicSizingHeightKeyword(string value) =>
+    internal static bool IsIntrinsicSizingHeightKeyword(string value) =>
         IsIntrinsicSizingWidthKeyword(value);
 
     private double ResolveSpecifiedHeightToBorderBox(double cssHeight)

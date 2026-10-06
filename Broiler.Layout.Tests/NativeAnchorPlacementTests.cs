@@ -99,11 +99,39 @@ public sealed class NativeAnchorPlacementTests
         Assert.Equal(30, target.Size.Height, 3);
     }
 
+    /// <summary>
+    /// An auto-sized childless box is as big as its content -- nothing -- under normal self-alignment, at the
+    /// start of the bottom-right cell (Chromium, measured). It filled the cell, as
+    /// an older draft of CSS Anchor Positioning had it; a box that asks to stretch still does (below).
+    /// </summary>
     [Fact(Timeout = 600000)]
-    public void Pass_FillsCell_WhenAutoWidthChildlessBox()
+    public void Pass_ContentSizes_AnAutoSizedChildlessBox()
+    {
+        var (root, _) = FillCellFixture(out var target);
+        try
+        {
+            NativeAnchorPlacement.Enabled = true;
+            CssBox.RunNativeAnchorPlacement(root);
+        }
+        finally { NativeAnchorPlacement.Enabled = false; }
+
+        Assert.Equal(60, target.Location.X, 3);
+        Assert.Equal(60, target.Location.Y, 3);
+        Assert.Equal(0, target.Size.Width, 3);
+        Assert.Equal(0, target.Size.Height, 3);
+    }
+
+    /// <summary>
+    /// Under <c>stretch</c> an auto-sized childless box fills its cell. Passes before and after: every auto box
+    /// filled its cell, and now only one that stretches does.
+    /// </summary>
+    [Fact(Timeout = 600000)]
+    public void Pass_FillsCell_WhenAStretchedChildlessBoxHasNoSize()
     {
         var (root, cb) = FillCellFixture(out var target);
-        // Auto width/height (default) + childless + content-box → fills the cell.
+        // Auto width/height + stretch + childless + content-box → fills the cell.
+        target.JustifySelf = "stretch";
+        target.AlignSelf = "stretch";
         try
         {
             NativeAnchorPlacement.Enabled = true;
@@ -202,8 +230,10 @@ public sealed class NativeAnchorPlacementTests
     public void Pass_BorderBox_FillsCell_AsBorderBox()
     {
         var (root, _) = FillCellFixture(out var target);
-        // Auto width + border-box → the border box fills the cell (140), padding/border
+        // Auto width + stretch + border-box → the border box fills the cell (140), padding/border
         // eat into the content box rather than extending beyond the cell.
+        target.JustifySelf = "stretch";
+        target.AlignSelf = "stretch";
         target.BoxSizing = "border-box";
         target.PaddingLeft = "10px";
         target.PaddingRight = "10px";
@@ -679,6 +709,9 @@ public sealed class NativeAnchorPlacementTests
         target.Position = "absolute";
         target.PositionArea = "bottom right";
         target.PositionAnchor = "--a";
+        // Stretched, so it fills its cell and the cell's size says which containing block it has.
+        target.JustifySelf = "stretch";
+        target.AlignSelf = "stretch";
         return (root, cb);
     }
 

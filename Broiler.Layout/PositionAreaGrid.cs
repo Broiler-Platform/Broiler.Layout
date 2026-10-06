@@ -7,7 +7,18 @@ namespace Broiler.Layout;
 /// The rectangle of a resolved CSS <c>position-area</c> grid cell, in the same
 /// coordinate space as the inputs to <see cref="PositionAreaGrid.ComputeCell"/>.
 /// </summary>
-public readonly record struct PositionAreaCell(double Left, double Top, double Width, double Height);
+public readonly record struct PositionAreaCell(double Left, double Top, double Width, double Height)
+{
+    /// <summary>
+    /// The anchor box's centre along the inline axis, in the cell's coordinate space, when the cell was
+    /// computed against an anchor (<see cref="PositionAreaGrid.ComputeCell"/>): where a box in an area that
+    /// spans all three columns is centred.
+    /// </summary>
+    public double? AnchorCenterX { get; init; }
+
+    /// <summary>The anchor box's centre along the block axis; see <see cref="AnchorCenterX"/>.</summary>
+    public double? AnchorCenterY { get; init; }
+}
 
 /// <summary>
 /// The used geometry of an element positioned within a <c>position-area</c> grid
@@ -98,7 +109,11 @@ public static class PositionAreaGrid
         return new PositionAreaCell(
             colStart, rowStart,
             Math.Max(0, colEnd - colStart),
-            Math.Max(0, rowEnd - rowStart));
+            Math.Max(0, rowEnd - rowStart))
+        {
+            AnchorCenterX = (anchorLeft + anchorRight) / 2,
+            AnchorCenterY = (anchorTop + anchorBottom) / 2,
+        };
     }
 
     /// <summary>
@@ -120,12 +135,21 @@ public static class PositionAreaGrid
     /// <param name="explicitHeight">Explicit height in px, if the used value is a length; else null.</param>
     /// <param name="percentHeight">Height as a percentage number, if a percentage; else null.</param>
     /// <param name="area">The parsed <c>position-area</c> selections (drive alignment).</param>
+    /// <param name="autoWidthIsContent">
+    /// Whether a width that is neither a length nor a percentage is the box's content size -- zero, for the
+    /// childless boxes a caller sizes from this -- rather than the IMCB's: CSS Anchor Positioning's
+    /// <c>normal</c> self-alignment, which is not <c>stretch</c>. Off, the box fills the IMCB, as an older draft
+    /// had it and the bridge's bake still asks.
+    /// </param>
+    /// <param name="autoHeightIsContent">The same for the height.</param>
     public static PositionAreaBox ResolveElementBox(
         PositionAreaCell cell,
         double insetTop, double insetRight, double insetBottom, double insetLeft,
         double? explicitWidth, double? percentWidth,
         double? explicitHeight, double? percentHeight,
-        PositionAreaValue area)
+        PositionAreaValue area,
+        bool autoWidthIsContent = false,
+        bool autoHeightIsContent = false)
     {
         double cellW = cell.Width;
         double cellH = cell.Height;
@@ -138,8 +162,8 @@ public static class PositionAreaGrid
 
         // Resolve element dimensions: percentages against the cell, explicit lengths
         // clamped to the cell, otherwise fill the IMCB.
-        double resolvedW = imcbW;
-        double resolvedH = imcbH;
+        double resolvedW = autoWidthIsContent ? 0 : imcbW;
+        double resolvedH = autoHeightIsContent ? 0 : imcbH;
         if (percentWidth.HasValue)
             resolvedW = cellW * percentWidth.Value / 100.0;
         else if (explicitWidth.HasValue && explicitWidth.Value > 0)
@@ -149,10 +173,29 @@ public static class PositionAreaGrid
         else if (explicitHeight.HasValue && explicitHeight.Value > 0)
             resolvedH = Math.Min(explicitHeight.Value, cellH);
 
-        double left = cell.Left + ComputeAlignmentOffset(area.Inline, cellW, resolvedW);
-        double top = cell.Top + ComputeAlignmentOffset(area.Block, cellH, resolvedH);
+        double left = area.Inline == PositionAreaSpan.SpanAll && cell.AnchorCenterX is { } centerX
+            ? CenterOnAnchor(cell.Left, cellW, centerX, resolvedW)
+            : cell.Left + ComputeAlignmentOffset(area.Inline, cellW, resolvedW);
+        double top = area.Block == PositionAreaSpan.SpanAll && cell.AnchorCenterY is { } centerY
+            ? CenterOnAnchor(cell.Top, cellH, centerY, resolvedH)
+            : cell.Top + ComputeAlignmentOffset(area.Block, cellH, resolvedH);
 
         return new PositionAreaBox(imcbLeft, imcbTop, imcbW, imcbH, resolvedW, resolvedH, left, top);
+    }
+
+    /// <summary>
+    /// CSS Anchor Positioning's <c>anchor-center</c>, which <c>normal</c> alignment is in an axis whose area spans
+    /// all three tracks: the box centred on the anchor, kept inside the area when it fits there. Chromium,
+    /// measured: a popover with <c>position-area: bottom</c> is centred under its
+    /// anchor; it was at the area's start, the left edge of the containing block.
+    /// </summary>
+    private static double CenterOnAnchor(double cellStart, double cellSize, double anchorCenter, double elementSize)
+    {
+        double start = anchorCenter - elementSize / 2;
+        if (elementSize > cellSize)
+            return start;
+
+        return Math.Clamp(start, cellStart, cellStart + cellSize - elementSize);
     }
 
     /// <summary>
@@ -188,12 +231,19 @@ public static class PositionAreaGrid
 
     /// <summary>
     /// Offset that aligns an element of size <paramref name="elementSize"/> within a
-    /// grid cell of size <paramref name="cellSize"/> along one axis. A
-    /// <see cref="PositionAreaSpan.Start"/> cell (nearest the anchor at the cell's
-    /// far edge) pushes the element to the cell end; <see cref="PositionAreaSpan.Center"/>
-    /// centres it; every other selection aligns to the cell start. No slack (element
-    /// at least as large as the cell) yields zero.
+    /// grid cell of size <paramref name="cellSize"/> along one axis, toward the anchor, as
+    /// <c>normal</c> self-alignment is for <c>position-area</c>: a <see cref="PositionAreaSpan.Start"/>
+    /// cell, or a <see cref="PositionAreaSpan.SpanStart"/> one ending at the anchor's far edge, pushes
+    /// the element to the cell end; <see cref="PositionAreaSpan.Center"/> centres it; an end or
+    /// <see cref="PositionAreaSpan.SpanEnd"/> cell, and a span over all three tracks without an anchor
+    /// to centre on, align it to the cell start. No slack (element at least as large as the cell)
+    /// yields zero.
     /// </summary>
+    /// <remarks>
+    /// Chromium, measured: <c>bottom span-left</c> puts the box's right edge at
+    /// the anchor's right edge. A <see cref="PositionAreaSpan.SpanStart"/> cell aligned to its start, the
+    /// containing block's edge.
+    /// </remarks>
     public static double ComputeAlignmentOffset(PositionAreaSpan selection, double cellSize, double elementSize)
     {
         double slack = cellSize - elementSize;
@@ -201,9 +251,9 @@ public static class PositionAreaGrid
 
         return selection switch
         {
-            PositionAreaSpan.Start => slack,   // "top"/"left" cell: align toward the anchor (cell end).
+            PositionAreaSpan.Start or PositionAreaSpan.SpanStart => slack,   // toward the anchor: the cell end.
             PositionAreaSpan.Center => slack / 2,
-            _ => 0,                            // "end"/spanning cells: align to the cell start.
+            _ => 0,                                                           // toward the anchor: the cell start.
         };
     }
 }

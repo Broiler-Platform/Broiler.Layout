@@ -190,8 +190,9 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // subtree on a second layout pass — stayed where the old origin had put it, so the box's
         // content rendered outside its own border box. www.mediawiki.org's site notice did exactly
         // that: its border box moved down by the margin its first block child propagated, and the
-        // notice text stayed above it.
-        moved.OffsetTop(growth);
+        // notice text stayed above it. An absolutely positioned box placed against a containing block
+        // outside the run stays where that block put it: the margin moves the run, not the viewport.
+        moved.OffsetTopInFlow(growth);
     }
 
     /// <summary>

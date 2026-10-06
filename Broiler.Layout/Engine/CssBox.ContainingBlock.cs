@@ -201,6 +201,29 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     private bool IsInitialContainingBlock(CssBox cb) => cb.ParentBox == null && LayoutEnvironment != null;
 
+    /// <summary>
+    /// Whether this is an absolutely positioned box that its own <c>top</c> or <c>bottom</c> places
+    /// against a containing block outside <paramref name="moved"/>: one that box moving in the flow
+    /// does not move (see <see cref="OffsetTopInFlow"/>). A box at its static position, with both
+    /// <c>auto</c>, is where the flow puts it, and goes with it.
+    /// </summary>
+    internal bool IsPlacedVerticallyOutside(CssBox moved)
+    {
+        if (Position != CssConstants.Absolute
+            || (Top == null || Top == CssConstants.Auto) && (Bottom == null || Bottom == CssConstants.Auto))
+        {
+            return false;
+        }
+
+        for (var box = FindPositionedContainingBlock(); box != null; box = box.ParentBox)
+        {
+            if (ReferenceEquals(box, moved))
+                return false;
+        }
+
+        return true;
+    }
+
     // The bridge marks a top-layer element with its top-layer order; a renderer-generated
     // top-layer box (a native ::backdrop, which has no element to carry the attribute) carries
     // the order in the box field instead. Mirrors FragmentTreeBuilder.GetTopLayerOrder, which
@@ -289,7 +312,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // bottom-up, so a containing block's ActualBottom is often still unsettled while its
             // out-of-flow children are being placed, and that method already recovers the height
             // from a definite specified one (and handles grid areas and the vertical-flow frame).
-            if (!box.IsNonAtomicInline && box.EstablishesNonPositionAbsPosContainingBlock())
+            //
+            // Not for a box in the top layer, which no ancestor captures (see
+            // FindPositionedContainingBlock): a modal dialog in a transformed container of definite size
+            // was laid out in that container, and its ::backdrop was the container's size -- Chromium
+            // (measured) centres the dialog in the viewport and covers the
+            // viewport with the backdrop. A frame's sub-viewport below still holds it: a frame has a top
+            // layer of its own.
+            if (!IsTopLayerBox && !box.IsNonAtomicInline && box.EstablishesNonPositionAbsPosContainingBlock())
             {
                 GetAbsoluteContainingBlockPaddingBox(box, out var cbLeft, out var cbTop, out var cbWidth, out var cbHeight);
                 if (cbWidth > 0 && cbHeight > 0)
