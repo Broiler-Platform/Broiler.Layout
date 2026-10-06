@@ -810,8 +810,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <summary>
     /// Resolves a colour declaration to pixels, rewriting the CSS Color 4 functions the canonical
     /// parser does not read (<c>oklch()</c>, <c>lab()</c>, <c>color()</c>, <c>color-mix()</c>, …)
-    /// into the <c>rgba()</c> form it does — see <see cref="IR.CssColor4"/> for why the conversion
-    /// lives on this side of the boundary rather than inside the parser.
+    /// into the <c>rgba()</c> form it does — see <see cref="CssColor4"/> for why the conversion
+    /// is a normaliser in front of the parser rather than part of it.
     /// </summary>
     /// <remarks>
     /// The rewrite has to happen before <c>ParseColor</c> rather than after it, because the
@@ -820,10 +820,10 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </remarks>
     protected override BColor GetActualColor(string colorStr) =>
         LayoutEnvironment.ParseColor(
-            IR.CssColor4.NormalizeColorFunctions(colorStr, ResolveCurrentColorFor(colorStr)));
+            CssColor4.NormalizeColorFunctions(colorStr, ResolveCurrentColorFor(colorStr)));
 
     /// <summary>
-    /// This element's <c>color</c> in a spelling <see cref="IR.CssColor4"/> can read, but only when
+    /// This element's <c>color</c> in a spelling <see cref="CssColor4"/> can read, but only when
     /// the value being resolved actually names <c>currentcolor</c> inside a colour function — the
     /// bare keyword is substituted by each property's own accessor, and computing
     /// <see cref="CssBoxProperties.ActualColor"/> speculatively would cost a cascade read on every

@@ -18,6 +18,18 @@ This was a source and dependency audit. No implementation changes or migrations
 were attempted, and no builds or tests were run. Source locations below describe
 the inspected checkouts, not necessarily the versions of their published packages.
 
+## Progress
+
+| Step | State |
+|---|---|
+| 1. `CssColor4` | Now `Broiler.CSS.CssColor4`. Layout drops its copy and consumes Broiler.CSS 0.1.0-preview.11. |
+| 2. `CascadeInvalidationSet` | Now `Broiler.CSS.Dom.CascadeInvalidationSet`. Layout drops its copy and consumes Broiler.CSS.Dom 0.1.0-preview.11. Broiler.HTML's two references change namespace when it takes that Layout. |
+| 3–6 and consolidation | Open. |
+
+Layout already passed its full suite against Broiler.CSS/CSS.Dom 0.1.0-preview.10 and
+Broiler.Dom 0.1.0-preview.12, the `main` of each repository, before the moves. So
+the dependency bump that carries them includes no change beyond the moves themselves.
+
 ## Recommended ownership
 
 | Responsibility | Destination |

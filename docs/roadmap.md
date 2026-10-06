@@ -50,6 +50,11 @@ The remaining work is preview hardening and cleanup.
   projections instead of the concrete box tree.
 - Track compiler/maintainability cleanup, including unused imports, eligible
   static members, and obsolete compatibility seams.
+- Move the remaining CSS and HTML grammar out of Layout as ranked in
+  `docs/css-dom-extraction-investigation.md`, starting with document-mode
+  classification (to Broiler.Dom.Html), then `image-set()` and `srcset` syntax.
+  `CssColor4` and `CascadeInvalidationSet` have already moved to Broiler.CSS and
+  Broiler.CSS.Dom.
 
 ## Stabilization
 

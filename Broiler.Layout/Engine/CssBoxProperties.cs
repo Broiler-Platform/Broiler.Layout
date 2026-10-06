@@ -904,7 +904,7 @@ internal abstract partial class CssBoxProperties
         get
         {
             var value = ResolveCssVariables(_backgroundImage);
-            return IR.CssColor4.NormalizeColorFunctions(value, ResolveCurrentColorFor(value));
+            return CssColor4.NormalizeColorFunctions(value, ResolveCurrentColorFor(value));
         }
         set => _backgroundImage = value;
     }
@@ -1329,13 +1329,13 @@ internal abstract partial class CssBoxProperties
     // than through GetActualColor, so they need the same CSS Color 4 rewrite BackgroundImage does.
     public string BoxShadow
     {
-        get => IR.CssColor4.NormalizeColorFunctions(_boxShadow, ResolveCurrentColorFor(_boxShadow));
+        get => CssColor4.NormalizeColorFunctions(_boxShadow, ResolveCurrentColorFor(_boxShadow));
         set => _boxShadow = value;
     }
 
     public string TextShadow
     {
-        get => IR.CssColor4.NormalizeColorFunctions(_textShadow, ResolveCurrentColorFor(_textShadow));
+        get => CssColor4.NormalizeColorFunctions(_textShadow, ResolveCurrentColorFor(_textShadow));
         set => _textShadow = value;
     }
 
