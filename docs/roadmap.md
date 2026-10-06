@@ -13,13 +13,11 @@ The remaining work is preview hardening and cleanup.
   vulnerability-scan evidence for the reviewed revision.
 - Keep the README dependency and friend-assembly inventory aligned with the
   executable architecture tests.
-- Release `DocumentModeContext.IsQuirksHtml`'s initial-insertion-mode rule (a
-  DOCTYPE after anything but comments and ASCII whitespace is ignored) no earlier
-  than the Broiler.Dom.Html release whose tree builder applies the same rule (the
-  one after 0.1.0-preview.2). Consumers (Broiler.HtmlBridge, Broiler.HTML) take
-  both package updates in one change: against preview.2 a page with content
-  before its DOCTYPE is quirks mode from the source and standards mode from the
-  serialized tree.
+- Delete `DocumentModeContext.IsQuirksHtml` and `IsQuirksDoctype`, now obsolete,
+  with `DocumentModeContextTests` and `DocumentModeDoctypeTests`, once Broiler.HTML,
+  Broiler.HtmlBridge and the Browser CLI call Broiler.Dom.Html's
+  `HtmlDocumentQueries.IsQuirksMode` and `IsQuirksDoctype` instead. `CurrentQuirksMode`
+  and the ambient-state bookkeeping stay.
 
 ## Resource hardening
 
@@ -51,10 +49,9 @@ The remaining work is preview hardening and cleanup.
 - Track compiler/maintainability cleanup, including unused imports, eligible
   static members, and obsolete compatibility seams.
 - Move the remaining CSS and HTML grammar out of Layout as ranked in
-  `docs/css-dom-extraction-investigation.md`, starting with document-mode
-  classification (to Broiler.Dom.Html), then `image-set()` and `srcset` syntax.
-  `CssColor4` and `CascadeInvalidationSet` have already moved to Broiler.CSS and
-  Broiler.CSS.Dom.
+  `docs/css-dom-extraction-investigation.md`: next are `image-set()` and `srcset`
+  syntax. `CssColor4` and `CascadeInvalidationSet` have already moved to Broiler.CSS
+  and Broiler.CSS.Dom, and document-mode classification to Broiler.Dom.Html.
 
 ## Stabilization
 

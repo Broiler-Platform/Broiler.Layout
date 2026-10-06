@@ -93,7 +93,15 @@ public static class DocumentModeContext
     /// tokenizer does. Each lists the departures it carries over, and the tests named
     /// <c>…_As_In_Broiler_Dom_Html</c> pin them, so both sides change together.
     /// </para>
+    /// <para>
+    /// <b>Obsolete.</b> Broiler.Dom.Html now answers this from its own tokenizer, through the tree
+    /// builder's initial-insertion-mode predicate: <c>HtmlDocumentQueries.IsQuirksMode</c> gives
+    /// the same answer on every case pinned here, and agrees with the parsed tree by construction
+    /// rather than by a mirror. This copy stays for one preview so that hosts can move over, and is
+    /// then deleted.
+    /// </para>
     /// </remarks>
+    [Obsolete("Use Broiler.Dom.Html.HtmlDocumentQueries.IsQuirksMode, which classifies with the tree builder's own tokenizer. This copy will be removed.")]
     public static bool IsQuirksHtml(string html)
     {
         if (string.IsNullOrEmpty(html))
@@ -140,6 +148,7 @@ public static class DocumentModeContext
     /// <param name="name">The DOCTYPE name, as parsed.</param>
     /// <param name="publicId">The public identifier, or null/empty when the DOCTYPE carries none.</param>
     /// <param name="systemId">The system identifier, or null/empty when the DOCTYPE carries none.</param>
+    [Obsolete("Use Broiler.Dom.Html.HtmlDocumentQueries.IsQuirksDoctype, which applies the same conditions. This copy will be removed.")]
     public static bool IsQuirksDoctype(string? name, string? publicId, string? systemId)
     {
         if (name is null || !name.Equals("html", StringComparison.OrdinalIgnoreCase))

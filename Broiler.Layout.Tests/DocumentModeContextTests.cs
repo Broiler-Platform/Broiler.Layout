@@ -1,3 +1,7 @@
+// These pin Layout's obsolete copy until it is deleted; Broiler.Dom.Html's HtmlQuirksModeTests carry
+// the same cases against HtmlDocumentQueries.
+#pragma warning disable CS0618
+
 using Xunit;
 
 namespace Broiler.Layout.Tests;

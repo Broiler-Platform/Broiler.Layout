@@ -24,7 +24,8 @@ the inspected checkouts, not necessarily the versions of their published package
 |---|---|
 | 1. `CssColor4` | Now `Broiler.CSS.CssColor4`. Layout drops its copy and consumes Broiler.CSS 0.1.0-preview.11. |
 | 2. `CascadeInvalidationSet` | Now `Broiler.CSS.Dom.CascadeInvalidationSet`. Layout drops its copy and consumes Broiler.CSS.Dom 0.1.0-preview.11. Broiler.HTML's two references change namespace when it takes that Layout. |
-| 3–6 and consolidation | Open. |
+| 3. Document-mode classification | Now `Broiler.Dom.Html.HtmlDocumentQueries.IsQuirksMode` and `IsQuirksDoctype`, built on Dom.Html's tokenizer and the tree builder's initial-insertion-mode predicate rather than a mirror of them. All 112 of Layout's cases pass there, and each markup case also matches the parsed tree. Layout's copies are `[Obsolete]` for one preview, then deleted. Layout takes no Dom.Html dependency. |
+| 4–6 and consolidation | Open. |
 
 Layout already passed its full suite against Broiler.CSS/CSS.Dom 0.1.0-preview.10 and
 Broiler.Dom 0.1.0-preview.12, the `main` of each repository, before the moves. So
