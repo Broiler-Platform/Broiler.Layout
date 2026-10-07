@@ -9,18 +9,21 @@ namespace Broiler.Layout.Engine;
 /// <remarks>
 /// <para>
 /// A fieldset's first <c>&lt;legend&gt;</c> child is not laid out in the fieldset's content. It is
-/// the <em>rendered legend</em>, and it belongs to the block-start border: its margin box is centred
-/// on that border, so a legend taller than the border stands proud of the fieldset's border box and
-/// the fieldset's content begins below it rather than below the border.
+/// the <em>rendered legend</em>, and it belongs to the block-start border: its border box is centred
+/// on that border. A legend thinner than the border sits inside it; a taller one sits at the top of
+/// the fieldset's border box, which grows to hold it, and the border is drawn through its middle.
+/// The fieldset's content begins below whichever of the border and the legend reaches further down.
+/// That is Chromium's geometry: an 18px-tall legend on the default 2px border starts where the
+/// fieldset's border box does, and the content 18px plus the padding below it.
 /// </para>
 /// <para>
-/// WPT's <c>css-break/fieldset-001</c> is written to pin exactly that, and it says so by
-/// construction — its reference states the same layout with a <c>&lt;p&gt;</c>, a
-/// <c>margin-top</c> that makes room for the part of the legend standing above, and an absolutely
-/// positioned legend at a negative <c>top</c>. Reading the geometry back out of that reference is
-/// where the rule below comes from: a 49px legend margin box on a 6px border is placed at
-/// <c>6/2 − 49/2 = −21.5</c>, and the content that follows starts at <c>6/2 + 49/2 = 27.5</c> plus
-/// the fieldset's own padding.
+/// WPT's <c>css-break/fieldset-001</c> pins the same picture by construction — its reference states
+/// the layout with a <c>&lt;p&gt;</c>, a <c>margin-top</c> that makes room for the part of the
+/// legend standing above its border, and an absolutely positioned legend at a negative <c>top</c>:
+/// a 49px legend on a 6px border begins <c>49/2 − 6/2 = 21.5</c> above the border's top edge, and the
+/// content that follows starts at the legend's bottom plus the fieldset's own padding. Drawing the
+/// border there, and stopping it behind the legend, is paint's part; the legend is the fieldset's
+/// first child in the fragment tree, which is all paint needs to find it.
 /// </para>
 /// <para>
 /// The legend's inline size is the other half of the rule and is resolved earlier, in
@@ -31,10 +34,9 @@ namespace Broiler.Layout.Engine;
 /// <para>
 /// Applied after the children are laid out, because the legend's margin box is only measured then —
 /// the same shape as every other post-layout placement here. What is <em>not</em> done is the
-/// notch: the block-start border is still painted behind the legend, where it should stop at the
-/// legend's margin box and resume after it. Nor is the block-size rule that goes with a
-/// non-<c>auto</c> <c>block-size</c> (subtract the part of the legend's margin box that spills past
-/// the border), which is what WPT's <c>fieldset-block-size</c> asks for.
+/// block-size rule that goes with a non-<c>auto</c> <c>block-size</c> (subtract the part of the
+/// legend's margin box that spills past the border), which is what WPT's <c>fieldset-block-size</c>
+/// asks for.
 /// </para>
 /// </remarks>
 internal partial class CssBox
@@ -46,25 +48,28 @@ internal partial class CssBox
             return;
 
         double border = ActualBorderTopWidth;
-        double legendBox = legend.ActualMarginTop
-            + (legend.ActualBottom - legend.Location.Y)
-            + legend.ActualMarginBottom;
+        double legendBorderBox = legend.ActualBottom - legend.Location.Y;
+        double legendBox = legend.ActualMarginTop + legendBorderBox + legend.ActualMarginBottom;
 
         if (legendBox <= 0)
             return;
 
+        // Laid out in the flow, the legend came first in the content: the rest follows its margin box.
         double marginBoxBottom = legend.Location.Y - legend.ActualMarginTop + legendBox;
 
-        // Centred on the border, which puts it above the border box whenever it is the taller.
-        double moveLegend = Location.Y + (border - legendBox) / 2 + legend.ActualMarginTop
-            - legend.Location.Y;
+        // Centred in a border thicker than it; otherwise at the top of the border box, its margin
+        // included, with the border drawn through its middle.
+        double legendTop = legendBorderBox < border
+            ? Location.Y + (border - legendBorderBox) / 2
+            : Location.Y + legend.ActualMarginTop;
+        double moveLegend = legendTop - legend.Location.Y;
 
         if (Math.Abs(moveLegend) > 0.01)
             legend.OffsetTop(moveLegend);
 
-        // The content starts below whichever of the border and the legend reaches further down —
-        // the legend's margin-box bottom is `border/2 + legendBox/2` by the centring above.
-        double contentTop = Location.Y + Math.Max(border, (border + legendBox) / 2) + ActualPaddingTop;
+        // The content starts below whichever of the border and the legend reaches further down.
+        double legendBottom = legendTop + legendBorderBox + legend.ActualMarginBottom;
+        double contentTop = Math.Max(Location.Y + border, legendBottom) + ActualPaddingTop;
         double moveRest = contentTop - marginBoxBottom;
 
         if (Math.Abs(moveRest) <= 0.01)
@@ -90,9 +95,9 @@ internal partial class CssBox
         // rendered a 100px-bordered fieldset 315px tall where every engine draws 218.
         //
         // Every in-flow child shifted by exactly `moveRest`, and the legend itself never reaches
-        // below `contentTop` (it is centred on the border, so its margin box ends at
-        // `border/2 + legendBox/2`, which is where the content begins whenever the legend is the
-        // taller). So the measured bottom shifts with the children, floored at an empty content box.
+        // below `contentTop` (the content begins at the legend's margin-box bottom whenever the
+        // legend is the taller). So the measured bottom shifts with the children, floored at an
+        // empty content box.
         if (Height == CssConstants.Auto || string.IsNullOrEmpty(Height))
         {
             ActualBottom = Math.Max(
@@ -103,6 +108,18 @@ internal partial class CssBox
 
     private bool IsFieldset =>
         string.Equals(HtmlTag?.Name, "fieldset", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether this box is a <c>&lt;button&gt;</c>, <c>&lt;input&gt;</c>, <c>&lt;select&gt;</c> or
+    /// <c>&lt;textarea&gt;</c>, which keeps its fit-content inline size when it is laid out as a
+    /// block, as a rendered legend does; see <c>ResolveBlockUsedWidth</c>.
+    /// </summary>
+    internal bool IsFormControl =>
+        HtmlTag?.Name is { } name
+        && (name.Equals("button", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("input", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("select", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("textarea", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Whether this box is the rendered legend of the fieldset it is a child of.

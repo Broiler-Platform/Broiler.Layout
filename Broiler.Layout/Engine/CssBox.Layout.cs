@@ -712,7 +712,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
         else if (!replacedSizeSettled
             && (Width == CssConstants.Auto || string.IsNullOrEmpty(Width))
-            && IsRenderedLegend)
+            && (IsRenderedLegend || IsFormControl))
         {
             // HTML §15.5.13: "If the computed value of 'inline-size' is 'auto', then the used
             // value is the fit-content inline size." A rendered legend is blockified, but unlike
@@ -721,6 +721,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             // Without this the legend filled the fieldset, so WPT's
             // `the-fieldset-and-legend-elements/legend-block-position-centering` drew a
             // fieldset-wide legend border where every engine draws a content-wide one.
+            //
+            // HTML's button layout says the same of a button, and the other form controls are
+            // widgets with a size of their own: Chromium keeps a `display: block` button, input,
+            // select or textarea at that size. reCAPTCHA's demo form draws a "Submit" button 57px
+            // wide there, which stretched across the form here.
             EnsureDescendantWordsMeasured(g);
 
             double ownPadBorder = ActualBorderLeftWidth + ActualBorderRightWidth
