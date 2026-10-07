@@ -78,7 +78,7 @@ count), then packs and verifies the package on Ubuntu and attaches it as `nuget-
 **Publish** (manual, or a `v0.1.0-preview.N` tag) resolves the next unused preview
 version, reruns CI with it, verifies a fresh consumer restore from nuget.org, and pushes
 the validated package and its symbols to nuget.org with the `NUGET_TOKEN` secret.
-`dry-run=true` is the default. The workflows and `eng/` scripts are shared with
+Every run pushes; CI is the no-push pack and consumer-restore check. The workflows and `eng/` scripts are shared with
 Broiler.CSS, Broiler.DOM and Broiler.Graphics.
 
 Preview numbers are cumulative: the next version is one past the highest preview of the
