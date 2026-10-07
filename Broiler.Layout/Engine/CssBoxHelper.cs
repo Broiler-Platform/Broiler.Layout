@@ -17,9 +17,7 @@ internal static class CssBoxHelper
         {
             return new CssBoxImage(parent, tag, baseUrl);
         }
-        else if (tag.Name.Equals("object", StringComparison.OrdinalIgnoreCase) &&
-                 tag.TryGetAttribute("data") is { } data &&
-                 data.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
+        else if (tag.Name.Equals("object", StringComparison.OrdinalIgnoreCase) && IsImageObject(tag))
         {
             // <object data="data:image/..."> — treat as a replaced image element.
             // Any nested fallback content will be removed by CorrectObjectBoxes.
@@ -37,6 +35,35 @@ internal static class CssBoxHelper
         {
             return new CssBox(parent, tag, baseUrl);
         }
+    }
+
+    /// <summary>
+    /// The attribute a host that loaded an <c>&lt;object&gt;</c>'s data stamps on it: the MIME type
+    /// of what the data turned out to be. Broiler.HtmlBridge writes it on its render projection.
+    /// </summary>
+    internal const string LoadedObjectTypeAttribute = "data-broiler-object-type";
+
+    /// <summary>
+    /// Whether an <c>&lt;object&gt;</c> renders its data as an image (HTML §4.8.7): data the host
+    /// loaded and found to be a raster image, or, when no host says, a <c>data:image</c> URL.
+    /// </summary>
+    /// <remarks>
+    /// Neither the URL nor the <c>type</c> attribute needs to name an image: Acid3's
+    /// <c>support-c.png</c> is one only because its response says <c>image/png</c>, and markup alone
+    /// left such an object a plain box that drew its fallback. The host's stamp is not the
+    /// <c>type</c> attribute because author selectors (Acid2's <c>object[type]</c>) match that. An
+    /// SVG image is not one of these: it is drawn from its markup (<c>TryLoadSvgContent</c>).
+    /// </remarks>
+    internal static bool IsImageObject(HtmlTag tag)
+    {
+        if (tag.TryGetAttribute(LoadedObjectTypeAttribute) is { } loadedType)
+        {
+            return loadedType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+                && !loadedType.StartsWith("image/svg", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return tag.TryGetAttribute("data") is { } data
+            && data.StartsWith("data:image", StringComparison.OrdinalIgnoreCase);
     }
 
     public static CssBox CreateBox(CssBox parent, Uri baseUrl, HtmlTag? tag = null, CssBox? before = null)
