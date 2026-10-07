@@ -33,6 +33,15 @@ internal static class CssLayoutEngine
     internal const double TypicalAscentRatio = 0.8;
 
     /// <summary>
+    /// How far past the end of a line content may reach and still be taken to fit, in pixels. A box
+    /// sized to its content keeps its width as a float, which can come out a millionth of a pixel
+    /// short of the sum of what it was sized around, and the last word then broke onto a line of its
+    /// own: "Submit now" in a 13.33px button, float or inline-block was two lines. A thousandth of a
+    /// pixel is far below anything that shows.
+    /// </summary>
+    internal const double FitTolerance = 1e-3;
+
+    /// <summary>
     /// Resolves a replaced element's specified width/height to a definite pixel
     /// length when it is neither <c>auto</c>, a percentage, nor an intrinsic-size
     /// keyword. Unlike a raw <see cref="CssLength"/> pixel check this resolves
@@ -1396,7 +1405,7 @@ internal static class CssLayoutEngine
                         right = BandRightAt(blockbox, cury, lineHeight, limitRight);
                     }
 
-                    if (boxRight > right)
+                    if (boxRight > right + FitTolerance)
                         wrapNoWrapBox = true;
                 }
 
@@ -1544,13 +1553,13 @@ internal static class CssLayoutEngine
                             if (runGoesOn && floats)
                                 runWidth = word.Width + SoftWrapOpportunities.RunAfterLastWord(g, b, limit);
                         }
-                        else if ((runGoesOn || curx + runWidth > lineRight)
+                        else if ((runGoesOn || curx + runWidth > lineRight + FitTolerance)
                             && (wordIndex > 0 || SoftWrapOpportunities.BeforeFirstWord(b)))
                         {
-                            if (runGoesOn && (curx + runWidth <= lineRight || floats))
+                            if (runGoesOn && (curx + runWidth <= lineRight + FitTolerance || floats))
                                 runWidth = word.Width + SoftWrapOpportunities.RunAfterLastWord(g, b, limit);
 
-                            wrapWord = curx + runWidth > lineRight;
+                            wrapWord = curx + runWidth > lineRight + FitTolerance;
                         }
                     }
 
@@ -1571,8 +1580,13 @@ internal static class CssLayoutEngine
                         curx = BandLeftAt(blockbox, cury, boxLineHeight, startx);
                         double nextLineLeft = curx;
 
-                        // handle if line is wrapped for the first text element where parent has left margin\padding
-                        if (b == box.Boxes[0] && !word.IsLineBreak && (word == b.Words[0] || (box.ParentBox != null && box.ParentBox.IsBlock)))
+                        // An inline box whose first word this is starts on the new line, its left
+                        // margin, border and padding before the word. The block's own are in startx
+                        // already, and an inline box's later lines start without them (CSS Fragmentation
+                        // 3 §5.4, box-decoration-break: slice). Every wrapped line in a block's first
+                        // child took them again, so a padded or bordered block, or a blockquote, set
+                        // its second and later lines in by its own edge a second time.
+                        if (box != blockbox && b == box.Boxes[0] && !word.IsLineBreak && word == b.Words[0])
                             curx += box.ActualMarginLeft + box.ActualBorderLeftWidth + box.ActualPaddingLeft;
 
                         line = NextLine(blockbox, line, maxbottom, cury);
@@ -1594,7 +1608,7 @@ internal static class CssLayoutEngine
                     // float's side, where browsers put it below the float. The first content is the
                     // word up to where the line may break in it, as above.
                     else if (!word.IsLineBreak && !word.IsSpaces && !lineHasContent
-                        && curx + runWidth > lineRight)
+                        && curx + runWidth > lineRight + FitTolerance)
                     {
                         double bandLeft = BandLeftAt(blockbox, cury, boxLineHeight, startx);
                         double dropped = DropLineBelowNarrowBands(
@@ -2074,7 +2088,7 @@ internal static class CssLayoutEngine
 
         double lineRight = BandRightAt(blockbox, cury, lineHeight, limitRight);
 
-        if (edgeBeforeBox + totalExtent > lineRight)
+        if (edgeBeforeBox + totalExtent > lineRight + FitTolerance)
         {
             if (edgeBeforeBox > bandLeft)
             {
