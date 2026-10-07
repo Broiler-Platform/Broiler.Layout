@@ -654,6 +654,14 @@ internal abstract partial class CssBoxProperties
     internal bool AbsposLocationFinalized { get; set; }
 
     /// <summary>
+    /// The height of its containing block's padding box this absolutely positioned box was last
+    /// placed against, or null before it was. A containing block whose height comes from its content
+    /// has none yet while the box is laid out, and lays the box out again once it has
+    /// (<c>CssBox.LayOutAbsposAgainstResolvedHeight</c>).
+    /// </summary>
+    internal double? AbsposContainingBlockHeight { get; set; }
+
+    /// <summary>
     /// The static position (CSS2.1 §10.3.7 / §10.6.4) an out-of-flow box would
     /// occupy in its inline formatting context — the inline cursor where FlowBox
     /// encountered it. Recorded by the inline layout so that when the box's block
