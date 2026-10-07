@@ -1419,7 +1419,7 @@ internal static partial class CssUtils
         string image = CssConstants.None;
         bool sawType = false, sawImage = false, sawNone = false;
 
-        foreach (var token in SplitListStyleComponents(value))
+        foreach (var token in SplitShorthandComponents(value))
         {
             var lower = token.ToLowerInvariant();
 
@@ -1470,10 +1470,11 @@ internal static partial class CssUtils
     }
 
     /// <summary>
-    /// Splits a <c>list-style</c> value on top-level whitespace, keeping a functional
-    /// component such as <c>url(a b.png)</c> or <c>image-set(...)</c> in one piece.
+    /// Splits a shorthand value such as <c>list-style</c> or <c>text-decoration</c> on top-level
+    /// whitespace, keeping a functional component such as <c>url(a b.png)</c>, <c>image-set(...)</c>
+    /// or <c>rgb(255, 0, 0)</c> in one piece.
     /// </summary>
-    private static List<string> SplitListStyleComponents(string value)
+    private static List<string> SplitShorthandComponents(string value)
     {
         var components = new List<string>(3);
         int depth = 0, start = -1;
@@ -1520,13 +1521,19 @@ internal static partial class CssUtils
         cssBox.TextDecorationStyle = "solid";
         cssBox.TextDecorationColor = "currentcolor";
 
-        var parts = value.Trim().Split([' '], StringSplitOptions.RemoveEmptyEntries);
         string? line = null;
 
-        foreach (var part in parts)
+        // Split at the top level: on every space, text-decoration: underline rgb(255, 0, 0) took
+        // "0)" for its colour, which is no colour, and the underline came out in the text's.
+        foreach (var part in SplitShorthandComponents(value.Trim()))
         {
             var lower = part.ToLowerInvariant();
-            if (lower is "underline" or "overline" or "line-through" or "none")
+            if (lower is "underline" or "overline" or "line-through")
+            {
+                // The lines add up: text-decoration: underline overline draws both.
+                line = line is null ? part : line + " " + part;
+            }
+            else if (lower is "none")
             {
                 line = part;
             }
