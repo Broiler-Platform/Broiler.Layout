@@ -1,5 +1,6 @@
 using Broiler.CSS;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 
 
@@ -712,6 +713,88 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         contentHeight = resolved;
         return contentHeight > 0;
     }
+
+    /// <summary>
+    /// Lays out again, once this box's height is known, the absolutely positioned boxes it is the
+    /// containing block of whose height or place depends on that height and that were placed against
+    /// another (CSS2.1 §10.6.4, §10.5, §9.3.2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An absolutely positioned box is laid out where it stands among its containing block's
+    /// descendants, while the containing block is still laying them out. When the containing block's
+    /// height comes from its content, it has none yet: a box with <c>top: 0; bottom: 0</c> and an auto
+    /// height was as tall as nothing, one with <c>bottom: 0</c> stood above its containing block, and
+    /// <c>top: 50%</c> or <c>height: 50%</c> came to nothing. reCAPTCHA marks a selected image tile with
+    /// a tick drawn by a box with all four insets 0 over the tile, and no tick was drawn.
+    /// <see cref="GetAbsoluteContainingBlockPaddingBox"/> finds the height early where a containing
+    /// block's specified height or its own insets give it; this covers the rest.
+    /// </para>
+    /// <para>
+    /// The boxes are found by a walk that stops at every positioned box, the containing block of the
+    /// absolutely positioned boxes inside it, so a layout walks each box once. Only a box whose
+    /// <c>bottom</c> is set, or whose <c>top</c>, <c>height</c>, <c>min-height</c> or <c>max-height</c>
+    /// is a percentage, depends on the height, and only one placed against another height is laid out
+    /// again.
+    /// </para>
+    /// </remarks>
+    private void LayOutAbsposAgainstResolvedHeight(ILayoutEnvironment g)
+    {
+        // The initial containing block's height is the viewport's, known from the start.
+        if (ParentBox is null)
+            return;
+
+        bool containsAbspos = Position is CssConstants.Relative or CssConstants.Absolute or CssConstants.Fixed
+            || IsNestedViewportRoot
+            || NativeAnchorPlacement.Enabled && EstablishesNonPositionAbsPosContainingBlock();
+        if (!containsAbspos)
+            return;
+
+        List<CssBox>? stale = null;
+        CollectAbsposPlacedAgainstAnotherHeight(this, ref stale);
+        if (stale is null)
+            return;
+
+        foreach (var box in stale)
+            box.PerformLayout(g);
+    }
+
+    private void CollectAbsposPlacedAgainstAnotherHeight(CssBox parent, ref List<CssBox>? stale)
+    {
+        foreach (var child in parent.Boxes)
+        {
+            if (child.Position == CssConstants.Absolute)
+            {
+                if (child.AbsposContainingBlockHeight is { } placedAgainst
+                    && child.DependsOnContainingBlockHeight()
+                    && ReferenceEquals(child.FindPositionedContainingBlock(), this))
+                {
+                    child.GetAbsoluteContainingBlockPaddingBox(this, out _, out _, out _, out double height);
+                    if (Math.Abs(height - placedAgainst) > 0.01)
+                        (stale ??= []).Add(child);
+                }
+
+                continue;
+            }
+
+            if (child.Position is CssConstants.Relative or CssConstants.Fixed)
+                continue;
+
+            CollectAbsposPlacedAgainstAnotherHeight(child, ref stale);
+        }
+    }
+
+    /// <summary>
+    /// Whether this absolutely positioned box's height or place depends on its containing block's
+    /// height: its <c>bottom</c> is set, or its <c>top</c>, <c>height</c>, <c>min-height</c> or
+    /// <c>max-height</c> is a percentage.
+    /// </summary>
+    private bool DependsOnContainingBlockHeight() =>
+        Bottom is not (null or CssConstants.Auto)
+        || Top is not null && Top.Contains('%')
+        || Height is not null && Height.Contains('%')
+        || MinHeight is not null && MinHeight.Contains('%')
+        || MaxHeight is not null && MaxHeight.Contains('%');
 
     /// <summary>
     /// CSS2.1 §10.7 over the §10.6.4 result: <c>min-height</c> and <c>max-height</c> clamp the

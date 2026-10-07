@@ -264,6 +264,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         ResolveUsedBlockHeight();
         ApplyMinMaxHeightConstraints();
         ApplyFloatExplicitHeight();
+        LayOutAbsposAgainstResolvedHeight(g);
         PositionAbsoluteBox();
         ApplyBlockAlignContent();
         ApplyBlockJustifySelf();
@@ -1323,6 +1324,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 var cb = FindPositionedContainingBlock();
 
                 GetAbsoluteContainingBlockPaddingBox(cb, out double cbPadLeft, out double cbPadTop, out double cbPadWidth, out double cbPadHeight);
+                AbsposContainingBlockHeight = cbPadHeight;
 
                 ResolveOverconstrainedAutoMargins(cbPadWidth, cbPadHeight);
 
