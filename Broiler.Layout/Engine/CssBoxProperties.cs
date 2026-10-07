@@ -1048,24 +1048,49 @@ internal abstract partial class CssBoxProperties
                 return CssConstants.FontSize;
 
             double parentSize = GetParent() != null ? GetParent().ComputedFontSizePoints : CssConstants.FontSize;
-            var fsize = FontSize switch
-            {
-                CssConstants.Medium => CssConstants.FontSize,
-                CssConstants.XXSmall => CssConstants.FontSize - 4,
-                CssConstants.XSmall => CssConstants.FontSize - 3,
-                CssConstants.Small => CssConstants.FontSize - 2,
-                CssConstants.Large => CssConstants.FontSize + 2,
-                CssConstants.XLarge => CssConstants.FontSize + 3,
-                CssConstants.XXLarge => CssConstants.FontSize + 4,
-                CssConstants.Smaller => parentSize - 2,
-                CssConstants.Larger => parentSize + 2,
-                _ when IsMathFontSize(FontSize) => parentSize,
-                _ => ResolveFontSizeLengthToPoints(FontSize, parentSize),
-            };
+            var fsize = KeywordFontSizePoints(FontSize) is { } keywordSize
+                ? keywordSize * MonospaceKeywordScale
+                : FontSize switch
+                {
+                    CssConstants.Smaller => parentSize - 2,
+                    CssConstants.Larger => parentSize + 2,
+                    _ when IsMathFontSize(FontSize) => parentSize,
+                    _ => ResolveFontSizeLengthToPoints(FontSize, parentSize),
+                };
 
             return fsize <= 0 ? 0.001 : fsize;
         }
     }
+
+    /// <summary>
+    /// The size, in points, an absolute-size keyword gives text of the default family, or
+    /// <c>null</c> for anything else.
+    /// </summary>
+    private static double? KeywordFontSizePoints(string fontSize) => fontSize switch
+    {
+        CssConstants.Medium => CssConstants.FontSize,
+        CssConstants.XXSmall => CssConstants.FontSize - 4,
+        CssConstants.XSmall => CssConstants.FontSize - 3,
+        CssConstants.Small => CssConstants.FontSize - 2,
+        CssConstants.Large => CssConstants.FontSize + 2,
+        CssConstants.XLarge => CssConstants.FontSize + 3,
+        CssConstants.XXLarge => CssConstants.FontSize + 4,
+        _ => null,
+    };
+
+    /// <summary>
+    /// What a font-size keyword's size is scaled by for this box's family: 13/16 when its only
+    /// family is the generic <c>monospace</c>, and 1 otherwise.
+    /// </summary>
+    /// <remarks>
+    /// CSS Fonts 4 §2.5 lets <c>medium</c> differ per generic family, and browsers make it 13px for
+    /// monospace where it is 16px for other text, so <c>code</c>, <c>kbd</c>, <c>samp</c> and
+    /// <c>tt</c> in 16px text are 13px; a keyword size reaches them through inheritance, which copies
+    /// the keyword. Chromium does this for the single generic family alone, which is why pages write
+    /// <c>monospace, monospace</c> to opt out, and not for a size given as a length.
+    /// </remarks>
+    private double MonospaceKeywordScale =>
+        string.Equals(FontFamily?.Trim(), CssConstants.Monospace, StringComparison.OrdinalIgnoreCase) ? 13.0 / 16.0 : 1.0;
 
     /// <summary>
     /// <c>font-size: math</c> (MathML Core §the-math-script-level-property, CSS Fonts 4).
@@ -2636,20 +2661,15 @@ internal abstract partial class CssBoxProperties
                 if (GetParent() != null)
                     parentSize = GetParent().ActualFont.Size;
 
-                fsize = FontSize switch
-                {
-                    CssConstants.Medium => CssConstants.FontSize,
-                    CssConstants.XXSmall => CssConstants.FontSize - 4,
-                    CssConstants.XSmall => CssConstants.FontSize - 3,
-                    CssConstants.Small => CssConstants.FontSize - 2,
-                    CssConstants.Large => CssConstants.FontSize + 2,
-                    CssConstants.XLarge => CssConstants.FontSize + 3,
-                    CssConstants.XXLarge => CssConstants.FontSize + 4,
-                    CssConstants.Smaller => parentSize - 2,
-                    CssConstants.Larger => parentSize + 2,
-                    _ when IsMathFontSize(FontSize) => parentSize,
-                    _ => ResolveFontSizeLengthToPoints(FontSize, parentSize),
-                };
+                fsize = KeywordFontSizePoints(FontSize) is { } keywordSize
+                    ? keywordSize * MonospaceKeywordScale
+                    : FontSize switch
+                    {
+                        CssConstants.Smaller => parentSize - 2,
+                        CssConstants.Larger => parentSize + 2,
+                        _ when IsMathFontSize(FontSize) => parentSize,
+                        _ => ResolveFontSizeLengthToPoints(FontSize, parentSize),
+                    };
             }
 
             // CSS 2.1 §15.4: font-size: 0 results in a zero-size em box.
