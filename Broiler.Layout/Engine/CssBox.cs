@@ -747,17 +747,19 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             _listItemBox._htmlContainer = ContainerInt;
             _listItemBox._layoutEnvironment = LayoutEnvironment;
 
+            // CSS Counter Styles 3 §6.1: disc, circle and square are the bullet, the white bullet
+            // and the black small square. Circle was a letter "o" and square a spade.
             if (ListStyleType.Equals(CssConstants.Disc, StringComparison.InvariantCultureIgnoreCase))
             {
                 _listItemBox.Text = "•".AsMemory();
             }
             else if (ListStyleType.Equals(CssConstants.Circle, StringComparison.InvariantCultureIgnoreCase))
             {
-                _listItemBox.Text = "o".AsMemory();
+                _listItemBox.Text = "◦".AsMemory();
             }
             else if (ListStyleType.Equals(CssConstants.Square, StringComparison.InvariantCultureIgnoreCase))
             {
-                _listItemBox.Text = "♠".AsMemory();
+                _listItemBox.Text = "▪".AsMemory();
             }
             else if (ListStyleType.Equals(CssConstants.Decimal, StringComparison.InvariantCultureIgnoreCase))
             {
@@ -779,8 +781,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         }
 
         _listItemBox.Words[0].Left = Location.X - _listItemBox.Size.Width - 5;
-        // Half the item's leading down, where the first line's text stands (CSS 2.1 §10.8.1).
-        _listItemBox.Words[0].Top = Location.Y + ActualPaddingTop + CssLayoutEngine.HalfLeading(this);
+
+        // On the item's first line box, its baseline on that line's, wherever the line is: in a
+        // heading the item starts with, too, as browsers draw it. It stood at the top of the item,
+        // so beside a heading's larger text the bullet sat by the heading's cap height. With no
+        // line, half the item's leading down, where a first line's text would stand (CSS 2.1 §10.8.1).
+        _listItemBox.Words[0].Top = CssLayoutEngine.FirstLineBaseline(this) is { } baseline
+            ? baseline - (_listItemBox.ActualFont.Height * CssLayoutEngine.TypicalAscentRatio)
+            : Location.Y + ActualPaddingTop + CssLayoutEngine.HalfLeading(this);
     }
 
     internal string GetAttribute(string attribute) => GetAttribute(attribute, string.Empty);

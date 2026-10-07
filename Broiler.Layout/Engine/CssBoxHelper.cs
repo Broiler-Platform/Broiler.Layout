@@ -954,38 +954,21 @@ internal static class CssBoxHelper
     /// CSS2.1 §9.4.3: <c>top</c> takes precedence over <c>bottom</c>.
     /// Returns 0 if the element is not relatively positioned or has no offset.
     /// </summary>
-    internal static double GetRelativeOffsetY(CssBoxProperties box)
-    {
-        bool hasTop = box.Top != null && box.Top != CssConstants.Auto;
-        bool hasBottom = box.Bottom != null && box.Bottom != CssConstants.Auto;
-
-        if (hasTop)
-            return CssLengthParser.ParseLength(box.Top, box.Size.Height, box.GetEmHeight());
-
-        if (hasBottom)
-            return -CssLengthParser.ParseLength(box.Bottom, box.Size.Height, box.GetEmHeight());
-
-        return 0;
-    }
+    /// <remarks>
+    /// The offset the box was given (<see cref="CssBox.RelativePositionOffset"/>), which the callers
+    /// take back off to find where the flow put it. It was worked out here a second time, with
+    /// percentages of the box's own size and no zoom, so what was taken off was not what had been
+    /// added whenever the two readings differed.
+    /// </remarks>
+    internal static double GetRelativeOffsetY(CssBox box) => box.RelativePositionOffset().Y;
 
     /// <summary>
     /// Computes the horizontal offset applied by <c>position: relative</c>.
     /// CSS2.1 §9.4.3: <c>left</c> takes precedence over <c>right</c> (in LTR).
     /// Returns 0 if the element is not relatively positioned or has no offset.
     /// </summary>
-    internal static double GetRelativeOffsetX(CssBoxProperties box)
-    {
-        bool hasLeft = box.Left != null && box.Left != CssConstants.Auto;
-        bool hasRight = box.Right != null && box.Right != CssConstants.Auto;
-
-        if (hasLeft)
-            return CssLengthParser.ParseLength(box.Left, box.Size.Width, box.GetEmHeight());
-
-        if (hasRight)
-            return -CssLengthParser.ParseLength(box.Right, box.Size.Width, box.GetEmHeight());
-
-        return 0;
-    }
+    /// <remarks>See <see cref="GetRelativeOffsetY"/>.</remarks>
+    internal static double GetRelativeOffsetX(CssBox box) => box.RelativePositionOffset().X;
 
     /// <summary>
     /// Collects all float boxes in the same block formatting context that
