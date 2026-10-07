@@ -3223,6 +3223,22 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// How far <c>position: relative</c> shifts this box from where layout places it, across and
     /// down; nothing for a box not positioned relatively.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A percentage <c>left</c> or <c>right</c> refers to the width of the containing block, and a
+    /// percentage <c>top</c> or <c>bottom</c> to its height (CSS2.1 §9.3.2), its content box's. They
+    /// referred to this box's own size, so an image four times as wide as the box it is clipped to,
+    /// shifted by <c>left: -100%</c> to show its second column, moved by its whole width and showed
+    /// nothing: reCAPTCHA's image challenge draws each of its tiles that way, and only the first,
+    /// which is not shifted, was drawn.
+    /// </para>
+    /// <para>
+    /// A percentage <c>top</c> or <c>bottom</c> whose containing block's height depends on its content
+    /// is <c>auto</c>, as Chromium resolves it (<see cref="RelativeInsetPercentageResolvesToAuto"/>).
+    /// Measured in Chromium: <c>left: 50%</c> in a 200px-wide containing block moves the box 100px,
+    /// <c>top: 50%</c> in a 100px-tall one 50px, and in one of <c>auto</c> height not at all.
+    /// </para>
+    /// </remarks>
     internal (double X, double Y) RelativePositionOffset()
     {
         // CSS2.1 §9.4.3: For relative positioning, 'left'/'right' and
@@ -3239,16 +3255,58 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         bool hasTop = Top != null && Top != CssConstants.Auto;
         bool hasBottom = Bottom != null && Bottom != CssConstants.Auto;
 
-        if (hasLeft)
-            dx = ParseUsedLength(Left, Size.Width, percentAgainstContainingBlock: false);
-        else if (hasRight)
-            dx = -ParseUsedLength(Right, Size.Width, percentAgainstContainingBlock: false);
+        var horizontal = hasLeft ? Left : hasRight ? Right : null;
+        if (horizontal is not null)
+        {
+            var offset = ParseUsedLength(horizontal, RelativeOffsetPercentageWidth());
+            dx = hasLeft ? offset : -offset;
+        }
 
-        if (hasTop)
-            dy = ParseUsedLength(Top, Size.Height, percentAgainstContainingBlock: false);
-        else if (hasBottom)
-            dy = -ParseUsedLength(Bottom, Size.Height, percentAgainstContainingBlock: false);
+        var vertical = hasTop ? Top : hasBottom ? Bottom : null;
+        if (vertical is not null && !RelativeInsetPercentageResolvesToAuto(vertical))
+        {
+            var offset = ParseUsedLength(vertical, PercentageHeightContainingBlockHeight());
+            dy = hasTop ? offset : -offset;
+        }
 
         return (dx, dy);
+    }
+
+    /// <summary>
+    /// The width a percentage <c>left</c> or <c>right</c> of this relatively positioned box refers to:
+    /// its containing block's content width, as for a percentage margin
+    /// (<see cref="TryGetPercentageBasisWidth"/>), or, for the root and the parts of a table, which
+    /// that leaves to their own passes, the initial containing block's or the containing block's.
+    /// </summary>
+    private double RelativeOffsetPercentageWidth()
+    {
+        if (TryGetPercentageBasisWidth(out var width))
+            return width;
+
+        if (ParentBox == null)
+            return LayoutEnvironment?.ViewportSize.Width ?? Size.Width;
+
+        var cb = ContainingBlock;
+        return Math.Max(0, cb.Size.Width
+            - cb.ActualBorderLeftWidth - cb.ActualBorderRightWidth
+            - cb.ActualPaddingLeft - cb.ActualPaddingRight);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="inset"/>, this relatively positioned box's <c>top</c> or <c>bottom</c>,
+    /// is a percentage that is <c>auto</c> because its containing block's height depends on its
+    /// content: Chromium's reading, after the rule CSS2.1 §10.5 gives a percentage height, and the
+    /// same conditions <see cref="HeightPercentageResolvesToAuto"/> tests for one.
+    /// </summary>
+    private bool RelativeInsetPercentageResolvesToAuto(string inset)
+    {
+        if (!inset.Contains('%'))
+            return false;
+
+        var cb = ContainingBlock;
+        if (cb?.ParentBox == null || cb.HasDefiniteAspectRatioBlockHeight() || cb.TryGetInsetDerivedContentHeight(out _))
+            return false;
+
+        return cb.Height == CssConstants.Auto || string.IsNullOrEmpty(cb.Height);
     }
 }
