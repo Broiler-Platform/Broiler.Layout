@@ -3669,7 +3669,7 @@ internal static class CssLayoutEngine
     /// Where the baseline of the first in-flow line box in <paramref name="box"/> lies, where its
     /// words aligned to the baseline stand, or null when it has no line with a word on it.
     /// </summary>
-    private static double? FirstLineBaseline(CssBox box)
+    internal static double? FirstLineBaseline(CssBox box)
     {
         // Words of its own are laid out on its container's lines, as an anonymous item's text is.
         if (box.Words.Count > 0 && !box.IsImage)
