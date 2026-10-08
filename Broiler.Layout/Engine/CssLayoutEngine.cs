@@ -580,10 +580,17 @@ internal static class CssLayoutEngine
             // top, it was too high by as much as content above the strut raised that top: a span
             // aligned `text-bottom` in a 10px font, alone on a line of 16px/20px text, reaches
             // above the strut, and the line ended where the span does, 1.44px above the strut.
-            if (hasLineContent && blockBox.ActualLineHeight > 0 && !linesHoldFlexItems
-                && linebox.Baseline is double lineBaseline)
+            //
+            // A block with no line height has a strut too, one of no height (ZeroLineHeightStrutBottom),
+            // and the line reaches down to it however high the content on it is raised. Left out, a
+            // line of inline-blocks raised above the baseline ended at the bottom of the lowest of
+            // them: Acid3's buckets, in `font: 0/0` and raised 2em, made a 122px line where its
+            // stylesheet works out 162px, and its score stood 40px too high.
+            if (hasLineContent && !linesHoldFlexItems && linebox.Baseline is double lineBaseline)
             {
-                maxBottom = Math.Max(maxBottom, lineBaseline + StrutDescent(blockBox));
+                maxBottom = Math.Max(maxBottom, blockBox.ActualLineHeight > 0
+                    ? lineBaseline + StrutDescent(blockBox)
+                    : lineBaseline + ZeroLineHeightStrutBottom(blockBox));
             }
 
             // So does the strut of an inline box holding no text on the line (StrutOnlyInlineBoxes),
@@ -3497,6 +3504,16 @@ internal static class CssLayoutEngine
     /// </summary>
     internal static double StrutDescent(CssBox blockBox) =>
         blockBox.ActualFont.Height * (1.0 - TypicalAscentRatio) + LeadingBelow(blockBox);
+
+    /// <summary>
+    /// How far below the baseline the strut of a block with a line height of 0 stands, which is
+    /// less than nothing: CSS 2.1 §10.8.1 puts half its leading, here negative, above its font's
+    /// glyphs and half below, so the strut has no height and stands halfway down the glyphs, above
+    /// the baseline by half the ascent less the descent. In <c>font: 0/0</c> it stands on the
+    /// baseline.
+    /// </summary>
+    internal static double ZeroLineHeightStrutBottom(CssBox blockBox) =>
+        blockBox.ActualFont.Height * (0.5 - TypicalAscentRatio);
 
     /// <summary>
     /// The top of the inline box a word of text stands in on its line: the leading above its glyphs
