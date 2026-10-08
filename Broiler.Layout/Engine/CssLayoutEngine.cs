@@ -1329,6 +1329,19 @@ internal static class CssLayoutEngine
             if (isAbsposChild)
                 b.InlineStaticPosition = new PointF((float)curx, (float)cury);
 
+            // CSS2.1 §9.6.1: nor is anything in it laid out on this block's lines. A positioned box
+            // holding boxes lays them out itself, in its own lines, once these are placed
+            // (LayoutOutOfFlowInlineDescendants), and so it needs no more from this flow than its
+            // static position. Flowed here too, its words were on the line of the block as well as
+            // on its own, the same words, so they were drawn twice and the line measured them where
+            // the box put them: in a paragraph of 16px/20px text, a span with `position: absolute;
+            // top: 30px` holding "X" moved the paragraph's text 33px down and made it 51px tall, and
+            // text in it longer than the line broke onto lines of the paragraph that stayed there.
+            // A box holding words itself, as an image does, lays out no lines of its own to put them
+            // on, and has them placed here still, from its static position (AdjustAbsolutePosition).
+            if (isAbsposChild && b.Words.Count == 0 && LaysOutOutOfFlowBoxAfterLines(box, blockbox))
+                continue;
+
             // The parser gives a <br> an empty line's height wherever it takes it to follow a block,
             // a line holding an inline element among them, and a block drops or corrects it when it
             // lays the <br> out (CssBox.ResolveBrLineHeight). A <br> on lines laid out in one pass,
@@ -1874,6 +1887,27 @@ internal static class CssLayoutEngine
         }
 
         box.LastHostingLineBox = line;
+    }
+
+    /// <summary>
+    /// Whether an absolutely or fixed positioned box in <paramref name="parent"/> is laid out by
+    /// <see cref="LayoutOutOfFlowInlineDescendants"/> once <paramref name="blockbox"/>'s lines are
+    /// placed: whether every box from <paramref name="parent"/> up to the block is one that walk
+    /// descends through, an inline box, in the flow, or an anonymous one.
+    /// </summary>
+    private static bool LaysOutOutOfFlowBoxAfterLines(CssBox parent, CssBox blockbox)
+    {
+        for (var box = parent; box != blockbox; box = box.ParentBox)
+        {
+            if (box == null || box.Display == CssConstants.None || box.Float != CssConstants.None || box.IsBlock
+                || box.Position is CssConstants.Absolute or CssConstants.Fixed
+                || (box.Display != CssConstants.Inline && box.Kind != BoxKind.Anonymous))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
