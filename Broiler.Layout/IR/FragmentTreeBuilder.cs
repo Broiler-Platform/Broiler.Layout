@@ -245,7 +245,13 @@ internal static class FragmentTreeBuilder
         {
             lines = new List<LineFragment>(box.LineBoxes.Count);
             foreach (var lineBox in box.LineBoxes)
-                lines.Add(BuildLineFragment(lineBox));
+            {
+                // Inline flow can leave an unused trailing line after a forced break. It has
+                // neither geometry nor paint content; projecting it at (0,0) invents a line
+                // before all preceding content. Keep empty lines that do have layout rectangles.
+                if (lineBox.Rectangles.Count > 0 || lineBox.Words.Count > 0)
+                    lines.Add(BuildLineFragment(lineBox));
+            }
         }
 
         // Emit the generated list-item marker (bullet / number). It is laid out on

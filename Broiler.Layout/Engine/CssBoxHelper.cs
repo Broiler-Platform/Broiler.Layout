@@ -12,7 +12,11 @@ internal static class CssBoxHelper
     public static CssBox CreateBox(HtmlTag tag, Uri baseUrl, CssBox? parent = null)
     {
         ArgumentNullException.ThrowIfNull(tag);
-
+        // HtmlBridge's isolated render projection carries the actual canvas bitmap.
+        // Keep the canvas tag so selectors and its natural-size rules still apply.
+        if (tag.Name.Equals("canvas", StringComparison.OrdinalIgnoreCase)
+            && tag.TryGetAttribute("data-broiler-canvas-bitmap") is { Length: > 0 })
+            return new CssBoxImage(parent, tag, baseUrl);
         if (tag.Name == HtmlConstants.Img)
         {
             return new CssBoxImage(parent, tag, baseUrl);

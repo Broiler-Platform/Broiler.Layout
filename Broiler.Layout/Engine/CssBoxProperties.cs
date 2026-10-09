@@ -1346,6 +1346,7 @@ internal abstract partial class CssBoxProperties
     }
 
     public string WordBreak { get; set; } = "normal";
+    public string OverflowWrap { get; set; } = "normal";
     public string LineBreak { get; set; } = "auto";
     public string Opacity { get; set; } = "1";
     public string ZIndex { get; set; } = CssConstants.Auto;
@@ -3189,6 +3190,7 @@ internal abstract partial class CssBoxProperties
         ListStyle = p.ListStyle;
         _lineHeight = p._lineHeight;
         WordBreak = p.WordBreak;
+        OverflowWrap = p.OverflowWrap;
         LineBreak = p.LineBreak;
         Direction = p.Direction;
         WritingMode = p.WritingMode;

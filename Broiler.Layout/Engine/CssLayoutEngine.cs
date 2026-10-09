@@ -1371,7 +1371,9 @@ internal static class CssLayoutEngine
             double rightspacing = !isAbsposChild ? b.ActualMarginRight + b.ActualBorderRightWidth + b.ActualPaddingRight : 0;
 
             b.RectanglesReset();
+            b.RestoreUnwrappedWords();
             b.MeasureWordsSize(g);
+            b.WrapOversizedWords(g, limitRight - startx - leftspacing - rightspacing);
 
             curx += leftspacing;
 

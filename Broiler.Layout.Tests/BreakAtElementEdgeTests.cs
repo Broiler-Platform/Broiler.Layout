@@ -32,6 +32,43 @@ public sealed class BreakAtElementEdgeTests
 {
     private static readonly Uri BaseUrl = new("file:///break-at-element-edge.html");
 
+    [Fact]
+    public void OverflowWrapBreakWordWrapsAndRestoresOnResize()
+    {
+        var block = Block(32);
+        block.OverflowWrap = "break-word";
+        Text(block, "abcdefgh");
+        Layout(block);
+        Assert.Equal(20, Word(block, "efgh").Top - Word(block, "abcd").Top, 1);
+        block.Width = "80px";
+        Layout(block);
+        Assert.Equal(64, Word(block, "abcdefgh").Width, 1);
+        Assert.Equal(20, block.Size.Height, 1);
+    }
+
+    [Theory]
+    [InlineData("normal", "normal")]
+    [InlineData("break-word", "nowrap")]
+    [InlineData("break-word", "pre")]
+    public void OverflowWrapPreservesUnbreakableTextWhenDisabled(string wrap, string whiteSpace)
+    {
+        var block = Block(32, whiteSpace);
+        block.OverflowWrap = wrap;
+        Text(block, "abcdefgh");
+        Layout(block);
+        Assert.Equal(64, Word(block, "abcdefgh").Width, 1);
+    }
+
+    [Fact]
+    public void OverflowWrapKeepsCombiningSequencesTogether()
+    {
+        var block = Block(16);
+        block.OverflowWrap = "break-word";
+        Text(block, "e\u0301o\u0308");
+        Layout(block);
+        Assert.Equal(20, Word(block, "o\u0308").Top - Word(block, "e\u0301").Top, 1);
+    }
+
     /// <summary>
     /// "aaa", then a span holding "bbb", in a 30px block: "aaabbb" is one word, so "bbb" follows
     /// "aaa" on the first line, 24px along and 2px down, and the block is a line tall. "bbb" went

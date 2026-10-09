@@ -52,6 +52,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public void ParseToWords()
     {
+        _unwrappedWords = null;
         Words.Clear();
 
         // CSS2.1 §4.3.8: UAs should not render characters from the Unicode

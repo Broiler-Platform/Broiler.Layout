@@ -134,6 +134,7 @@ internal static partial class CssUtils
             "block-ellipsis" => cssBox.BlockEllipsis,
             "-webkit-box-orient" => cssBox.WebkitBoxOrient,
             "word-break" => cssBox.WordBreak,
+            "overflow-wrap" or "word-wrap" => cssBox.OverflowWrap,
             "line-break" => cssBox.LineBreak,
             "visibility" => cssBox.Visibility,
             "image-animation" => cssBox.ImageAnimation,
@@ -886,6 +887,10 @@ internal static partial class CssUtils
                 break;
             case "word-break":
                 cssBox.WordBreak = value;
+                break;
+            case "overflow-wrap":
+            case "word-wrap":
+                cssBox.OverflowWrap = value;
                 break;
             case "line-break":
                 cssBox.LineBreak = value;

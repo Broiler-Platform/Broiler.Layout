@@ -108,7 +108,9 @@ internal sealed class CssBoxImage : CssBox
         // density is meaningful and kept, because it is a zero-sized image.
         _imageWord.PixelDensity = selection is { Density: > 0 } chosen ? chosen.Density : 1.0;
 
-        var src = selection?.Url ?? GetAttribute("src");
+        var src = HtmlTag?.Name.Equals("canvas", StringComparison.OrdinalIgnoreCase) == true
+            ? GetAttribute("data-broiler-canvas-bitmap")
+            : selection?.Url ?? GetAttribute("src");
         // <object data="..."> fallback: use 'data' attribute when 'src' is absent
         if (string.IsNullOrEmpty(src))
             src = GetAttribute("data");
