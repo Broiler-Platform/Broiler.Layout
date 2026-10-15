@@ -3690,7 +3690,7 @@ internal static class CssLayoutEngine
                 continue;
 
             // A cell spanning rows reaches below this one.
-            if (!int.TryParse(cell.GetAttribute("rowspan"), out int rowspan) || rowspan <= 1)
+            if (HtmlTableSpans.GetRowSpan(cell) <= 1)
                 bottom = Math.Max(bottom ?? double.MinValue, cell.ActualBottom);
 
             if (string.IsNullOrEmpty(cell.VerticalAlign) || cell.VerticalAlign == CssConstants.Baseline)

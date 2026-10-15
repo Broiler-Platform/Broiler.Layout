@@ -1731,25 +1731,9 @@ internal sealed class CssLayoutEngineTable
         return sum; // -b.ActualBorderLeftWidth - b.ActualBorderRightWidth - b.ActualPaddingRight - b.ActualPaddingLeft;
     }
 
-    private static int GetColSpan(CssBox b)
-    {
-        string att = b.GetAttribute("colspan", "1");
+    private static int GetColSpan(CssBox b) => HtmlTableSpans.GetColSpan(b);
 
-        if (!int.TryParse(att, out int colspan) || colspan < 1)
-            return 1;
-
-        return colspan;
-    }
-
-    private static int GetRowSpan(CssBox b)
-    {
-        string att = b.GetAttribute("rowspan", "1");
-
-        if (!int.TryParse(att, out int rowspan))
-            return 1;
-
-        return rowspan;
-    }
+    private static int GetRowSpan(CssBox b) => HtmlTableSpans.GetRowSpan(b);
 
     /// <summary>
     /// CSS2.1 §17.5.3: the explicit <c>height</c> of a table row is a minimum.
