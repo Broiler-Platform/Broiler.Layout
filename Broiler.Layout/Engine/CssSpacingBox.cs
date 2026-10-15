@@ -13,7 +13,7 @@ internal sealed class CssSpacingBox : CssBox
         Display = CssConstants.None;
 
         StartRow = startRow;
-        EndRow = startRow + int.Parse(extendedBox.GetAttribute("rowspan", "1")) - 1;
+        EndRow = startRow + HtmlTableSpans.GetRowSpan(extendedBox) - 1;
     }
 
     public CssBox ExtendedBox { get; }
