@@ -18,7 +18,7 @@ public sealed class AutoMarginCenteringTests
 {
     private static readonly Uri BaseUrl = new("file:///auto-margin.html");
 
-    private static CssBox Box(CssBox parent, SizeF size, string position)
+    private static CssBox Box(CssBox? parent, SizeF size, string position)
     {
         var b = new CssBox(parent, null, BaseUrl) { Location = new PointF(0, 0), Size = size, Position = position };
         if (parent == null)

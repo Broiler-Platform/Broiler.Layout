@@ -82,6 +82,6 @@ internal static class LayoutTreeCensus
         return total;
     }
 
-    private static bool IsFlexOrGridContainer(string display) =>
+    private static bool IsFlexOrGridContainer(string? display) =>
         display is "flex" or "inline-flex" or "grid" or "inline-grid";
 }

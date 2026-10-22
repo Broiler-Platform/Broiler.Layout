@@ -21,7 +21,7 @@ public sealed class LogicalMinMaxSizeTests
 {
     private static readonly Uri BaseUrl = new("file:///logical-bounds.html");
 
-    private static CssBox Box(string writingMode = null)
+    private static CssBox Box(string? writingMode = null)
     {
         var box = new CssBox(null, null, BaseUrl)
         {

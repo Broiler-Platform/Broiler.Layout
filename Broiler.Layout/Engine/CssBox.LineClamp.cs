@@ -150,7 +150,7 @@ internal partial class CssBox
     /// </summary>
     private string ResolveBlockEllipsis(bool auto)
     {
-        string v = BlockEllipsis?.Trim();
+        string? v = BlockEllipsis?.Trim();
 
         if (string.IsNullOrEmpty(v) || v.Equals(CssConstants.None, StringComparison.OrdinalIgnoreCase))
             return auto ? AutoBlockEllipsis : string.Empty;
@@ -224,7 +224,7 @@ internal partial class CssBox
     private static bool TryParseLineCount(string value, out int lines)
     {
         lines = 0;
-        string v = value?.Trim();
+        string? v = value?.Trim();
 
         if (string.IsNullOrEmpty(v) || v.Equals(CssConstants.None, StringComparison.OrdinalIgnoreCase))
             return false;

@@ -57,7 +57,7 @@ internal partial class CssBox
         if (string.IsNullOrWhiteSpace(value))
             return false;
 
-        foreach (var token in value.Split((char[])null, System.StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in value.Split((char[]?)null, System.StringSplitOptions.RemoveEmptyEntries))
         {
             if (token.Equals("size", System.StringComparison.OrdinalIgnoreCase)
                 || token.Equals("strict", System.StringComparison.OrdinalIgnoreCase))

@@ -105,7 +105,7 @@ internal static class CssBoxHelper
         return newBox;
     }
 
-    internal static CssRect FirstWordOccourence(CssBox b, CssLineBox line)
+    internal static CssRect? FirstWordOccourence(CssBox b, CssLineBox line)
     {
         if (b.Words.Count == 0 && b.Boxes.Count == 0)
             return null;
@@ -124,7 +124,7 @@ internal static class CssBoxHelper
         {
             foreach (CssBox bb in b.Boxes)
             {
-                CssRect w = FirstWordOccourence(bb, line);
+                CssRect? w = FirstWordOccourence(bb, line);
 
                 if (w != null)
                     return w;
@@ -162,7 +162,7 @@ internal static class CssBoxHelper
         return true;
     }
 
-    public static void GetMinimumWidth_LongestWord(CssBox box, ref double maxWidth, ref CssRect maxWidthWord)
+    public static void GetMinimumWidth_LongestWord(CssBox box, ref double maxWidth, ref CssRect? maxWidthWord)
     {
         LayoutWorkTrace.Count(LayoutWorkTrace.Counters.IntrinsicVisits);
 
@@ -281,7 +281,7 @@ internal static class CssBoxHelper
     /// padded table cell per feature, came out 12,060px wide in a 900px page.
     /// </para>
     /// </remarks>
-    public static void GetMinMaxSumWords(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, CssBox suppressExplicitWidthFor = null)
+    public static void GetMinMaxSumWords(CssBox box, ref double min, ref double maxSum, ref double paddingSum, ref double marginSum, CssBox? suppressExplicitWidthFor = null)
     {
         // The box lays out lines of its own, and the first starts with nothing on it.
         bool lineHoldsContent = false;
@@ -744,7 +744,7 @@ internal static class CssBoxHelper
     /// Returns the last word in document order within <paramref name="box"/>'s
     /// in-flow inline content, or <c>null</c> if it has none.
     /// </summary>
-    private static CssRect LastContentWord(CssBox box)
+    private static CssRect? LastContentWord(CssBox box)
     {
         if (box.Words.Count > 0)
             return box.Words[^1];
@@ -769,7 +769,7 @@ internal static class CssBoxHelper
     public static double GetMaxFloatBottom(CssBox box)
     {
         double maxBottom = 0;
-        List<(string tag, double bottom)> considered = null;
+        List<(string tag, double bottom)>? considered = null;
 
         if (box.ParentBox == null)
             return maxBottom;
@@ -814,7 +814,7 @@ internal static class CssBoxHelper
     /// direction.  Floated elements establish a new BFC, so their descendant
     /// floats are excluded from clearance calculations outside.
     /// </summary>
-    private static void CollectMaxFloatBottom(CssBox box, string clearDir, ref double maxBottom, ref List<(string tag, double bottom)> considered)
+    private static void CollectMaxFloatBottom(CssBox box, string clearDir, ref double maxBottom, ref List<(string tag, double bottom)>? considered)
     {
         if (box.Float != CssConstants.None)
         {

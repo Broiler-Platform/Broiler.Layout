@@ -63,7 +63,7 @@ internal static partial class SvgRenderer
     /// </summary>
     private static bool UsesBoxRelativeTransformBox(Dictionary<string, string> attrs)
     {
-        string box = GetPresentationValue(attrs, "transform-box")?.Trim();
+        string? box = GetPresentationValue(attrs, "transform-box")?.Trim();
         return !string.IsNullOrEmpty(box)
             && !box.Equals("view-box", StringComparison.OrdinalIgnoreCase);
     }
@@ -84,6 +84,6 @@ internal static partial class SvgRenderer
     /// reference that draws the rect with no transform at all, and a centre origin threw the square
     /// hundreds of pixels away.
     /// </remarks>
-    private static PointF ResolveTransformOrigin(string value, RectangleF box) =>
+    private static PointF ResolveTransformOrigin(string? value, RectangleF box) =>
         CssTransformOrigin.Resolve(value, box, initialIsBoxCorner: true);
 }

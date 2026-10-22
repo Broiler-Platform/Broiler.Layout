@@ -26,7 +26,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     private sealed class FlexItemLayout
     {
-        public CssBox Box { get; init; }
+        public required CssBox Box { get; init; }
         public double Grow { get; init; }
         public double Shrink { get; init; }
 
@@ -444,7 +444,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         CssBox child, double containerContentWidth, double? definiteCrossContentHeight)
     {
         double borderBoxWidth;
-        string basis = child.FlexBasis?.Trim();
+        string? basis = child.FlexBasis?.Trim();
 
         if (!string.IsNullOrEmpty(basis)
             && !basis.Equals("auto", StringComparison.OrdinalIgnoreCase)
@@ -1287,7 +1287,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         double marginHeight = child.ActualMarginTop + child.ActualMarginBottom;
         double borderBoxHeight;
-        string basis = child.FlexBasis?.Trim();
+        string? basis = child.FlexBasis?.Trim();
 
         if (!string.IsNullOrEmpty(basis)
             && !basis.Equals("auto", StringComparison.OrdinalIgnoreCase)
@@ -1919,7 +1919,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <c>height</c> is <c>auto</c> and the main size is therefore content-based.
     /// </summary>
     /// <remarks>
-    /// <see cref="TryGetDefiniteContentHeight"/> answers a narrower question and cannot be reused:
+    /// <see cref="TryGetDefiniteContentHeight()"/> answers a narrower question and cannot be reused:
     /// it drops a zero result, and <c>height: 0</c> under a <c>min-height</c> is precisely the
     /// definite-but-clamped case this exists to catch.
     /// </remarks>

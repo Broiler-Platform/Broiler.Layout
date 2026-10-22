@@ -16,7 +16,7 @@ public sealed class EffectiveZoomTests
 {
     private static readonly Uri BaseUrl = new("file:///zoom.html");
 
-    private static CssBox Box(CssBox parent, string zoom = "normal")
+    private static CssBox Box(CssBox? parent, string zoom = "normal")
     {
         var b = new CssBox(parent, null, BaseUrl) { Location = new PointF(0, 0), Size = new SizeF(10, 10), Zoom = zoom };
         return b;

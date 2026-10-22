@@ -129,7 +129,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// <c>min-content</c>, <c>stretch</c>, <c>inherit</c>, …), which is left unconstrained.
     /// </summary>
     /// <remarks>
-    /// The guard is load-bearing, not defensive: <see cref="CssLengthParser.ParseLength"/> resolves
+    /// The guard is load-bearing, not defensive: <see cref="CssLengthParser.ParseLength(string, double, double, bool)"/> resolves
     /// an unrecognised unit to <c>0px</c>, so handing it <c>max-width: fit-content</c> would clamp
     /// the box to nothing rather than leave it alone.
     /// </remarks>
@@ -447,7 +447,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         using var measuring = MeasureContent();
 
         double maxWidth = 0;
-        CssRect maxWidthWord = null;
+        CssRect? maxWidthWord = null;
         CssBoxHelper.GetMinimumWidth_LongestWord(this, ref maxWidth, ref maxWidthWord);
 
         double padding = 0f;
@@ -973,7 +973,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // no number in it at all, and rejecting that token used to reject the whole declaration.
         bool sawSlash = false;
 
-        foreach (var token in value.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             if (token.Equals("auto", StringComparison.OrdinalIgnoreCase)
                 || token.Equals("none", StringComparison.OrdinalIgnoreCase))

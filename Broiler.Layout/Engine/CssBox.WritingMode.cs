@@ -23,7 +23,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     {
         if (!VerticalFlowPrototype.Enabled)
             return false;
-        for (CssBox ctx = this; ctx != null; ctx = ctx.ParentBox)
+        for (CssBox? ctx = this; ctx != null; ctx = ctx.ParentBox)
         {
             bool ctxVertical = IsVerticalWritingMode(ctx.WritingMode);
             bool parentVertical = ctx.ParentBox != null
@@ -210,7 +210,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 // monospace/square fonts, approximate otherwise).  This is what
                 // the position-only transform alone could not do: without it a
                 // run paints horizontally and overlaps the next column.
-                string text = word.Text;
+                string? text = word.Text;
                 if (text != null && text.Length > 1 && !word.IsLineBreak)
                 {
                     double advance = word.Width / text.Length;

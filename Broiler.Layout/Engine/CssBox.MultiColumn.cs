@@ -499,14 +499,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// descendant with multiple in-flow block children for multi-column
     /// fragmentation.
     /// </summary>
-    private CssBox FindMultiColumnFragmentParent()
+    private CssBox? FindMultiColumnFragmentParent()
     {
         CssBox current = this;
 
         for (int depth = 0; depth < 10; depth++)
         {
             int inFlowCount = 0;
-            CssBox onlyChild = null;
+            CssBox? onlyChild = null;
 
             foreach (var child in current.Boxes)
             {

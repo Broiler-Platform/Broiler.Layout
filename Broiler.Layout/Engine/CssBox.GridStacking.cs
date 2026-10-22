@@ -20,7 +20,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private bool ApplyGridStacking()
     {
         bool allSameCell = true;
-        string firstRow = null, firstCol = null;
+        string? firstRow = null, firstCol = null;
 
         foreach (var child in Boxes)
         {
@@ -118,7 +118,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private bool TryApplyStackingRowTracks(double cellLeft, double cellTop, double columnWidth)
     {
         double em = GetEmHeight();
-        List<GridTrackSpec> rowSpecs = ParseTrackList(GridTemplateRows, em);
+        List<GridTrackSpec>? rowSpecs = ParseTrackList(GridTemplateRows, em);
 
         if (rowSpecs == null || rowSpecs.Count == 0 || rowSpecs.Count > MaxGridLine)
             return false;
@@ -151,7 +151,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         double rowGap = ResolveGridGap(RowGap, rowBasis, em);
 
         var rowItems = new List<AxisItem> { new(rowStart, rowSpan, contentH, contentH) };
-        double[] rowSizes = ResolveTrackSizes(rowSpecs, implicitRow, rowCount,
+        double[]? rowSizes = ResolveTrackSizes(rowSpecs, implicitRow, rowCount,
             rowBasis, rowDefinite, rowGap, rowBasis, rowItems);
 
         if (rowSizes == null)
@@ -190,7 +190,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     /// <summary>The <c>grid-row</c> of the first in-flow grid item (all in-flow
     /// items share it on the stacking path, so any one is representative).</summary>
-    private string GridRowOfFirstInFlowItem()
+    private string? GridRowOfFirstInFlowItem()
     {
         foreach (var child in Boxes)
         {
@@ -216,14 +216,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     private bool StretchGridItemToColumnWidth(CssBox child, double columnWidth, out string resolvedJustify)
     {
         bool isAutoWidth = child.Width == CssConstants.Auto || string.IsNullOrEmpty(child.Width);
-        string js = child.JustifySelf?.Trim().ToLowerInvariant();
+        string? js = child.JustifySelf?.Trim().ToLowerInvariant();
 
         // CSS Box Alignment §6.2: 'justify-self: auto' resolves to the grid
         // container's 'justify-items' (the intermediate display: contents
         // ancestor, having no box, does not contribute).
         if (string.IsNullOrEmpty(js) || js == "auto")
         {
-            string ji = JustifyItems?.Trim().ToLowerInvariant();
+            string? ji = JustifyItems?.Trim().ToLowerInvariant();
             js = string.IsNullOrEmpty(ji) || ji == "auto" || ji == "legacy"
                 ? "normal"
                 : ji;

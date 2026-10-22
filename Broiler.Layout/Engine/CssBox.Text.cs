@@ -13,7 +13,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 {
     public void SetGeneratedTextContent(string text)
     {
-        CssBox textBox = null;
+        CssBox? textBox = null;
 
         foreach (CssBox child in Boxes)
         {
@@ -270,14 +270,14 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         /// <c>math-auto</c> — element-scoped MathML italicization not modelled here —
         /// or the CSS-wide keywords).
         /// </summary>
-        public static TextTransformer For(string value)
+        public static TextTransformer? For(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
                 return null;
 
             bool capitalize = false, upper = false, lower = false, fullWidth = false, fullSizeKana = false;
 
-            foreach (var token in value.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+            foreach (var token in value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
             {
                 switch (token.ToLowerInvariant())
                 {
@@ -432,7 +432,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         {
             foreach (var boxWord in Words)
             {
-                boxWord.Width = boxWord.Text != "\n" ? g.MeasureText(ActualFont, boxWord.Text).Width : 0;
+                boxWord.Width = boxWord.Text is { } text && text != "\n" ? g.MeasureText(ActualFont, text).Width : 0;
                 boxWord.Height = ActualFont.Height;
             }
         }

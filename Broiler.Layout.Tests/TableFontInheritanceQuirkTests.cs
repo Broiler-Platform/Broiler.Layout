@@ -282,7 +282,7 @@ public sealed class TableFontInheritanceQuirkTests
     private sealed class EchoFont(double size) : ILayoutFont
     {
         public double Size { get; } = size;
-        public double Height => size;
+        public double Height => Size;
         public double UnderlineOffset => 0;
         public double LeftPadding => 0;
         public string? FontFeatures => null;

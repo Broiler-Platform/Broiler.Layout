@@ -87,7 +87,7 @@ public sealed class Fragment
     /// SVG markup for replaced elements (e.g. <c>&lt;object data="file.svg"&gt;</c>)
     /// that should be rendered via <c>SvgRenderer</c> instead of as a raster image.
     /// </summary>
-    public string SvgContent { get; init; }
+    public string? SvgContent { get; init; }
 
     /// <summary>
     /// HTML source of a nested browsing context — an <c>&lt;object type="text/html"&gt;</c>,
@@ -96,13 +96,13 @@ public sealed class Fragment
     /// at the element's content-box size and composites it over the box.  Null when
     /// the element is not an embedded document or the source could not be loaded.
     /// </summary>
-    public string EmbeddedDocumentHtml { get; init; }
+    public string? EmbeddedDocumentHtml { get; init; }
 
     /// <summary>
     /// Base URL of the embedded document (see <see cref="EmbeddedDocumentHtml"/>), used
     /// to resolve that document's own relative resources.
     /// </summary>
-    public string EmbeddedDocumentBaseUrl { get; init; }
+    public string? EmbeddedDocumentBaseUrl { get; init; }
 
     /// <summary>
     /// Per-line-box rectangles for inline elements. Used by paint to render

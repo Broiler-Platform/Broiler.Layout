@@ -21,7 +21,7 @@ internal static partial class CssUtils
         return w;
     }
 
-    public static string GetPropertyValue(CssBox cssBox, string propName)
+    public static string? GetPropertyValue(CssBox cssBox, string propName)
     {
         return propName switch
         {
@@ -196,7 +196,7 @@ internal static partial class CssUtils
     /// </summary>
     private static void SetFlexFlowShorthand(CssBox cssBox, string value)
     {
-        foreach (var token in value.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             if (token is "row" or "row-reverse" or "column" or "column-reverse")
                 cssBox.FlexDirection = token;
@@ -232,7 +232,7 @@ internal static partial class CssUtils
         }
 
         string? grow = null, shrink = null, basis = null;
-        foreach (var token in v.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in v.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             bool isNumber = double.TryParse(
                 token, System.Globalization.NumberStyles.Float,
@@ -1002,7 +1002,7 @@ internal static partial class CssUtils
     private static void ApplyContainIntrinsicSizeShorthand(CssBox cssBox, string value)
     {
         var tokens = (value ?? string.Empty)
-            .Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
         var components = new List<string>();
 
@@ -1110,11 +1110,11 @@ internal static partial class CssUtils
     /// preserving the other edge already stored.</summary>
     private static void SetGridLineSide(CssBox cssBox, bool isRow, bool isStart, string value)
     {
-        string cur = isRow ? cssBox.GridRow : cssBox.GridColumn;
+        string? cur = isRow ? cssBox.GridRow : cssBox.GridColumn;
         int slash = cur?.IndexOf('/') ?? -1;
-        string start = slash >= 0 ? cur[..slash].Trim()
+        string start = slash >= 0 && cur != null ? cur[..slash].Trim()
                      : string.IsNullOrWhiteSpace(cur) ? "auto" : cur.Trim();
-        string end = slash >= 0 ? cur[(slash + 1)..].Trim() : "auto";
+        string end = slash >= 0 && cur != null ? cur[(slash + 1)..].Trim() : "auto";
         if (isStart) start = value.Trim(); else end = value.Trim();
         string combined = CombineGridLine(start, end);
         if (isRow) cssBox.GridRow = combined; else cssBox.GridColumn = combined;
@@ -1149,10 +1149,10 @@ internal static partial class CssUtils
     /// dropped declaration — the element falls back to its default display —
     /// matching reference browsers, which ship no unflagged grid-lanes support.
     /// </summary>
-    internal static string NormalizeDisplayValue(string value, CssBox box = null)
+    internal static string NormalizeDisplayValue(string value, CssBox? box = null)
     {
         string v = value.Trim();
-        var parts = v.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        var parts = v.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
         // `display: grid-lanes` / `<outside> grid-lanes` is invalid: no stable
         // browser ships the CSS Grid Level 3 grid-lanes keyword unflagged, so the
@@ -1235,8 +1235,8 @@ internal static partial class CssUtils
             or CssConstants.PreWrap or CssConstants.PreLine)
             return v;
 
-        string collapse = null, wrap = null;
-        foreach (var token in v.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+        string? collapse = null, wrap = null;
+        foreach (var token in v.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             switch (token)
             {
@@ -1298,9 +1298,9 @@ internal static partial class CssUtils
     /// accepted alongside it. Anything else (including the initial
     /// <c>horizontal</c>) is the inline axis.
     /// </summary>
-    internal static bool IsVerticalWebkitBoxOrient(string value)
+    internal static bool IsVerticalWebkitBoxOrient(string? value)
     {
-        string v = value?.Trim();
+        string? v = value?.Trim();
         return v != null
             && (v.Equals("vertical", StringComparison.OrdinalIgnoreCase)
                 || v.Equals("block-axis", StringComparison.OrdinalIgnoreCase));
@@ -1313,9 +1313,9 @@ internal static partial class CssUtils
     /// unknown/custom elements such as <c>&lt;grid&gt;</c>). Only used by the
     /// grid-lanes fallback in <see cref="NormalizeDisplayValue"/>.
     /// </summary>
-    private static string DefaultDisplayForElement(CssBox box)
+    private static string DefaultDisplayForElement(CssBox? box)
     {
-        string name = box?.HtmlTag?.Name;
+        string? name = box?.HtmlTag?.Name;
         return name != null && BlockLevelHtmlTags.Contains(name)
             ? CssConstants.Block
             : CssConstants.Inline;

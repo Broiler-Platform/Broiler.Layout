@@ -63,7 +63,7 @@ internal abstract class CssRect(CssBox owner)
 
     public virtual bool HasSpaceAfter => false;
 
-    public virtual object Image
+    public virtual object? Image
     {
         get { return null; }
         set { }
@@ -72,14 +72,14 @@ internal abstract class CssRect(CssBox owner)
     public virtual bool IsImage => false;
     public virtual bool IsSpaces => true;
     public virtual bool IsLineBreak => false;
-    public virtual string Text => null;
+    public virtual string? Text => null;
     public bool Selected => Selection != null;
     public int SelectedStartIndex => Selection != null ? Selection.GetSelectingStartIndex(this) : -1;
     public int SelectedEndIndexOffset => Selection != null ? Selection.GetSelectedEndIndexOffset(this) : -1;
     public double SelectedStartOffset => Selection != null ? Selection.GetSelectedStartOffset(this) : -1;
     public double SelectedEndOffset => Selection != null ? Selection.GetSelectedEndOffset(this) : -1;
     internal double LeftGlyphPadding => OwnerBox != null ? OwnerBox.ActualFont.LeftPadding : 0;
-    public override string ToString() => $"{Text.Replace(' ', '-').Replace("\n", "\\n")} ({Text.Length} char{(Text.Length != 1 ? "s" : string.Empty)})";
+    public override string ToString() => Text is not null ? $"{Text.Replace(' ', '-').Replace("\n", "\\n")} ({Text.Length} char{(Text.Length != 1 ? "s" : string.Empty)})" : (base.ToString() ?? string.Empty);
 
     public bool BreakPage()
     {

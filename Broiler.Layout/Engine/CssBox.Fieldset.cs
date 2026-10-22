@@ -141,7 +141,7 @@ internal partial class CssBox
     /// is an ordinary block and stays in the content, which is what HTML §15.5.13 says by naming
     /// only the first.
     /// </summary>
-    private CssBox RenderedLegend()
+    private CssBox? RenderedLegend()
     {
         foreach (var child in Boxes)
         {

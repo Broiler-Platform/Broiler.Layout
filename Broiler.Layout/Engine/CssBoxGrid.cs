@@ -153,11 +153,11 @@ internal partial class CssBox
         // (none/empty or an out-of-scope token) declines the whole pass; an orphan
         // subgrid axis contributes no explicit tracks (its `subgrid` computed to none).
         // A repeat(auto-fill, …) template is expanded to a concrete track list here.
-        List<GridTrackSpec> colSpecs = colSubgrid ? FixedTrackSpecs(SubgridColumnSizes)
+        List<GridTrackSpec>? colSpecs = colSubgrid ? FixedTrackSpecs(SubgridColumnSizes)
             : colOrphanSubgrid ? []
             : ParseTrackListMaybeAutoRepeat(GridTemplateColumns, em, contentWidth, autoRepeatColGap);
 
-        List<GridTrackSpec> rowSpecs = rowSubgrid ? FixedTrackSpecs(SubgridRowSizes)
+        List<GridTrackSpec>? rowSpecs = rowSubgrid ? FixedTrackSpecs(SubgridRowSizes)
             : rowOrphanSubgrid ? []
             : ParseTrackListMaybeAutoRepeat(GridTemplateRows, em, autoRepeatBlock, autoRepeatRowGap, autoRepeatBlockFromMin);
 
@@ -264,7 +264,7 @@ internal partial class CssBox
         var rowNames = ParseLineNames(GridTemplateRows);
 
         if (!TryCollectGridPlacements(colSpecs.Count, rowSpecs.Count, colNames, rowNames,
-                gridIsAbsposContainingBlock, out var placements, out List<CssBox> absposItems))
+                gridIsAbsposContainingBlock, out var placements, out List<CssBox>? absposItems))
             return false;
 
         // A grid with no in-flow items has no tracks to size *from*, so the pass
@@ -301,7 +301,7 @@ internal partial class CssBox
         // distribution grows auto tracks to fill the container; a packing/spacing
         // justify-content leaves them at content size and positions them instead.
         bool stretchCols = IsStretchContentDistribution(JustifyContent);
-        double[] colSizes = ResolveTrackSizes(colSpecs, implicitCol, colCount,
+        double[]? colSizes = ResolveTrackSizes(colSpecs, implicitCol, colCount,
             contentWidth, definite: true, colGap, contentWidth, colItems, stretchCols,
             explicitStart: explicitColStart);
 
@@ -383,7 +383,7 @@ internal partial class CssBox
             rowItems.Add(new AxisItem(p.PlacedRow, p.RowSpan, h, h));
         }
         bool stretchRows = IsStretchContentDistribution(AlignContent);
-        double[] rowSizes = ResolveTrackSizes(rowSpecs, implicitRow, rowCount,
+        double[]? rowSizes = ResolveTrackSizes(rowSpecs, implicitRow, rowCount,
             rowBasis, rowDefinite, rowGap, rowBasis, rowItems, stretchRows,
             explicitStart: explicitRowStart);
 
@@ -570,7 +570,7 @@ internal partial class CssBox
     /// </summary>
     private bool TryCollectGridPlacements(int explicitCols, int explicitRows,
         IReadOnlyDictionary<string, List<int>> colNames, IReadOnlyDictionary<string, List<int>> rowNames,
-        bool collectAbspos, out List<GridPlacement> placements, out List<CssBox> absposItems)
+        bool collectAbspos, out List<GridPlacement> placements, out List<CssBox>? absposItems)
     {
         placements = [];
         absposItems = null;
@@ -1171,8 +1171,8 @@ internal partial class CssBox
     /// indexes the same coordinate as the sized tracks.
     /// </summary>
     private static (int? startLine, int? endLine) ParseAbsposGridLines(
-        string value, int explicitTracks, int explicitStart,
-        IReadOnlyDictionary<string, List<int>> names = null)
+        string? value, int explicitTracks, int explicitStart,
+        IReadOnlyDictionary<string, List<int>>? names = null)
     {
         string v = (value ?? "").Trim();
         int slash = v.IndexOf('/');
@@ -1386,7 +1386,7 @@ internal partial class CssBox
     /// existing conservative path. The subgrid's children have already been laid
     /// out (its standalone/orphan pass), so their measured heights are available.
     /// </summary>
-    private static double[] TryGetSubgridRowContributions(CssBox subgrid, int parentSpan)
+    private static double[]? TryGetSubgridRowContributions(CssBox subgrid, int parentSpan)
     {
         if (parentSpan <= 0)
             return null;
@@ -1476,7 +1476,7 @@ internal partial class CssBox
         => new(new GridSize(GridSizeKind.Auto), new GridSize(GridSizeKind.Auto));
 
     /// <summary>Build fixed (px) track-sizing functions from inherited subgrid sizes.</summary>
-    private static List<GridTrackSpec> FixedTrackSpecs(double[] sizes)
+    private static List<GridTrackSpec>? FixedTrackSpecs(double[]? sizes)
     {
         if (sizes == null)
             return null;
@@ -1810,7 +1810,7 @@ internal partial class CssBox
     /// </summary>
     private void AlignGridRowBaselines(List<GridPlacement> placements)
     {
-        Dictionary<int, List<CssBox>> byRow = null;
+        Dictionary<int, List<CssBox>>? byRow = null;
 
         foreach (var p in placements)
         {
@@ -1941,7 +1941,7 @@ internal partial class CssBox
     /// <c>fit-content()</c>, <c>repeat(auto-fill/auto-fit, …)</c>) — the signal to
     /// decline the pass and use the existing approximation.
     /// </summary>
-    private static List<GridTrackSpec> ParseTrackList(string value, double em)
+    private static List<GridTrackSpec>? ParseTrackList(string? value, double em)
     {
         if (string.IsNullOrWhiteSpace(value))
             return null;
@@ -1964,7 +1964,7 @@ internal partial class CssBox
     /// unchanged; an auto-repeat that cannot be resolved (non-fixed repeated tracks,
     /// <c>auto-fit</c>, or combined with subgrid) returns <c>null</c> to decline.
     /// </summary>
-    private static List<GridTrackSpec> ParseTrackListMaybeAutoRepeat(string value, double em,
+    private static List<GridTrackSpec>? ParseTrackListMaybeAutoRepeat(string? value, double em,
         double availableSize, double gap, bool fillMinimum = false)
     {
         var expanded = ExpandAutoRepeatTrackList(value, em, availableSize, gap, fillMinimum, out bool hasAutoRepeat);
@@ -1986,7 +1986,7 @@ internal partial class CssBox
     /// unmodelled), non-fixed repeated tracks, or a repeated block that would exceed
     /// <see cref="MaxGridLine"/> tracks.
     /// </summary>
-    private static List<GridTrackSpec> ExpandAutoRepeatTrackList(string value, double em,
+    private static List<GridTrackSpec>? ExpandAutoRepeatTrackList(string? value, double em,
         double availableSize, double gap, bool fillMinimum, out bool hasAutoRepeat)
     {
         hasAutoRepeat = false;
@@ -2034,7 +2034,7 @@ internal partial class CssBox
             // Only a repeat() whose *count* argument is auto-fill/auto-fit is an
             // auto-repeat; the keyword appearing inside a line name (e.g.
             // [auto-fill-start]) is not, and must fall through to the ordinary parse.
-            string autoKind = AutoRepeatCountKind(token);
+            string? autoKind = AutoRepeatCountKind(token);
             if (autoKind == "auto-fit")
             {
                 hasAutoRepeat = true;       // empty-track collapsing unmodelled → decline
@@ -2122,7 +2122,7 @@ internal partial class CssBox
     /// that keyword, else <c>null</c>. Distinguishes a genuine auto-repeat from the
     /// keyword merely occurring inside a line-name token.
     /// </summary>
-    private static string AutoRepeatCountKind(string token)
+    private static string? AutoRepeatCountKind(string token)
     {
         if (!token.StartsWith("repeat(", StringComparison.OrdinalIgnoreCase) || !token.EndsWith(')'))
             return null;
@@ -2468,7 +2468,7 @@ internal partial class CssBox
     /// <para>
     /// A definite height is the container's used content height whether or not the
     /// tracks fill it, so the track sum is the answer only for an indefinite one.
-    /// <see cref="TryGetDefiniteContentHeight"/> deliberately declines a percentage
+    /// <see cref="TryGetDefiniteContentHeight()"/> deliberately declines a percentage
     /// height — resolving one there would change which grids size their rows against a
     /// definite basis, and with it <c>align-content</c> and every percentage track.
     /// This reads no further than the abspos containing block, where the percentage is
@@ -2576,7 +2576,7 @@ internal partial class CssBox
     /// <c>null</c> to decline (a percentage against an indefinite basis, or a
     /// negative/degenerate result).
     /// </summary>
-    private static double[] ResolveTrackSizes(List<GridTrackSpec> explicitSpecs, GridTrackSpec implicitSpec,
+    private static double[]? ResolveTrackSizes(List<GridTrackSpec> explicitSpecs, GridTrackSpec implicitSpec,
         int count, double containerSize, bool definite, double gap, double percentBasis,
         List<AxisItem> items, bool stretchAutoTracks = false, int explicitStart = 0)
     {
@@ -2955,8 +2955,8 @@ internal partial class CssBox
     /// <c>-2</c> the one before it, and so on; a negative line pointing before the
     /// grid's start, or a named line, falls back to <c>auto</c>.
     /// </summary>
-    private static (int? start, int span) ParseGridLine(string value, int explicitTracks,
-        IReadOnlyDictionary<string, List<int>> names = null)
+    private static (int? start, int span) ParseGridLine(string? value, int explicitTracks,
+        IReadOnlyDictionary<string, List<int>>? names = null)
     {
         if (string.IsNullOrWhiteSpace(value))
             return (null, 1);
@@ -2993,7 +2993,7 @@ internal partial class CssBox
     }
 
     private static (int? start, int span) ParseSingleGridLine(string token, int explicitTracks,
-        IReadOnlyDictionary<string, List<int>> names = null)
+        IReadOnlyDictionary<string, List<int>>? names = null)
     {
         if (string.IsNullOrEmpty(token) || token.Equals("auto", StringComparison.OrdinalIgnoreCase))
             return (null, 1);
@@ -3084,7 +3084,7 @@ internal partial class CssBox
                 if (close < 0) return;
 
                 foreach (var name in v.Substring(i + 1, close - i - 1)
-                             .Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+                             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
                 {
                     if (!result.TryGetValue(name, out var list))
                         result[name] = list = [];

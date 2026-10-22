@@ -207,10 +207,10 @@ public sealed class AffineLayerMapTests
     [Theory]
     [InlineData(null)]
     [InlineData(new float[] { 1f, 0f, 0f })]
-    public void A_Malformed_Matrix_Is_Declined(float[] matrix)
+    public void A_Malformed_Matrix_Is_Declined(float[]? matrix)
     {
-        Assert.True(AffineLayerMap.IsAxisAligned(matrix));
-        Assert.False(AffineLayerMap.TryCreate(matrix, 0f, 0f, 1f, 1f, 0f, 0f, out _));
+        Assert.True(AffineLayerMap.IsAxisAligned(matrix!));
+        Assert.False(AffineLayerMap.TryCreate(matrix!, 0f, 0f, 1f, 1f, 0f, 0f, out _));
     }
 
     [Fact(Timeout = 600000)]

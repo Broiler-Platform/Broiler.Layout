@@ -25,7 +25,7 @@ public sealed class LineBreakWordSplittingTests
         if (wordBreak != null) box.WordBreak = wordBreak;
         box.Text = text.AsMemory();
         box.ParseToWords();
-        return box.Words.Select(w => w.Text).ToArray();
+        return box.Words.Select(w => w.Text!).ToArray();
     }
 
     [Fact(Timeout = 600000)]

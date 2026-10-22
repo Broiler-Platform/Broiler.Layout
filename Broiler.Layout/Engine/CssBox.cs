@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Broiler.CSS;
 using Broiler.Graphics;
 using Broiler.Graphics.Color;
@@ -14,8 +15,8 @@ namespace Broiler.Layout.Engine;
 internal partial class CssBox : CssBoxProperties, IDisposable
 {
     private CssBox? _parentBox;
-    protected object _htmlContainer;
-    private ILayoutEnvironment _layoutEnvironment;
+    protected object _htmlContainer = null!;
+    private ILayoutEnvironment _layoutEnvironment = null!;
     private ReadOnlyMemory<char> _text;
 
     internal bool _tableFixed;
@@ -39,7 +40,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// Phase 5 uses this to run the shared <c>Broiler.CSS.Dom</c> cascade on the
     /// canonical element and project the result onto this box.
     /// </summary>
-    internal Dom.DomElement SourceElement { get; set; }
+    internal Dom.DomElement? SourceElement { get; set; }
 
     /// <summary>
     /// When the block-inside-inline correction (CSS2.1 §9.2.1.1) splits a
@@ -49,7 +50,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// positioned ancestor so that <see cref="FindPositionedContainingBlock"/>
     /// can still find it.
     /// </summary>
-    internal CssBox SplitPositionedAncestor { get; set; }
+    internal CssBox? SplitPositionedAncestor { get; set; }
 
     /// <summary>
     /// RF-BRIDGE-1b Track 3.2: marks a materialised nested-browsing-context root
@@ -86,7 +87,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// Only populated on the original box that serves as
     /// <see cref="SplitPositionedAncestor"/> for hoisted descendants.
     /// </summary>
-    internal List<CssBox> SplitFragments { get; private set; }
+    internal List<CssBox>? SplitFragments { get; private set; }
 
     /// <summary>
     /// Register a box as a fragment of this positioned inline that was
@@ -99,7 +100,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     }
 
     protected bool _wordsSizeMeasured;
-    private CssBox _listItemBox;
+    private CssBox? _listItemBox;
 
     /// <summary>
     /// The generated list-item marker box (bullet / number glyph) for a
@@ -122,12 +123,18 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     internal Dictionary<string, string> CustomProperties { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    internal void SetCustomProperty(string propertyName, string value)
+    internal void SetCustomProperty(string propertyName, string? value)
     {
         if (string.IsNullOrEmpty(propertyName))
             return;
 
-        var trimmed = value?.Trim();
+        if (value == null)
+        {
+            CustomProperties.Remove(propertyName);
+            return;
+        }
+
+        var trimmed = value.Trim();
         if (string.Equals(trimmed, "initial", StringComparison.OrdinalIgnoreCase))
         {
             CustomProperties[propertyName] = InvalidCustomPropertySentinel;
@@ -195,7 +202,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     internal object ContainerInt
     {
-        get { return _htmlContainer ??= _parentBox?.ContainerInt; }
+        get { return _htmlContainer ??= _parentBox?.ContainerInt!; }
         set { _htmlContainer = value; }
     }
 
@@ -234,7 +241,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     internal ILayoutEnvironment LayoutEnvironment
     {
-        get { return _layoutEnvironment ??= _parentBox?.LayoutEnvironment; }
+        get { return _layoutEnvironment ??= _parentBox?.LayoutEnvironment!; }
         set { _layoutEnvironment = value; }
     }
 
@@ -255,7 +262,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     public override bool AvoidGeometryAntialias => LayoutEnvironment?.AvoidGeometryAntialias ?? false;
 
-    protected override bool TryGetCustomPropertyValue(string propertyName, out string value)
+    protected override bool TryGetCustomPropertyValue(string propertyName, [NotNullWhen(true)] out string? value)
     {
         if (CustomProperties.TryGetValue(propertyName, out value))
             return true;
@@ -263,7 +270,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (ParentBox != null)
             return ParentBox.TryGetCustomPropertyValue(propertyName, out value);
 
-        value = string.Empty;
+        value = null;
         return false;
     }
 
@@ -445,16 +452,16 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
     internal CssRect FirstWord => Words[0];
 
-    internal CssLineBox FirstHostingLineBox { get; set; }
+    internal CssLineBox? FirstHostingLineBox { get; set; }
 
-    internal CssLineBox LastHostingLineBox { get; set; }
+    internal CssLineBox? LastHostingLineBox { get; set; }
 
     /// <summary>
     /// The floats that shorten this block's line boxes, recorded by
     /// <see cref="CssLayoutEngine.CreateLineBoxes"/> for the pass it is running so that every
     /// line it flows can consult the same geometry. Null on a box that has not flowed lines.
     /// </summary>
-    internal LineFloatBands LineFloatBands { get; set; }
+    internal LineFloatBands? LineFloatBands { get; set; }
 
     internal Uri BaseUrl { get; set; }
 
@@ -695,7 +702,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             childBox.Dispose();
     }
 
-    protected override sealed CssBoxProperties GetParent() => _parentBox;
+    protected override sealed CssBoxProperties? GetParent() => _parentBox;
 
     private int GetIndexForList()
     {

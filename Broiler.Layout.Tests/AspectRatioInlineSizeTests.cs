@@ -80,7 +80,7 @@ public sealed class AspectRatioInlineSizeTests
     [Theory]
     [InlineData("200px", null, 200)]
     [InlineData(null, "40px", 40)]
-    public void The_Block_Axis_Clamp_Is_Transferred_Too(string minHeight, string maxHeight, double expectedWidth)
+    public void The_Block_Axis_Clamp_Is_Transferred_Too(string? minHeight, string? maxHeight, double expectedWidth)
     {
         var box = BlockIn(Page(), height: "100px", aspectRatio: "1/1");
         if (minHeight != null)
@@ -98,7 +98,7 @@ public sealed class AspectRatioInlineSizeTests
     [Theory]
     [InlineData("150px", null, 150)]
     [InlineData(null, "40px", 40)]
-    public void The_Inline_Axis_Clamp_Applies_After_The_Transfer(string minWidth, string maxWidth, double expectedWidth)
+    public void The_Inline_Axis_Clamp_Applies_After_The_Transfer(string? minWidth, string? maxWidth, double expectedWidth)
     {
         var box = BlockIn(Page(), height: "100px", aspectRatio: "1/1");
         if (minWidth != null)
@@ -299,7 +299,7 @@ public sealed class AspectRatioInlineSizeTests
         };
     }
 
-    private static CssBox BlockIn(CssBox parent, string height, string aspectRatio)
+    private static CssBox BlockIn(CssBox parent, string? height, string? aspectRatio)
     {
         var box = new CssBox(parent, new HtmlTag("div", false, null), BaseUrl)
         {

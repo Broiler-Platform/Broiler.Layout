@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Broiler.CSS;
 using Broiler.Graphics;
 using Broiler.Graphics.Color;
@@ -133,7 +134,7 @@ internal abstract partial class CssBoxProperties
     private BColor _actualBorderRightColor = BColor.Empty;
     private BColor _actualTextDecorationColor = BColor.Empty;
     private BColor _actualBackgroundColor = BColor.Empty;
-    private ILayoutFont _actualFont;
+    private ILayoutFont? _actualFont;
 
     #endregion
 
@@ -430,12 +431,12 @@ internal abstract partial class CssBoxProperties
             // now carries "<h> <v>", the same two-value form the per-corner longhands accept.
             int slashIndex = raw.IndexOf('/');
             string[] vertical = slashIndex >= 0
-                ? raw[(slashIndex + 1)..].Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
+                ? raw[(slashIndex + 1)..].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                 : [];
             if (slashIndex >= 0)
                 raw = raw[..slashIndex];
 
-            string[] r = raw.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            string[] r = raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
             // border-radius lists its corners clockwise from the top-left, and fills a short list
             // by mirroring: 2 values are the two diagonals, 3 leave the bottom-left to match the
@@ -469,7 +470,7 @@ internal abstract partial class CssBoxProperties
                 CornerSwRadius = Corner(3);
             }
 
-            _cornerRadius = value;
+            _cornerRadius = value ?? "0";
         }
     }
 
@@ -715,8 +716,8 @@ internal abstract partial class CssBoxProperties
     /// is the analogous row-axis inheritance; the gaps carry the parent's gutters,
     /// which a subgridded axis adopts (CSS Grid L2 §7.3).
     /// </summary>
-    internal double[] SubgridColumnSizes { get; set; }
-    internal double[] SubgridRowSizes { get; set; }
+    internal double[] SubgridColumnSizes { get; set; } = [];
+    internal double[] SubgridRowSizes { get; set; } = [];
     internal double? SubgridColumnGap { get; set; }
     internal double? SubgridRowGap { get; set; }
 
@@ -893,7 +894,7 @@ internal abstract partial class CssBoxProperties
             // black (WPT css-view-transitions nested tests inherit a colour through group wrappers).
             if (value != null && value.Equals("inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } bgParent)
                 value = bgParent.BackgroundColor;
-            _backgroundColor = value;
+            _backgroundColor = value ?? "transparent";
             _actualBackgroundColor = BColor.Empty;
         }
     }
@@ -1055,7 +1056,7 @@ internal abstract partial class CssBoxProperties
             if (string.IsNullOrEmpty(FontSize))
                 return CssConstants.FontSize;
 
-            double parentSize = GetParent() != null ? GetParent().ComputedFontSizePoints : CssConstants.FontSize;
+            double parentSize = GetParent() is { } p ? p.ComputedFontSizePoints : CssConstants.FontSize;
             var fsize = KeywordFontSizePoints(FontSize) is { } keywordSize
                 ? keywordSize * MonospaceKeywordScale
                 : FontSize switch
@@ -1307,7 +1308,7 @@ internal abstract partial class CssBoxProperties
     /// <see cref="CssBox.ResolveLineClamp"/> needs to know the box opted into the
     /// legacy <c>-webkit-line-clamp</c> after the keyword itself is gone.
     /// </summary>
-    public string LegacyWebkitBoxDisplay { get; set; }
+    public string? LegacyWebkitBoxDisplay { get; set; }
 
     /// <summary>
     /// Set by <see cref="CssBox.ApplyLineClamp"/> on a box whose content was
@@ -1385,8 +1386,8 @@ internal abstract partial class CssBoxProperties
     {
         get
         {
-            if (_backgroundClip.Equals("inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null)
-                return GetParent().BackgroundClip;
+            if (_backgroundClip.Equals("inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } bgParent)
+                return bgParent.BackgroundClip;
 
             return _backgroundClip;
         }
@@ -1605,7 +1606,7 @@ internal abstract partial class CssBoxProperties
     public string GridAutoFlow { get; set; } = "row";
     public string GridAutoRows { get; set; } = "auto";
     public string GridAutoColumns { get; set; } = "auto";
-    public string FontFamily { get; set; }
+    public string FontFamily { get; set; } = string.Empty;
 
     /// <summary>
     /// Raw CSS <c>font-feature-settings</c> value (e.g. <c>"ss05" on, "liga" off</c>),
@@ -1619,7 +1620,7 @@ internal abstract partial class CssBoxProperties
     /// <c>styleset(crossed-doubleu)</c>), inherited.  Resolved against
     /// <c>@font-feature-values</c> into concrete feature tags after the cascade.
     /// </summary>
-    public string FontVariantAlternates { get; set; }
+    public string? FontVariantAlternates { get; set; }
 
     /// <summary>
     /// Parses <see cref="FontFeatureSettings"/> into a space-separated list of
@@ -1690,9 +1691,9 @@ internal abstract partial class CssBoxProperties
         set
         {
             // CSS2.1 §6.2.1: 'inherit' resolves to the parent's computed value.
-            if (value != null && value.Equals("inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null)
+            if (value != null && value.Equals("inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } p)
             {
-                _fontSize = GetParent().FontSize;
+                _fontSize = p.FontSize;
                 InvalidateFontDependentValues();
                 return;
             }
@@ -1705,13 +1706,13 @@ internal abstract partial class CssBoxProperties
             var trimmedValue = value?.Trim();
             if (trimmedValue != null
                 && trimmedValue.EndsWith('%')
-                && GetParent() != null
+                && GetParent() is { } pctParent
                 && double.TryParse(trimmedValue[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out _))
             {
                 // Percentage font-size resolves against the parent's COMPUTED (unzoomed) font size on the
                 // native-zoom path, so `zoom` applies once (via EffectiveZoom on the used size) rather than
                 // compounding through the font-size chain; off it, the existing used-size basis is kept.
-                double parentBasis = GetParent().EffectiveZoom != 1.0 ? GetParent().ComputedFontSizePoints : GetParent().ActualFont.Size;
+                double parentBasis = pctParent.EffectiveZoom != 1.0 ? pctParent.ComputedFontSizePoints : pctParent.ActualFont.Size;
                 double resolvedPoints = CssLengthParser.ParseNumber(trimmedValue, parentBasis);
                 _fontSize = resolvedPoints.ToString("0.0###", CultureInfo.InvariantCulture) + "pt";
                 InvalidateFontDependentValues();
@@ -1725,7 +1726,7 @@ internal abstract partial class CssBoxProperties
                 return;
             }
 
-            string length = RegexParserUtils.Search(RegexParserUtils.CssLengthRegex(), value);
+            string? length = value != null ? RegexParserUtils.Search(RegexParserUtils.CssLengthRegex(), value) : null;
 
             if (length != null)
             {
@@ -1736,11 +1737,11 @@ internal abstract partial class CssBoxProperties
                 {
                     computedValue = "medium";
                 }
-                else if (len.Unit == CssUnit.Em && GetParent() != null)
+                else if (len.Unit == CssUnit.Em && GetParent() is { } emParent)
                 {
                     // em font-size resolves against the parent's COMPUTED (unzoomed) size on the
                     // native-zoom path (see the percentage branch above).
-                    double parentBasis = GetParent().EffectiveZoom != 1.0 ? GetParent().ComputedFontSizePoints : GetParent().ActualFont.Size;
+                    double parentBasis = emParent.EffectiveZoom != 1.0 ? emParent.ComputedFontSizePoints : emParent.ActualFont.Size;
                     computedValue = len.ConvertEmToPoints(parentBasis).ToString();
                 }
                 else
@@ -1752,7 +1753,7 @@ internal abstract partial class CssBoxProperties
             }
             else
             {
-                _fontSize = value;
+                _fontSize = value ?? string.Empty;
             }
 
             InvalidateFontDependentValues();
@@ -1837,8 +1838,8 @@ internal abstract partial class CssBoxProperties
         {
             if (double.IsNaN(_actualHeight))
             {
-                _actualHeight = string.Equals(Height, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null
-                    ? GetParent().ActualHeight
+                _actualHeight = string.Equals(Height, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } hParent
+                    ? hParent.ActualHeight
                     : ParseLengthWithLineHeight(Height, Size.Height);
             }
 
@@ -1852,8 +1853,8 @@ internal abstract partial class CssBoxProperties
         {
             if (double.IsNaN(_actualWidth))
             {
-                _actualWidth = string.Equals(Width, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null
-                    ? GetParent().ActualWidth
+                _actualWidth = string.Equals(Width, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } wParent
+                    ? wParent.ActualWidth
                     : ParseLengthWithLineHeight(Width, Size.Width);
             }
 
@@ -2205,16 +2206,16 @@ internal abstract partial class CssBoxProperties
 
     protected abstract BColor GetActualColor(string colorStr);
 
-    protected virtual bool TryGetCustomPropertyValue(string propertyName, out string value)
+    protected virtual bool TryGetCustomPropertyValue(string propertyName, [NotNullWhen(true)] out string? value)
     {
-        value = string.Empty;
+        value = null;
         return false;
     }
 
-    private string ResolveCssVariables(string value)
+    private string ResolveCssVariables(string? value)
     {
         if (string.IsNullOrEmpty(value) || value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) < 0)
-            return value;
+            return value ?? string.Empty;
 
         string resolved = value;
         for (int i = 0; i < 8 && resolved.Contains("var(", StringComparison.OrdinalIgnoreCase); i++)
@@ -2484,7 +2485,7 @@ internal abstract partial class CssBoxProperties
 
     /// <summary>The horizontal component of a corner radius: the first of its one or two
     /// space-separated values.</summary>
-    internal static string FirstCornerRadiusComponent(string radius)
+    internal static string? FirstCornerRadiusComponent(string? radius)
     {
         if (string.IsNullOrWhiteSpace(radius))
             return radius;
@@ -2494,15 +2495,18 @@ internal abstract partial class CssBoxProperties
         return space < 0 ? trimmed : trimmed[..space];
     }
 
-    private double ParseCornerRadius(string radius)
+    private double ParseCornerRadius(string? radius)
     {
+        if (string.IsNullOrWhiteSpace(radius)) return 0;
         // A corner radius may carry two values — `border-top-left-radius: 75px 50px` is an ellipse,
         // horizontal radius then vertical. Only the horizontal one is resolved here; the vertical is
         // derived at paint time, where the box height is known. Handing the whole pair to the
         // single-length parser made it fail and return 0, so a two-value corner did not round at all.
         radius = FirstCornerRadiusComponent(radius);
+        if (string.IsNullOrWhiteSpace(radius))
+            return 0;
 
-        double basis = radius != null && radius.Contains('%', StringComparison.Ordinal)
+        double basis = radius.Contains('%', StringComparison.Ordinal)
             ? Math.Max(0, Size.Width)
             : 0;
 
@@ -2667,8 +2671,8 @@ internal abstract partial class CssBoxProperties
             {
                 double parentSize = CssConstants.FontSize;
 
-                if (GetParent() != null)
-                    parentSize = GetParent().ActualFont.Size;
+                if (GetParent() is { } fontParent)
+                    parentSize = fontParent.ActualFont.Size;
 
                 fsize = KeywordFontSizePoints(FontSize) is { } keywordSize
                     ? keywordSize * MonospaceKeywordScale
@@ -2773,7 +2777,7 @@ internal abstract partial class CssBoxProperties
         }
     }
 
-    protected abstract CssBoxProperties GetParent();
+    protected abstract CssBoxProperties? GetParent();
 
     public double GetEmHeight() => ActualFont.Size * CssMetrics.PtToPx;
 
@@ -2845,8 +2849,11 @@ internal abstract partial class CssBoxProperties
     /// case for insets and percentage/abspos block sizes; <c>false</c> when it is the box's own already
     /// effective-zoom-scaled size (e.g. a relative-positioning offset resolved against <c>Size</c>).
     /// </param>
-    private protected double ParseUsedLength(string value, double basis, bool percentAgainstContainingBlock = true)
+    private protected double ParseUsedLength(string? value, double basis, bool percentAgainstContainingBlock = true)
     {
+        if (string.IsNullOrWhiteSpace(value))
+            return 0;
+
         if (NeedsCalcZoomScope(value))
         {
             CssLengthParser.SetElementZoom(EffectiveZoom, percentAgainstContainingBlock ? OwnZoom : 1.0);
@@ -3035,8 +3042,8 @@ internal abstract partial class CssBoxProperties
     private CssBoxProperties GetEffectiveRootBoxProperties()
     {
         CssBoxProperties root = this;
-        while (root.GetParent() != null)
-            root = root.GetParent();
+        while (root.GetParent() is { } next)
+            root = next;
 
         if (root is CssBox cssRoot)
         {
@@ -3060,7 +3067,7 @@ internal abstract partial class CssBoxProperties
     /// per CSS 2.1 §15.6. Handles keywords <c>normal</c>, <c>bold</c>,
     /// <c>bolder</c>, <c>lighter</c>, and numeric strings.
     /// </summary>
-    internal static int ResolveNumericFontWeight(string fontWeight, CssBoxProperties parent)
+    internal static int ResolveNumericFontWeight(string fontWeight, CssBoxProperties? parent)
     {
         if (string.IsNullOrEmpty(fontWeight) || fontWeight == CssConstants.Normal || fontWeight == CssConstants.Inherit)
             return 400;
@@ -3112,7 +3119,7 @@ internal abstract partial class CssBoxProperties
     /// Returns <c>true</c> when the resolved numeric font weight is 600 or above,
     /// meaning the font should use a bold face.
     /// </summary>
-    private static bool IsBoldWeight(string fontWeight, CssBoxProperties parent)
+    private static bool IsBoldWeight(string fontWeight, CssBoxProperties? parent)
     {
         if (string.IsNullOrEmpty(fontWeight) || fontWeight == CssConstants.Normal || fontWeight == CssConstants.Inherit)
             return false;
@@ -3120,7 +3127,7 @@ internal abstract partial class CssBoxProperties
         return ResolveNumericFontWeight(fontWeight, parent) >= 600;
     }
 
-    protected void SetAllBorders(string style = null, string width = null, string color = null)
+    protected void SetAllBorders(string? style = null, string? width = null, string? color = null)
     {
         if (style != null)
             BorderLeftStyle = BorderTopStyle = BorderRightStyle = BorderBottomStyle = style;
@@ -3142,10 +3149,10 @@ internal abstract partial class CssBoxProperties
         if (WordSpacing == CssConstants.Normal)
             return;
 
-        string len = RegexParserUtils.Search(RegexParserUtils.CssLengthRegex(), WordSpacing);
-        // word-spacing is a used length: scale it by the box's zoom (absolute × EffectiveZoom; an em term
-        // already rides the zoomed font via GetEmHeight). Inert while NativeZoom is off — byte-identical.
-        ActualWordSpacing += ApplyZoomToLength(len, CssLengthParser.ParseLength(len, 1, GetEmHeight()));
+        if (RegexParserUtils.Search(RegexParserUtils.CssLengthRegex(), WordSpacing) is { } len)
+        {
+            ActualWordSpacing += ApplyZoomToLength(len, CssLengthParser.ParseLength(len, 1, GetEmHeight()));
+        }
     }
 
     protected void InheritStyle(CssBox? p, bool everything)

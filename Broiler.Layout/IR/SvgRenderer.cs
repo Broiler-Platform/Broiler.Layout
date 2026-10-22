@@ -1,4 +1,4 @@
-#nullable disable
+using System.Diagnostics.CodeAnalysis;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -509,9 +509,9 @@ internal static partial class SvgRenderer
     /// without needing a real parser, which is all the rest of this renderer has either.
     /// </summary>
     private static bool TryParseFirstClipShape(
-        string body, bool objectBoundingBox, out SvgClipPathTable.ClipShape shape)
+        string body, bool objectBoundingBox, [NotNullWhen(true)] out SvgClipPathTable.ClipShape? shape)
     {
-        SvgClipPathTable.ClipShape best = null;
+        SvgClipPathTable.ClipShape? best = null;
         int bestIndex = int.MaxValue;
 
         Consider(ParseRectRegex().Match(body), SvgClipPathTable.ClipShapeKind.Rect);
@@ -1052,7 +1052,7 @@ internal static partial class SvgRenderer
     /// <c>conformance-checkers/html-svg/masking-path-14-f</c> covered the panel it should have been
     /// clipped to a corner of.
     /// </remarks>
-    private static Dictionary<string, RectangleF> CollectClipRects(string svgXml)
+    private static Dictionary<string, RectangleF>? CollectClipRects(string svgXml)
     {
         if (string.IsNullOrEmpty(svgXml)
             || svgXml.IndexOf("<clippath", StringComparison.OrdinalIgnoreCase) < 0)
@@ -1060,7 +1060,7 @@ internal static partial class SvgRenderer
             return null;
         }
 
-        Dictionary<string, RectangleF> rects = null;
+        Dictionary<string, RectangleF>? rects = null;
         foreach (Match cm in ClipPathBlockRegex().Matches(svgXml))
         {
             var clipAttrs = ParseAttributes(cm.Groups[1].Value);
@@ -1098,13 +1098,13 @@ internal static partial class SvgRenderer
     /// <see langword="null"/> when it carries none or the reference cannot be expressed as a rect.
     /// </summary>
     private static RectangleF? ClipRectFor(
-        Dictionary<string, string> attrs, Dictionary<string, RectangleF> clipRects,
+        Dictionary<string, string> attrs, Dictionary<string, RectangleF>? clipRects,
         RectangleF bounds, float sx, float sy, float tx, float ty, SvgTransform elementTransform)
     {
         if (clipRects == null)
             return null;
 
-        string clipPath = GetPresentationValue(attrs, "clip-path");
+        string? clipPath = GetPresentationValue(attrs, "clip-path");
         if (string.IsNullOrWhiteSpace(clipPath)
             || !TryParsePaintReference(clipPath, out var id, out _)
             || !clipRects.TryGetValue(id, out var rect))
@@ -1162,7 +1162,7 @@ internal static partial class SvgRenderer
         Dictionary<string, string> attrs, float pctD, float sx, float sy, float viewportScale)
     {
         float declared = GetLength(attrs, "stroke-width", pctD, 1);
-        string effect = GetPresentationValue(attrs, "vector-effect");
+        string? effect = GetPresentationValue(attrs, "vector-effect");
         bool nonScaling = effect != null
             && effect.Trim().Equals("non-scaling-stroke", StringComparison.OrdinalIgnoreCase);
 

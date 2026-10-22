@@ -398,7 +398,7 @@ internal sealed class CssLineBox
         }
         else
         {
-            CssRect firstw = CssBoxHelper.FirstWordOccourence(b, this);
+            CssRect? firstw = CssBoxHelper.FirstWordOccourence(b, this);
 
             if (firstw != null)
                 gap = firstw.Top - r.Top;
@@ -433,7 +433,7 @@ internal sealed class CssLineBox
         string[] ws = new string[Words.Count];
 
         for (int i = 0; i < ws.Length; i++)
-            ws[i] = Words[i].Text;
+            ws[i] = Words[i].Text ?? string.Empty;
 
         return string.Join(" ", ws);
     }

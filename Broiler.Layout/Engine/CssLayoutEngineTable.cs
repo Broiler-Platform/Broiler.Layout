@@ -11,8 +11,8 @@ internal sealed class CssLayoutEngineTable
 {
     private readonly CssBox _tableBox;
 
-    private CssBox _headerBox;
-    private CssBox _footerBox;
+    private CssBox? _headerBox;
+    private CssBox? _footerBox;
 
     private readonly List<CssBox> _bodyrows = [];
     private readonly List<CssBox> _columns = [];
@@ -32,8 +32,8 @@ internal sealed class CssLayoutEngineTable
 
     private bool _widthSpecified;
 
-    private double[] _columnWidths;
-    private double[] _columnMinWidths;
+    private double[] _columnWidths = null!;
+    private double[]? _columnMinWidths;
     private double[] _columnMaxWidths = [];
 
     // The widths the columns were given by their cells or their <col>s, NaN for the others, as
@@ -1076,7 +1076,7 @@ internal sealed class CssLayoutEngineTable
 
             foreach (CssBox cell in row.Boxes)
             {
-                CssSpacingBox spacer = cell as CssSpacingBox;
+                CssSpacingBox? spacer = cell as CssSpacingBox;
 
                 if (spacer == null && GetRowSpan(cell) == 1)
                 {
@@ -1871,7 +1871,7 @@ internal sealed class CssLayoutEngineTable
     {
         MeasureColumns();
 
-        minFullWidths = (double[])_columnMinWidths.Clone();
+        minFullWidths = (double[])_columnMinWidths!.Clone();
         maxFullWidths = (double[])_columnMaxWidths.Clone();
 
         if (!onlyNans)
@@ -1918,7 +1918,7 @@ internal sealed class CssLayoutEngineTable
     private double[] GetColumnMinWidths()
     {
         MeasureColumns();
-        return _columnMinWidths;
+        return _columnMinWidths!;
     }
 
     /// <summary>

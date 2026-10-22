@@ -25,6 +25,7 @@ namespace Broiler.Layout.Text;
 /// </remarks>
 internal static class SystemFontIndexRegistration
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2255:The 'ModuleInitializer' attribute should not be used in libraries", Justification = "Layout must hand its font resolver over to Graphics on module load; see remarks")]
     [ModuleInitializer]
     internal static void Register() => BSystemFontFiles.Use(SystemFontIndex.TryResolve);
 }

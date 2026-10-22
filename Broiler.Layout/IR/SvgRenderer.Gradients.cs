@@ -47,7 +47,7 @@ internal static partial class SvgRenderer
     /// gradient its <c>href</c>/<c>xlink:href</c> points at, so the chains are resolved after the
     /// whole document has been seen and a gradient may point forwards.
     /// </summary>
-    private static Dictionary<string, SvgGradient> CollectGradients(string svgXml)
+    private static Dictionary<string, SvgGradient>? CollectGradients(string svgXml)
     {
         if (string.IsNullOrEmpty(svgXml)
             || svgXml.IndexOf("Gradient", StringComparison.OrdinalIgnoreCase) < 0)
@@ -94,7 +94,7 @@ internal static partial class SvgRenderer
 
         // Either spelling arrives under "href" (see CollectGradients), with the unprefixed one
         // already preferred where a gradient carries both.
-        string href = gradient.Attributes.GetValueOrDefault("href");
+        string? href = gradient.Attributes.GetValueOrDefault("href");
 
         if (string.IsNullOrWhiteSpace(href) || href.Length < 2 || href[0] != '#')
             return gradient;

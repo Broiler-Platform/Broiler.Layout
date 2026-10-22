@@ -8,7 +8,7 @@ namespace Broiler.Layout.Engine;
 internal sealed class CssBoxImage : CssBox
 {
     private readonly CssRectImage _imageWord;
-    private ILayoutImageLoader _imageLoadHandler;
+    private ILayoutImageLoader? _imageLoadHandler;
 
     /// <summary>
     /// This box's replaced-content completion, captured by the image prefetch (multithreading item #8)
@@ -24,7 +24,7 @@ internal sealed class CssBoxImage : CssBox
 
     }
 
-    public object Image => _imageWord.Image;
+    public object? Image => _imageWord.Image;
 
     /// <summary>
     /// Whether this image is block-level: <c>display: block</c> as declared, or as blockification

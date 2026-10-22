@@ -63,8 +63,8 @@ partial class CssBox
             GetAbsoluteContainingBlockPaddingBox(cb, out _, out cbPadTop, out _, out cbPadHeight);
         }
 
-        double cssTop = CssLengthParser.ParseLength(Top, cbPadHeight, GetEmHeight());
-        double cssBottom = CssLengthParser.ParseLength(Bottom, cbPadHeight, GetEmHeight());
+        double cssTop = CssLengthParser.ParseLength(Top!, cbPadHeight, GetEmHeight());
+        double cssBottom = CssLengthParser.ParseLength(Bottom!, cbPadHeight, GetEmHeight());
         double remaining = cbPadHeight - cssTop - cssBottom - boxHeight;
         double marginTop = remaining >= 0 ? remaining / 2 : 0;
 

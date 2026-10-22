@@ -274,7 +274,7 @@ internal static class FragmentTreeBuilder
         RectangleF imgSourceRect = RectangleF.Empty;
         SizeF imgIntrinsicSize = SizeF.Empty;
         float imgIntrinsicRatio = 0;
-        string svgContent = null;
+        string? svgContent = null;
         if (box is CssBoxImage imgBox)
         {
             imgHandle = imgBox.Image;
@@ -343,8 +343,8 @@ internal static class FragmentTreeBuilder
         // re-check visibility.  CSS inheritance does not cross the frame
         // boundary, so a hidden host frame suppresses the whole nested document
         // regardless of that document's own styles.
-        string embeddedHtml = null;
-        string embeddedBaseUrl = null;
+        string? embeddedHtml = null;
+        string? embeddedBaseUrl = null;
         if (svgContent == null && imgHandle == null && box.HtmlTag != null
             && string.Equals(style.Visibility, "visible", StringComparison.OrdinalIgnoreCase))
         {
@@ -631,7 +631,7 @@ internal static class FragmentTreeBuilder
     /// Attempts to load SVG content from a <c>data</c> attribute value.
     /// Supports <c>data:image/svg+xml</c> URIs and local <c>.svg</c> file references.
     /// </summary>
-    private static string TryLoadSvgContent(string dataAttr, Uri baseUrl)
+    private static string? TryLoadSvgContent(string dataAttr, Uri? baseUrl)
     {
         // A data: URL carries the image itself, percent-encoded or in base64, and names no file.
         // The markup was taken as everything after the first comma, so a base64 body reached the SVG
@@ -654,7 +654,7 @@ internal static class FragmentTreeBuilder
                 string basePath = baseUrl.IsAbsoluteUri && baseUrl.IsFile
                     ? baseUrl.LocalPath
                     : baseUrl.OriginalString;
-                string dir = Path.GetDirectoryName(basePath);
+                string? dir = Path.GetDirectoryName(basePath);
                 if (!string.IsNullOrEmpty(dir))
                 {
                     string svgPath = Path.GetFullPath(Path.Combine(dir, dataAttr));
@@ -682,10 +682,10 @@ internal static class FragmentTreeBuilder
     /// relative <see cref="Uri"/>, and a page rendered without a base URL has one, so reading it
     /// unguarded turned a frame into an exception out of the whole render.
     /// </summary>
-    private static string ContainerBaseUrl(CssBox box) =>
+    private static string? ContainerBaseUrl(CssBox box) =>
         box.BaseUrl is { IsAbsoluteUri: true } baseUrl ? baseUrl.AbsoluteUri : null;
 
-    private static (string Html, string BaseUrl) TryLoadEmbeddedDocument(CssBox box)
+    private static (string? Html, string? BaseUrl) TryLoadEmbeddedDocument(CssBox box)
     {
         string tagName = (box.HtmlTag ?? throw new InvalidOperationException("Embedded-document box has no HTML tag.")).Name;
 
@@ -790,7 +790,7 @@ internal static class FragmentTreeBuilder
             string basePath = box.BaseUrl.IsAbsoluteUri && box.BaseUrl.IsFile
                 ? box.BaseUrl.LocalPath
                 : box.BaseUrl.OriginalString;
-            string dir = Path.GetDirectoryName(basePath);
+            string? dir = Path.GetDirectoryName(basePath);
             if (string.IsNullOrEmpty(dir))
                 return (null, null);
 
@@ -811,7 +811,7 @@ internal static class FragmentTreeBuilder
                 return (null, null);
 
             string docUrl = new Uri(docPath).AbsoluteUri;
-            string markup = BuildEmbeddedDocumentMarkup(docPath, docUrl);
+            string? markup = BuildEmbeddedDocumentMarkup(docPath, docUrl);
             return markup == null ? (null, null) : (markup, docUrl);
         }
         catch
@@ -840,7 +840,7 @@ internal static class FragmentTreeBuilder
     /// is still just a file on disk. Shared with <see cref="LoadEmbeddedDocumentFromRoot"/> so the
     /// document-relative and root-relative branches cannot drift apart again.
     /// </remarks>
-    private static string ResolveRelativeDocumentPath(string url)
+    private static string? ResolveRelativeDocumentPath(string url)
     {
         string path = url.Split('?', '#')[0];
         if (path.Length == 0)
@@ -863,7 +863,7 @@ internal static class FragmentTreeBuilder
     /// (<see cref="Engine.DocumentRoot.Current"/>), or <c>(null, null)</c> when no root is set or
     /// the path names nothing under it — the empty frame this case has always painted.
     /// </summary>
-    private static (string Html, string BaseUrl) LoadEmbeddedDocumentFromRoot(string url)
+    private static (string? Html, string? BaseUrl) LoadEmbeddedDocumentFromRoot(string url)
     {
         if (Engine.DocumentRoot.Current is not { Length: > 0 } root)
             return (null, null);
@@ -886,7 +886,7 @@ internal static class FragmentTreeBuilder
                 return (null, null);
 
             string docUrl = new Uri(docPath).AbsoluteUri;
-            string markup = BuildEmbeddedDocumentMarkup(docPath, docUrl);
+            string? markup = BuildEmbeddedDocumentMarkup(docPath, docUrl);
             return markup == null ? (null, null) : (markup, docUrl);
         }
         catch
@@ -921,7 +921,7 @@ internal static class FragmentTreeBuilder
     /// the whole page render (WPT
     /// <c>navigation-timing/dom-interactive-media-document.html</c>).
     /// </remarks>
-    private static string BuildEmbeddedDocumentMarkup(string path, string docUrl)
+    private static string? BuildEmbeddedDocumentMarkup(string path, string docUrl)
     {
         switch (ClassifyEmbeddedResource(path))
         {
@@ -1070,7 +1070,7 @@ internal static class FragmentTreeBuilder
     /// markup so that PaintWalker can render it via
     /// SvgRenderer.
     /// </summary>
-    private static string SerializeSvgSubtree(CssBox svgBox)
+    private static string? SerializeSvgSubtree(CssBox svgBox)
     {
         var sb = new StringBuilder();
         SerializeSvgBox(svgBox, sb);

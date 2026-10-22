@@ -24,7 +24,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         bool trimBlockStart = false;
         bool trimBlockEnd = false;
 
-        foreach (var token in MarginTrim.Split((char[])null, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in MarginTrim.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             switch (token.ToLowerInvariant())
             {
@@ -46,8 +46,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         if (!trimBlockStart && !trimBlockEnd)
             return;
 
-        CssBox first = null;
-        CssBox last = null;
+        CssBox? first = null;
+        CssBox? last = null;
 
         foreach (var child in Boxes)
         {
@@ -240,7 +240,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
     /// </summary>
     internal bool MarginTopCollapsesWithParent => _marginTopCollapsesWithParent;
 
-    protected double MarginTopCollapse(CssBoxProperties prevSibling)
+    protected double MarginTopCollapse(CssBoxProperties? prevSibling)
     {
         double value;
 
@@ -497,7 +497,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         // kept by line layout, and OffsetTop moves it with every shift of the boxes around it.
         // Reading it gave a flex item holding one word, which a row centred 33.5px down, the
         // bottom of a text box shifted there twice, 67px down.
-        CssBox lastInFlowChild = null;
+        CssBox? lastInFlowChild = null;
 
         foreach (var child in Boxes)
         {

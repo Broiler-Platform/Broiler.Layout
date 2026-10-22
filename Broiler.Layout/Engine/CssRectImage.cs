@@ -4,10 +4,10 @@ namespace Broiler.Layout.Engine;
 
 internal sealed class CssRectImage(CssBox owner) : CssRect(owner)
 {
-    private object _image;
+    private object? _image;
     private RectangleF _imageRectangle;
 
-    public override object Image
+    public override object? Image
     {
         get { return _image; }
         set { _image = value; }

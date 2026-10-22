@@ -16,7 +16,7 @@ public sealed class NativeAnchorPlacementTests
 {
     private static readonly Uri BaseUrl = new("file:///anchor-pass.html");
 
-    private static CssBox Box(CssBox parent, PointF location, SizeF size)
+    private static CssBox Box(CssBox? parent, PointF location, SizeF size)
     {
         var b = new CssBox(parent, null, BaseUrl) { Location = location, Size = size };
         // Root boxes get a minimal layout environment so the containing-block resolution

@@ -215,7 +215,7 @@ public sealed class SvgStructureAndPaintTests
             + "<rect width='10' height='10' fill='blue'/></pattern></defs>"
             + "<g transform='translate(40 60)'><rect width='10' height='10' fill='url(#p)'/></g>");
 
-        var tile = Assert.Single(items.OfType<DrawSvgRectItem>().Where(r => r.Fill == BColor.Blue));
+        var tile = Assert.Single(items.OfType<DrawSvgRectItem>(), r => r.Fill == BColor.Blue);
         Assert.Equal(40, tile.Bounds.X + tile.X, 3);
         Assert.Equal(60, tile.Bounds.Y + tile.Y, 3);
 

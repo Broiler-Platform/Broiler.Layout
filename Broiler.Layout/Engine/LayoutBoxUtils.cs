@@ -71,7 +71,7 @@ internal static class LayoutBoxUtils
         return true;
     }
 
-    public static CssBox GetPreviousSibling(CssBox b)
+    public static CssBox? GetPreviousSibling(CssBox b)
     {
         if (b.ParentBox == null)
             return null;
@@ -98,7 +98,7 @@ internal static class LayoutBoxUtils
     /// elements (CSS2.1 §9.5, §9.6.1). Relatively positioned elements
     /// remain in flow and are not skipped (CSS2.1 §9.3.1).
     /// </summary>
-    public static CssBox GetPreviousInFlowSibling(CssBox b)
+    public static CssBox? GetPreviousInFlowSibling(CssBox b)
     {
         if (b.ParentBox == null)
             return null;
@@ -119,7 +119,7 @@ internal static class LayoutBoxUtils
         return null;
     }
 
-    public static CssBox GetPreviousContainingBlockSibling(CssBox b)
+    public static CssBox? GetPreviousContainingBlockSibling(CssBox b)
     {
         var conBlock = b;
         int index = conBlock.ParentBox?.Boxes.IndexOf(conBlock) ?? -1;

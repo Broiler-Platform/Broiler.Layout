@@ -206,6 +206,6 @@ public sealed class DisplayContentsBoxesTests
         Assert.Equal([grandchild], first.Boxes);
     }
 
-    private static CssBox Box(CssBox parent, string tag, string display) =>
+    private static CssBox Box(CssBox? parent, string tag, string display) =>
         new(parent, new HtmlTag(tag, isSingle: false), BaseUrl) { Display = display };
 }

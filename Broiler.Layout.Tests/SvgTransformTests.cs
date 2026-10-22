@@ -134,7 +134,7 @@ public sealed class SvgTransformTests
     [InlineData(null)]
     [InlineData("nonsense(3)")]
     [InlineData("matrix(1, 0, 0)")]
-    public void TryParse_Rejects_A_List_With_No_Function_In_It(string value)
+    public void TryParse_Rejects_A_List_With_No_Function_In_It(string? value)
     {
         Assert.False(SvgTransform.TryParse(value, out var transform));
         Assert.True(transform.IsIdentity);

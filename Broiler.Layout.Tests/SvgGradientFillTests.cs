@@ -38,7 +38,7 @@ public class SvgGradientFillTests
             Viewport,
             1f);
 
-    private static DrawTiledGradientItem Gradient(string body) =>
+    private static DrawTiledGradientItem? Gradient(string body) =>
         Render(body).OfType<DrawTiledGradientItem>().FirstOrDefault();
 
     private const string LinearRedBlue =
@@ -51,9 +51,9 @@ public class SvgGradientFillTests
         var g = Gradient($"<defs>{LinearRedBlue}</defs><rect width='100' height='50' fill='url(#g)'/>");
 
         Assert.NotNull(g);
-        Assert.Equal(2, g.Stops.Count);
-        Assert.Equal(255, g.Stops[0].Color.R);
-        Assert.Equal(255, g.Stops[1].Color.B);
+        Assert.Equal(2, g!.Stops!.Count);
+        Assert.Equal(255, g!.Stops![0].Color.R);
+        Assert.Equal(255, g!.Stops![1].Color.B);
     }
 
     /// <summary>
@@ -65,7 +65,7 @@ public class SvgGradientFillTests
     public void DefaultLinearGradient_RunsLeftToRight()
     {
         var g = Gradient($"<defs>{LinearRedBlue}</defs><rect width='100' height='50' fill='url(#g)'/>");
-        Assert.Equal(90f, g.Angle, 1);
+        Assert.Equal(90f, g!.Angle, 1);
     }
 
     /// <summary>A vertical gradient vector is 180° — top to bottom.</summary>
@@ -77,7 +77,7 @@ public class SvgGradientFillTests
             + "<stop offset='0%' stop-color='red'/><stop offset='100%' stop-color='blue'/>"
             + "</linearGradient></defs><rect width='100' height='50' fill='url(#g)'/>");
 
-        Assert.Equal(180f, g.Angle, 1);
+        Assert.Equal(180f, g!.Angle, 1);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class SvgGradientFillTests
             + "<stop offset='100%' stop-color='blue'/></linearGradient></defs>"
             + "<rect width='100' height='50' fill='url(#g)'/>");
 
-        Assert.InRange(g.Stops[0].Color.A, 120, 136);
-        Assert.Equal(255, g.Stops[1].Color.A);
+        Assert.InRange(g!.Stops![0].Color.A, 120, 136);
+        Assert.Equal(255, g!.Stops![1].Color.A);
     }
 
     /// <summary>SVG 1.1 §13.2.4: offsets are clamped to 0..1 and kept non-decreasing.</summary>
@@ -120,7 +120,7 @@ public class SvgGradientFillTests
             + "<stop offset='5' stop-color='black'/></linearGradient></defs>"
             + "<rect width='100' height='50' fill='url(#g)'/>");
 
-        Assert.Equal([0f, 0.7f, 0.7f, 1f], g.Stops.Select(s => s.Position).ToArray());
+        Assert.Equal([0f, 0.7f, 0.7f, 1f], g!.Stops!.Select(s => s.Position).ToArray());
     }
 
     /// <summary>A gradient takes its stops from the one its <c>href</c> points at.</summary>
@@ -132,8 +132,8 @@ public class SvgGradientFillTests
             + "<rect width='100' height='50' fill='url(#copy)'/>");
 
         Assert.NotNull(g);
-        Assert.Equal(2, g.Stops.Count);
-        Assert.Equal(255, g.Stops[0].Color.R);
+        Assert.Equal(2, g!.Stops!.Count);
+        Assert.Equal(255, g!.Stops![0].Color.R);
     }
 
     /// <summary>
@@ -155,8 +155,8 @@ public class SvgGradientFillTests
             + "</defs><rect width='100' height='50' fill='url(#copy)'/>");
 
         Assert.NotNull(g);
-        Assert.Equal(0, g.Stops[0].Color.R);
-        Assert.True(g.Stops[0].Color.G > 200, "the href gradient's lime should win over xlink:href's red");
+        Assert.Equal(0, g!.Stops![0].Color.R);
+        Assert.True(g!.Stops![0].Color.G > 200, "the href gradient's lime should win over xlink:href's red");
     }
 
     /// <summary>An <c>xlink:href</c> on its own still resolves.</summary>
@@ -168,7 +168,7 @@ public class SvgGradientFillTests
             + "<rect width='100' height='50' fill='url(#copy)'/>");
 
         Assert.NotNull(g);
-        Assert.Equal(2, g.Stops.Count);
+        Assert.Equal(2, g!.Stops!.Count);
     }
 
     /// <summary>A reference that names nothing paints nothing — no gradient, and no black box.</summary>
@@ -208,6 +208,6 @@ public class SvgGradientFillTests
             + "<rect width='100' height='100' fill='url(#g)' transform='rotate(90)'/>");
 
         Assert.NotNull(g);
-        Assert.Equal(180f, g.Angle, 1);
+        Assert.Equal(180f, g!.Angle, 1);
     }
 }

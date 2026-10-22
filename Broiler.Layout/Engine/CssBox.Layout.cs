@@ -166,7 +166,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
 
         var previous = LayoutBoxUtils.GetPreviousSibling(this);
 
-        if (!string.IsNullOrEmpty(Height) && Height != CssConstants.Auto && CssLayoutEngine.BrEndsLineOf(previous))
+        if (!string.IsNullOrEmpty(Height) && Height != CssConstants.Auto && previous != null && CssLayoutEngine.BrEndsLineOf(previous))
             Height = CssConstants.Auto;
         else if (Height == ParserEmptyLineHeight && ActualLineHeight > 0)
             Height = ActualLineHeight.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "px";
@@ -370,8 +370,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
         {
             double containingWidth = width;
 
-            width = string.Equals(Width, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null
-                ? GetParent().ActualWidth
+            width = string.Equals(Width, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } wParent
+                ? wParent.ActualWidth
                 : ParseLengthWithLineHeight(Width, containingWidth, percentAgainstContainingBlock: true);
 
             // CSS2.1 §10.4: Apply max-width constraint
@@ -2029,8 +2029,8 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 }
                 else
                 {
-                    contentHeight = string.Equals(Height, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() != null
-                        ? GetParent().ActualHeight
+                    contentHeight = string.Equals(Height, "inherit", StringComparison.OrdinalIgnoreCase) && GetParent() is { } hParent
+                        ? hParent.ActualHeight
                         : ActualHeight;
                 }
 
@@ -3082,11 +3082,11 @@ internal partial class CssBox : CssBoxProperties, IDisposable
             string js = JustifySelf?.Trim().ToLowerInvariant() ?? "auto";
 
             if (js == "auto")
-                js = ParentBox.JustifyItems?.Trim().ToLowerInvariant() ?? "normal";
+                js = ParentBox!.JustifyItems?.Trim().ToLowerInvariant() ?? "normal";
 
             if (js is "normal" or "stretch" or "auto" or "legacy")
             {
-                js = (ParentBox.TextAlign?.Trim().ToLowerInvariant()) switch
+                js = (ParentBox!.TextAlign?.Trim().ToLowerInvariant()) switch
                 {
                     "-webkit-right" => "right",
                     "-webkit-center" => "center",
@@ -3102,7 +3102,7 @@ internal partial class CssBox : CssBoxProperties, IDisposable
                 js = null!;
 
             double boxWidth = ActualRight - Location.X;
-            double containerWidth = ParentBox.ClientRectangle.Width;
+            double containerWidth = ParentBox!.ClientRectangle.Width;
 
             // Free space is what remains AFTER the box's own margins. Auto margins
             // are resolved during block layout (e.g. margin:auto centres the box by

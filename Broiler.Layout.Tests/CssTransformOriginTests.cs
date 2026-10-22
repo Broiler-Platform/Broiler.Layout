@@ -27,10 +27,10 @@ public sealed class CssTransformOriginTests
 {
     private static readonly RectangleF Box = new(10, 20, 100, 200);
 
-    private static PointF ForCssBox(string value) =>
+    private static PointF ForCssBox(string? value) =>
         CssTransformOrigin.Resolve(value, Box, initialIsBoxCorner: false);
 
-    private static PointF ForSvgElement(string value) =>
+    private static PointF ForSvgElement(string? value) =>
         CssTransformOrigin.Resolve(value, Box, initialIsBoxCorner: true);
 
     private static void AssertPoint(float x, float y, PointF actual)

@@ -18,7 +18,7 @@ public sealed class ZoomInsetTests
 {
     private static readonly Uri BaseUrl = new("file:///zoom-inset.html");
 
-    private static CssBox Box(CssBox parent, SizeF size, string position, string zoom = "normal")
+    private static CssBox Box(CssBox? parent, SizeF size, string position, string zoom = "normal")
     {
         var b = new CssBox(parent, null, BaseUrl) { Location = new PointF(0, 0), Size = size, Position = position, Zoom = zoom };
         if (parent == null)

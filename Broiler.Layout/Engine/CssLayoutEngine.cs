@@ -14,7 +14,7 @@ internal static class CssLayoutEngine
     /// (up to but not including <paramref name="stop"/>) has
     /// <c>position:absolute</c> or <c>position:fixed</c>.
     /// </summary>
-    private static bool IsInAbsposSubtree(CssBox box, CssBox stop)
+    private static bool IsInAbsposSubtree(CssBox? box, CssBox? stop)
     {
         for (var b = box; b != null && b != stop; b = b.ParentBox)
         {
@@ -2041,7 +2041,7 @@ internal static class CssLayoutEngine
         double ibContentWidth;
         if (isReplaced)
         {
-            b.ResolveReplacedContentSize(intrinsic.Value, containerWidth, out ibContentWidth, out replacedContentHeight);
+            b.ResolveReplacedContentSize(intrinsic!.Value, containerWidth, out ibContentWidth, out replacedContentHeight);
         }
         else if (b.Width != CssConstants.Auto && !string.IsNullOrEmpty(b.Width))
         {
@@ -2989,7 +2989,7 @@ internal static class CssLayoutEngine
     {
         foreach (CssRect word in line.Words)
         {
-            string text = word.Text;
+            string? text = word.Text;
 
             if (string.IsNullOrEmpty(text))
                 continue;
@@ -3051,7 +3051,7 @@ internal static class CssLayoutEngine
 
         for (int i = box.Words.Count - 1; i >= 0; i--)
         {
-            string text = box.Words[i].Text;
+            string? text = box.Words[i].Text;
             if (string.IsNullOrEmpty(text))
                 continue;
 

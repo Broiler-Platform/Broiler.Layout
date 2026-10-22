@@ -79,7 +79,7 @@ internal static class SvgForeignObjectBoxes
     /// contributes no offset, rather than having some functions applied and others dropped — which
     /// would place a subtree confidently and wrongly.
     /// </remarks>
-    internal static bool TryParseLoneTranslate(string transformList, out double x, out double y)
+    internal static bool TryParseLoneTranslate(string? transformList, out double x, out double y)
     {
         x = 0;
         y = 0;
@@ -286,7 +286,7 @@ internal static class SvgForeignObjectBoxes
 
     /// <summary>The element's transform, preferring the cascaded value over the presentation
     /// attribute.</summary>
-    private static string TransformOf(CssBox box)
+    private static string? TransformOf(CssBox box)
     {
         var computed = box.Transform;
         if (!string.IsNullOrWhiteSpace(computed)
@@ -300,7 +300,7 @@ internal static class SvgForeignObjectBoxes
 
     /// <summary>The box's tag name without an <c>svg:</c> prefix, lowercased, or
     /// <see langword="null"/> for a box that is not an element.</summary>
-    private static string SvgLocalName(CssBox box)
+    private static string? SvgLocalName(CssBox box)
     {
         var tag = box.HtmlTag?.Name;
         if (string.IsNullOrEmpty(tag))

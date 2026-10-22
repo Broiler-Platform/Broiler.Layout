@@ -29,7 +29,7 @@ public sealed class GeneratedTextContentTests
     }
 
     private static string[] WordsOfGeneratedChild(CssBox box) =>
-        box.Boxes.Single(child => child.HtmlTag == null).Words.Select(word => word.Text).ToArray();
+        box.Boxes.Single(child => child.HtmlTag == null).Words.Select(word => word.Text!).ToArray();
 
     [Fact(Timeout = 600000)]
     public void SetGeneratedTextContent_Produces_Words()
