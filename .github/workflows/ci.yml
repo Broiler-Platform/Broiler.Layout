@@ -35,7 +35,7 @@ jobs:
         # The library is platform-neutral net10.0, so both legs compile the same sources.
         # They run anyway because layout is where text measurement and font resolution
         # live, and those are exactly the places two hosts disagree.
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -74,17 +74,17 @@ jobs:
           if-no-files-found: warn
 
       - name: Pack and verify every package
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         shell: pwsh
         run: ./eng/pack.ps1 -Version $env:PACKAGE_VERSION
 
       - name: Verify consumer restore from nuget.org (dry run)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         shell: pwsh
         run: ./eng/verify-feed.ps1
 
       - name: Upload packages
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
