@@ -261,7 +261,9 @@ public static class TileParallelReplay
     private static int ReadConfiguredDegree()
     {
         var configured = ReadConfiguredPositive(TilesEnvironmentVariable, 0);
-        return configured > 0 ? configured : Environment.ProcessorCount;
+        if (configured > 0) return configured;
+        if (OperatingSystem.IsBrowser()) return 1;
+        return Environment.ProcessorCount;
     }
 
     private static int ReadConfiguredPositive(string variable, int fallback)
