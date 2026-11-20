@@ -41,6 +41,7 @@
     <PackageReference Include="Broiler.CSS.Dom" />
     <PackageReference Include="Broiler.Dom" />
     <PackageReference Include="Broiler.Graphics" />
+    <PackageReference Include="Broiler.Media.Image" />
   </ItemGroup>
 
 </Project>

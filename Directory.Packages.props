@@ -7,6 +7,7 @@
     <PackageVersion Include="Broiler.CSS.Dom" Version="0.1.0-preview.18" />
     <PackageVersion Include="Broiler.Dom" Version="0.1.0-preview.17" />
     <PackageVersion Include="Broiler.Graphics" Version="0.1.0-preview.15" />
+    <PackageVersion Include="Broiler.Media.Image" Version="0.1.0-preview.19" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />

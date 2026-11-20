@@ -23,10 +23,10 @@ official HTML Renderer component or as endorsed by that project's contributors.
 The public seam consists of the host abstractions (`ILayoutEnvironment`, `ILayoutFont`,
 and `ILayoutImageLoader`), their value types, and the renderer-neutral HTML metadata
 types used to construct a layout input. The concrete box tree and layout algorithms
-remain internal. Layout consumes only `Broiler.CSS`, `Broiler.CSS.Dom`, `Broiler.Dom`,
-the backend-neutral `Broiler.Graphics` primitive layer, and the BCL; painting,
-resource acquisition, HTML parsing, and platform UI remain in their owning
-assemblies.
+remain internal. Layout consumes `Broiler.CSS`, `Broiler.CSS.Dom`, `Broiler.Dom`,
+the backend-neutral `Broiler.Graphics` primitive layer, shared SVG geometry
+from `Broiler.Media.Image`, and the BCL. The host supplies the raster backend used
+to paint SVG display lists.
 
 `ILayoutView` is also public, but it is a contract a consumer implements and injects, not
 one this component fills: nothing here — and nothing in any other Broiler component today —

@@ -7,15 +7,13 @@ namespace Broiler.Layout.Tests;
 /// Freezes the <c>Broiler.Layout</c> dependency boundary for the layout extraction
 /// (see <c>Broiler.Layout/docs/roadmap.md</c>). The component may
 /// reference only <c>Broiler.CSS</c>, <c>Broiler.CSS.Dom</c>, <c>Broiler.Dom</c>,
-/// the backend-agnostic <c>Broiler.Graphics</c> primitive layer (color/font
-/// metrics — <c>BColor</c>, <c>ILayoutFont</c>; no concrete rasterizer), and the
-/// BCL. It must not leak the renderer, bridge, JavaScript, or any concrete
-/// graphics backend through its public surface.
+/// the backend-agnostic <c>Broiler.Graphics</c> primitive layer, the shared SVG
+/// geometry in <c>Broiler.Media.Image</c>, and the BCL.
 /// </summary>
 public sealed class LayoutArchitectureTests
 {
     [Fact(Timeout = 600000)]
-    public void Production_Project_References_Only_Css_Dom_And_Graphics_Primitives()
+    public void Production_Project_References_Only_Css_Dom_Graphics_And_Image_Primitives()
     {
         var project = XDocument.Load(FindProjectPath());
         var references = project
@@ -24,11 +22,7 @@ public sealed class LayoutArchitectureTests
             .OrderBy(static name => name, StringComparer.Ordinal)
             .ToArray();
 
-        // Broiler.Graphics is the backend-agnostic primitive layer (BColor,
-        // ILayoutFont). A concrete backend (e.g. Broiler.Graphics.Windows) must
-        // NOT appear here — this allowlist is the structural gate that keeps them
-        // out of the layout engine.
-        Assert.Equal(["Broiler.CSS", "Broiler.CSS.Dom", "Broiler.Dom", "Broiler.Graphics"], references);
+        Assert.Equal(["Broiler.CSS", "Broiler.CSS.Dom", "Broiler.Dom", "Broiler.Graphics", "Broiler.Media.Image"], references);
         Assert.Empty(project.Descendants("ProjectReference"));
     }
 
